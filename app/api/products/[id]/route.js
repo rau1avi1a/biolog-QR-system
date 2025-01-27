@@ -2,21 +2,20 @@ import connectMongoDB from "@lib/mongo/index.js";
 import Product from "@/models/Product";
 import { NextResponse } from "next/server";
 
-// This route = /api/products/[id]
+// Force dynamic route handling
 export const dynamic = "force-dynamic";
 
 // PUT => edit top-level fields like CatalogNumber, ProductName
-export async function PUT(request, {params}) {
+export async function PUT(request, { params }) {
   try {
-    const { id } = params; // Destructure `id`
-
+    const { id } = params; // Extract `id`
     const body = await request.json(); // Parse request body
+
     await connectMongoDB(); // Connect to MongoDB
 
-    // Find the product by ID and update
     const updatedProduct = await Product.findByIdAndUpdate(id, body, {
-      new: true, // Return the updated document
-      runValidators: true, // Ensure validation runs on update
+      new: true,
+      runValidators: true,
     });
 
     if (!updatedProduct) {
@@ -37,7 +36,7 @@ export async function PUT(request, {params}) {
 }
 
 // GET => return the entire product (including embedded lots)
-export async function GET(request, {params}) {
+export async function GET(request, { params }) {
   try {
     const { id } = params;
 
@@ -59,7 +58,7 @@ export async function GET(request, {params}) {
 }
 
 // DELETE => remove entire product
-export async function DELETE(request, {params}) {
+export async function DELETE(request, { params }) {
   try {
     const { id } = params;
 

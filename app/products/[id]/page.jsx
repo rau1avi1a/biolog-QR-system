@@ -8,8 +8,7 @@ import ProductDetailClient from "./ProductDetailClient"
 // Force dynamic route to avoid param errors
 export const dynamic = "force-dynamic"
 
-export default async function ProductDetailPage({ context }) {
-  const { params } = context
+export default async function ProductDetailPage({ params }) {
   const { id } = params
 
   await connectMongoDB()
