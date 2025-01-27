@@ -6,9 +6,8 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 // PUT => partial update a single lot (like changing Quantity, ExpirationDate, isAvailable, etc.)
-export async function PUT(request, context) {
+export async function PUT(request, {params}) {
   try {
-    const params = await context.params; // Await context.params for proper handling
     const { id, lotId } = params;
 
     const body = await request.json(); // e.g. { LotNumber, Quantity, ExpirationDate, isAvailable }
@@ -67,9 +66,8 @@ export async function PUT(request, context) {
 }
 
 // DELETE => Remove a specific lot from a product's Lots array
-export async function DELETE(request, context) {
+export async function DELETE(request, {params}) {
     try {
-      const params = await context.params; // Await context.params for proper handling
       const { id, lotId } = params;
   
       await connectMongoDB();

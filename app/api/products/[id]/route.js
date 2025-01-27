@@ -6,9 +6,8 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 // PUT => edit top-level fields like CatalogNumber, ProductName
-export async function PUT(request, context) {
+export async function PUT(request, {params}) {
   try {
-    const params = await context.params; // Await `params` to ensure proper handling
     const { id } = params; // Destructure `id`
 
     const body = await request.json(); // Parse request body
@@ -38,9 +37,8 @@ export async function PUT(request, context) {
 }
 
 // GET => return the entire product (including embedded lots)
-export async function GET(request, context) {
+export async function GET(request, {params}) {
   try {
-    const params = await context.params; // Await `params`
     const { id } = params;
 
     await connectMongoDB();
@@ -61,9 +59,8 @@ export async function GET(request, context) {
 }
 
 // DELETE => remove entire product
-export async function DELETE(request, context) {
+export async function DELETE(request, {params}) {
   try {
-    const params = await context.params; // Await `params`
     const { id } = params;
 
     await connectMongoDB();

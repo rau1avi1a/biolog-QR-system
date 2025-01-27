@@ -10,9 +10,8 @@ export const dynamic = "force-dynamic";
  * POST => Add a new lot to the product's Lots array
  * JSON body e.g. { "LotNumber": "G3-LotC", "Quantity": 50, "ExpirationDate": "2024-12-31", "isAvailable": true }
  */
-export async function POST(request, context) {
+export async function POST(request, {params}) {
   try {
-    const params = await context.params; // Await params to ensure proper handling
     const { id } = params;
 
     await connectMongoDB();
