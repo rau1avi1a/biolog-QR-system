@@ -1,7 +1,7 @@
 // app/api/upload/route.js
 import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
-import connectMongoDB from '@/lib/mongo/index.js';
+import connectMongoDB from '@lib/index.js';
 import Chemical from '@/models/Chemical';
 
 const readFile = async (file) => {

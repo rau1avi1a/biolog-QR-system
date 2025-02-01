@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
-import ProductDataSection from "./ProductDataSection";
-import ChemicalDataSection from "./ChemicalDataSection";
+import ProductDataSection from "./Products/ProductInventorySection";
+import ChemicalDataSection from "./Chemicals/ChemicalInventorySection";
 
 export default function InventoryLayout() {
   const [activeSection, setActiveSection] = useState("chemical");

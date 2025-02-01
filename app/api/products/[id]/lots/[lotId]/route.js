@@ -1,6 +1,6 @@
 // app/api/products/[id]/lots/[lotId]/route.js
 
-import connectMongoDB from "@lib/mongo/index.js";
+import connectMongoDB from "@lib/index.js";
 import Product from "@/models/Product";
 import { NextResponse } from "next/server";
 import { revalidatePath } from 'next/cache'; // Import revalidatePath for On-Demand Revalidation

@@ -1,7 +1,7 @@
 // app/api/chemicals/[id]/lots/route.js
 import Chemical from "@/models/Chemical";
 import ChemicalAudit from "@/models/ChemicalAudit";
-import connectMongoDB from "@/lib/mongo/index.js";
+import connectMongoDB from "@lib/index.js";
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api-auth";
 import { withRateLimit } from "@/middleware/rateLimit";

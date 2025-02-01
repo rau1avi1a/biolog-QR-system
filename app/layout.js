@@ -6,7 +6,7 @@ import Image from "next/image";
 import { ToastProvider } from "@/components/ui/toast";
 import { cookies } from 'next/headers';
 import { jwtVerify } from 'jose'; // Use 'jose' for verification
-import connectMongoDB from '@/lib/mongo/index.js';
+import connectMongoDB from '@lib/index.js';
 import User from '@/models/User';
 
 const geistSans = Geist({

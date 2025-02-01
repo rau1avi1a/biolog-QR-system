@@ -1,4 +1,4 @@
-import InventoryLayout from "./InventoryLayout";
+import InventoryLayout from "../components/InventoryLayout";
 
 export default async function InventoryPage() {
 

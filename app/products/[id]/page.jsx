@@ -1,9 +1,8 @@
 // app/inventory/product/[id]/page.jsx
 import React from "react"
-import connectMongoDB from "@lib/mongo"
+import connectMongoDB from "@lib/index"
 import Product from "@/models/Product"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import ProductDetailClient from "./ProductDetailClient"
 
 // Force dynamic route to avoid param errors
 export const dynamic = "force-dynamic"
@@ -36,7 +35,6 @@ export default async function ProductDetailPage({ params }) {
         </CardHeader>
         <CardContent>
           {/* Pass product to client, letting the client show all dynamic fields */}
-          <ProductDetailClient initialData={product} />
         </CardContent>
       </Card>
     </div>

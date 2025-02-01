@@ -1,6 +1,6 @@
 // app/api/auth/login/route.js
 import { NextResponse } from 'next/server';
-import connectMongoDB from '@/lib/mongo/index.js';
+import connectMongoDB from '@lib/index.js';
 import User from '@/models/User';
 import { SignJWT } from 'jose'; // Import SignJWT from 'jose'
 

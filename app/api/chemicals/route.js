@@ -1,7 +1,7 @@
 // app/api/chemicals/route.js
 
 import Chemical from "@/models/Chemical"
-import connectMongoDB from "@/lib/mongo/index.js"
+import connectMongoDB from "@lib/index.js"
 import { NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"

@@ -2,7 +2,7 @@
 
 import React, { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { ChemicalTable } from "./ChemicalTable";
+import { ChemicalTable } from "./ChemHomeTable";
 import ChemEditParentDialog from "./ChemEditParentDialog";
 import ChemEditLotDialog from "./ChemEditLotDialog";
 import ChemAddLotDialog from "./ChemAddLotDialog";

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/table";
 import { ChevronLeft } from "lucide-react";
 import { formatDistance } from 'date-fns';
-import ChemicalAuditTable from "@/components/ChemicalAuditTable"
+import ChemicalAuditTable from "@/components/Chemicals/ChemAuditTable"
 
 export default function ChemicalDetail() {
   const router = useRouter();

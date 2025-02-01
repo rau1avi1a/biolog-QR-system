@@ -24,7 +24,7 @@ import {
   ToastDescription,
   ToastAction,
 } from "@/components/ui/toast";
-import EditLotDialog from "../../../../EditLotDialog";
+import EditLotDialog from "@/components/Products/ProductEditLotDialog";
 import { cn } from "@/lib/utils";
 import { CheckCircle } from "lucide-react"; // Import CheckCircle icon
 

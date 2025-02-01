@@ -10,10 +10,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { MoreHorizontal, Trash2, Check } from "lucide-react"; // Import Trash2 and Check icons
 
-import EditParentDialog from "./EditParentDialog";
-import AddParentDialog from "./AddParentDialog";
-import EditLotDialog from "./EditLotDialog";
-import AddLotDialog from "./AddLotDialog";
+import EditParentDialog from "./ProductEditParentDialog";
+import AddParentDialog from "./ProductAddParentDialog";
+import EditLotDialog from "./ProductEditLotDialog";
+import AddLotDialog from "./ProductAddLotDialog";
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from "@/components/ui/alert-dialog";
 import {
   Toast,
