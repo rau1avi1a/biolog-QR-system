@@ -47,7 +47,6 @@ export async function GET() {
         const formattedUsers = users.map((user) => ({
             _id: user._id,
             name: user.name,
-            userName: user.userName,
             email: user.email,
             role: user.role,
             createdAt: user.createdAt,
