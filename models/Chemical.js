@@ -7,6 +7,14 @@ const lotSchema = new Schema({
   // Add fields as you like (ExpirationDate?), or keep it simple
 });
 
+const sourcesSchema = new Schema({
+  Vendor: { type: String, required: false},
+  PartNumber: { type: String, required: false },
+  isPreferredVendor: { type: Boolean, required: false},
+  lastPurchaseDate: { type: Date, required: false},
+  lastPurchasePrice: { type: Number, required: false}
+})
+
 const chemicalSchema = new Schema(
   {
     BiologNumber: { type: String, required: true },
@@ -15,6 +23,7 @@ const chemicalSchema = new Schema(
     CASNumber: { type: String, required: false },
     Location: { type: String, required: false },
     Lots: { type: [lotSchema], default: [] },
+    Sources: { type: [sourcesSchema], default: []}
   },
   { timestamps: true,
     strict: false

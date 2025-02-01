@@ -45,6 +45,19 @@ export default function NavBar({ user }) {
           className="text-white hover:text-gray-300 transition-colors">
           Home
         </Link>
+        <Link
+        href="/cyclecount"
+        className="text-white hover:text-gray-300 transition-colors"
+        >
+          Cycle Count
+        </Link>
+        <Link
+        href="/files"
+        className="text-white hover:text-gray-300 transition-colors"
+        >
+          Files
+        </Link>
+
       </div>
 
       <div className="flex items-center space-x-4">
