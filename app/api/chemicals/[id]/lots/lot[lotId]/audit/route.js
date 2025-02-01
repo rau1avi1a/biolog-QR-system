@@ -3,7 +3,14 @@ import { NextResponse } from 'next/server';
 import ChemicalAudit from '@/models/ChemicalAudit';
 import Chemical from '@/models/Chemical';
 import { withAuth } from '@/lib/api-auth';
+import { withRateLimit } from '@/middleware/rateLimit';
 
+/**
+ * Get audit history for a specific lot
+ * @param {Request} request - The request object
+ * @param {Object} context - The context object containing params
+ * @returns {Promise<NextResponse>} The response object
+ */
 async function getLotAuditHistory(request, context) {
   try {
     const params = await Promise.resolve(context.params);
@@ -44,4 +51,6 @@ async function getLotAuditHistory(request, context) {
   }
 }
 
-export const GET = withAuth(getLotAuditHistory);
+// Export the handler with middleware
+const handler = withRateLimit(withAuth(getLotAuditHistory));
+export { handler as GET };

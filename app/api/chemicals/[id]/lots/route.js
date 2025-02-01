@@ -4,15 +4,21 @@ import ChemicalAudit from "@/models/ChemicalAudit";
 import connectMongoDB from "@/lib/mongo/index.js";
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api-auth";
+import { withRateLimit } from "@/middleware/rateLimit";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * POST handler for adding a new lot to a chemical
+ * @param {Request} request The request object
+ * @param {Object} context The context containing params and user info
+ */
 async function addLot(request, context) {
   try {
     const params = await Promise.resolve(context.params);
     const { id } = params;
     const user = context.user;
-    
+
     await connectMongoDB();
     const body = await request.json();
 
@@ -25,14 +31,13 @@ async function addLot(request, context) {
     const newLot = {
       LotNumber: body.LotNumber ?? "NewLot",
       Quantity: body.Quantity ?? 0,
-      // Add any other lot fields here
     };
 
     chem.Lots.push(newLot);
     await chem.save();
 
     // Create audit entry for new lot
-    await ChemicalAudit.create({
+    await ChemicalAudit.logUsage({
       chemical: {
         BiologNumber: chem.BiologNumber,
         ChemicalName: chem.ChemicalName,
@@ -41,7 +46,7 @@ async function addLot(request, context) {
       },
       lot: {
         LotNumber: newLot.LotNumber,
-        QuantityUsed: newLot.Quantity,  // Initial quantity is "used" amount
+        QuantityUsed: 0,
         QuantityRemaining: newLot.Quantity
       },
       user: {
@@ -49,7 +54,7 @@ async function addLot(request, context) {
         name: user.name,
         email: user.email
       },
-      action: "ADD",  // New action type
+      action: 'ADD',
       notes: `New lot created with initial quantity ${newLot.Quantity}`,
       project: body.project,
       department: body.department
@@ -63,4 +68,8 @@ async function addLot(request, context) {
   }
 }
 
-export const POST = withAuth(addLot);
+// Create handler with middleware
+const postHandler = withRateLimit(withAuth(addLot));
+
+// Export handler
+export { postHandler as POST };

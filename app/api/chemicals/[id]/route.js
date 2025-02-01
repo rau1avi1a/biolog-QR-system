@@ -1,65 +1,79 @@
 // app/api/chemicals/[id]/route.js
 import Chemical from "@/models/Chemical";
+import connectMongoDB from "@/lib/mongo/index.js";
 import { NextResponse } from "next/server";
-import { withAuth, withRole } from "@/lib/api-auth";
+import { withAuth } from "@/lib/api-auth";
+import { withRateLimit } from "@/middleware/rateLimit";
 
 export const dynamic = "force-dynamic";
 
-// Handler for GET /api/chemicals/[id]
+/**
+ * GET handler for retrieving a single chemical
+ */
 async function getChemical(request, context) {
   try {
-    // Use Promise.resolve to handle both Promise and non-Promise params
     const params = await Promise.resolve(context.params);
-    const id = params.id;
+    const { id } = params;
 
-    // For MongoDB in Vercel, don't use lean() as it can cause issues
+    await connectMongoDB();
     const chem = await Chemical.findById(id);
+    
     if (!chem) {
       return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    // Convert to plain object manually
-    const chemical = chem.toObject();
-    return NextResponse.json(chemical, { status: 200 });
+    const doc = chem.toObject();
+    return NextResponse.json(doc, { status: 200 });
   } catch (err) {
     console.error('GET /api/chemicals/[id] error:', err);
     return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
 
-// Handler for PUT /api/chemicals/[id]
+/**
+ * PUT handler for updating a chemical
+ */
 async function updateChemical(request, context) {
   try {
     const params = await Promise.resolve(context.params);
-    const id = params.id;
+    const { id } = params;
     const body = await request.json();
 
+    await connectMongoDB();
+
     const updated = await Chemical.findByIdAndUpdate(
-      id, 
-      body, 
+      id,
+      body,
       { new: true, runValidators: true }
     );
+
     if (!updated) {
       return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    return NextResponse.json(updated.toObject(), { status: 200 });
+    const doc = updated.toObject();
+    return NextResponse.json(doc, { status: 200 });
   } catch (err) {
     console.error('PUT /api/chemicals/[id] error:', err);
     return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
 
-// Handler for DELETE /api/chemicals/[id]
+/**
+ * DELETE handler for removing a chemical
+ */
 async function deleteChemical(request, context) {
   try {
     const params = await Promise.resolve(context.params);
-    const id = params.id;
+    const { id } = params;
+
+    await connectMongoDB();
 
     const deleted = await Chemical.findByIdAndDelete(id);
     if (!deleted) {
       return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
+
     return NextResponse.json({ message: "Chemical deleted" }, { status: 200 });
   } catch (err) {
     console.error('DELETE /api/chemicals/[id] error:', err);
@@ -67,7 +81,14 @@ async function deleteChemical(request, context) {
   }
 }
 
-// Wrap handlers with authentication
-export const GET = withAuth(getChemical);
-export const PUT = withAuth(updateChemical);
-export const DELETE = withRole(withAuth(deleteChemical), ['admin']);
+// Create handlers with middleware
+const getHandler = withRateLimit(withAuth(getChemical));
+const putHandler = withRateLimit(withAuth(updateChemical));
+const deleteHandler = withRateLimit(withAuth(deleteChemical));
+
+// Export handlers
+export {
+  getHandler as GET,
+  putHandler as PUT,
+  deleteHandler as DELETE
+};

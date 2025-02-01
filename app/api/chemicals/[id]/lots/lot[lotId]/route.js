@@ -4,16 +4,19 @@ import ChemicalAudit from "@/models/ChemicalAudit";
 import connectMongoDB from "@/lib/mongo/index.js";
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api-auth";
+import { withRateLimit } from "@/middleware/rateLimit";
 
 export const dynamic = "force-dynamic";
 
-// PUT => partial update for a single embedded lot
+/**
+ * PUT handler for updating a lot
+ */
 async function updateLot(request, context) {
   try {
     const params = await Promise.resolve(context.params);
     const { id, lotId } = params;
     const user = context.user;
-
+    
     await connectMongoDB();
 
     const body = await request.json();
@@ -40,48 +43,36 @@ async function updateLot(request, context) {
     // Create audit entry if quantity changed
     if (body.Quantity !== undefined && body.Quantity !== oldQuantity) {
       const quantityChange = body.Quantity - oldQuantity;
-
-      // Decide the action (ADD, DEPLETE, USE, etc.)
-      const action =
-        quantityChange > 0
-          ? "ADD"
-          : body.Quantity === 0
-          ? "DEPLETE"
-          : "USE";
-
       await ChemicalAudit.logUsage({
         chemical: chem,
         lotNumber: lot.LotNumber,
-        quantityPrevious: oldQuantity, // store old quantity in the new field
         quantityUsed: Math.abs(quantityChange),
         quantityRemaining: body.Quantity,
         user,
-        notes:
-          body.notes ||
-          `Quantity ${quantityChange > 0 ? "increased" : "decreased"} by ${Math.abs(
-            quantityChange
-          )}`,
+        notes: body.notes || `Quantity ${quantityChange > 0 ? 'increased' : 'decreased'} by ${Math.abs(quantityChange)}`,
         project: body.project,
         department: body.department,
-        action,
+        action: quantityChange > 0 ? 'ADJUST' : body.Quantity === 0 ? 'DEPLETE' : 'USE'
       });
     }
 
     const doc = chem.toObject();
     return NextResponse.json(doc, { status: 200 });
   } catch (err) {
-    console.error("Error updating lot:", err);
+    console.error('Error updating lot:', err);
     return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
 
-// DELETE => remove a single lot
+/**
+ * DELETE handler for removing a lot
+ */
 async function deleteLot(request, context) {
   try {
     const params = await Promise.resolve(context.params);
     const { id, lotId } = params;
     const user = context.user;
-
+    
     await connectMongoDB();
 
     const chem = await Chemical.findById(id);
@@ -101,8 +92,8 @@ async function deleteLot(request, context) {
       quantityUsed: lot.Quantity,
       quantityRemaining: 0,
       user,
-      notes: "Lot removed",
-      action: "REMOVE",
+      notes: 'Lot removed',
+      action: 'REMOVE'
     });
 
     // Remove the lot
@@ -112,10 +103,14 @@ async function deleteLot(request, context) {
     const doc = chem.toObject();
     return NextResponse.json(doc, { status: 200 });
   } catch (err) {
-    console.error("Error deleting lot:", err);
+    console.error('Error deleting lot:', err);
     return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
 
-export const PUT = withAuth(updateLot);
-export const DELETE = withAuth(deleteLot);
+// Create handlers with middleware
+const putHandler = withRateLimit(withAuth(updateLot));
+const deleteHandler = withRateLimit(withAuth(deleteLot));
+
+// Export handlers
+export { putHandler as PUT, deleteHandler as DELETE };

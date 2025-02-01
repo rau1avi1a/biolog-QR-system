@@ -1,8 +1,6 @@
 // middleware.js
 import { NextResponse } from 'next/server';
-import { jwtVerify } from 'jose'; // Import jwtVerify from 'jose'
-import { rateLimitMiddleware } from './middleware/rateLimit';
-import { withSecureHeaders } from 'next-secure-headers';
+import { verify } from 'jsonwebtoken';
 
 const publicPaths = [
   '/api/auth/login',
@@ -15,13 +13,6 @@ const publicPaths = [
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
-
-  if (
-    pathname.startsWith('/api/auth/login') ||
-    pathname.startsWith('/api/auth/request-account')
-  ) {
-    return rateLimitMiddleware(request);
-  }
 
   // Allow access to public paths
   if (publicPaths.some(path => pathname.startsWith(path))) {
@@ -42,20 +33,15 @@ export async function middleware(request) {
   }
 
   try {
-    // Verify token using 'jose'
-    const secret = new TextEncoder().encode(process.env.JWT_SECRET);
-    await jwtVerify(token, secret);
-
-    // If token is valid, proceed
+    // Verify token
+    verify(token, process.env.JWT_SECRET);
     return NextResponse.next();
   } catch (error) {
-    console.error('JWT Verification Error:', error);
     // If token is invalid, redirect to login
     return NextResponse.redirect(new URL('/auth/login', request.url));
   }
 }
 
-// Configure which routes to run middleware on
 export const config = {
   matcher: [
     /*
@@ -64,8 +50,7 @@ export const config = {
      * - _next/image (image optimization files)
      * - images (your local images folder)
      * - favicon.ico (favicon file)
-     * - Public API routes and pages
      */
-    '/((?!_next/static|_next/image|images|favicon.ico|api/auth/login|api/auth/logout|auth/login|auth/signup).*)',
+    '/((?!_next/static|_next/image|images|favicon.ico).*)',
   ],
 };
