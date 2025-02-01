@@ -1,60 +1,73 @@
-import Chemical from "@/models/Chemical"
-import connectMongoDB from "@/lib/mongo/index.js"
-import { NextResponse } from "next/server"
+// app/api/chemicals/[id]/route.js
+import Chemical from "@/models/Chemical";
+import { NextResponse } from "next/server";
+import { withAuth, withRole } from "@/lib/api-auth";
 
-export const dynamic = "force-dynamic"
+export const dynamic = "force-dynamic";
 
-// GET /api/chemicals/[id] => fetch single chemical doc
-export async function GET(request, { params }) {
+// Handler for GET /api/chemicals/[id]
+async function getChemical(request, context) {
   try {
-    await connectMongoDB()
-    const { id } = params
-    const chem = await Chemical.findById(id)
+    // Use Promise.resolve to handle both Promise and non-Promise params
+    const params = await Promise.resolve(context.params);
+    const id = params.id;
+
+    // For MongoDB in Vercel, don't use lean() as it can cause issues
+    const chem = await Chemical.findById(id);
     if (!chem) {
-      return NextResponse.json({ message: "Chemical not found" }, { status: 404 })
+      return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    // format if needed
-    const doc = chem.toObject()
-    // doc.Lots = ...
-    return NextResponse.json(doc, { status: 200 })
+    // Convert to plain object manually
+    const chemical = chem.toObject();
+    return NextResponse.json(chemical, { status: 200 });
   } catch (err) {
-    return NextResponse.json({ message: err.message }, { status: 500 })
+    console.error('GET /api/chemicals/[id] error:', err);
+    return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
 
-// PUT => update top-level fields (BiologNumber, ChemicalName, etc.)
-export async function PUT(request, { params }) {
+// Handler for PUT /api/chemicals/[id]
+async function updateChemical(request, context) {
   try {
-    await connectMongoDB()
-    const { id } = params
-    const body = await request.json()
+    const params = await Promise.resolve(context.params);
+    const id = params.id;
+    const body = await request.json();
 
-    const updated = await Chemical.findByIdAndUpdate(id, body, { new: true })
+    const updated = await Chemical.findByIdAndUpdate(
+      id, 
+      body, 
+      { new: true, runValidators: true }
+    );
     if (!updated) {
-      return NextResponse.json({ message: "Chemical not found" }, { status: 404 })
+      return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    const doc = updated.toObject()
-    // doc.Lots = ...
-    return NextResponse.json(doc, { status: 200 })
+    return NextResponse.json(updated.toObject(), { status: 200 });
   } catch (err) {
-    return NextResponse.json({ message: err.message }, { status: 500 })
+    console.error('PUT /api/chemicals/[id] error:', err);
+    return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
 
-// DELETE => remove entire chemical doc
-export async function DELETE(request, { params }) {
+// Handler for DELETE /api/chemicals/[id]
+async function deleteChemical(request, context) {
   try {
-    await connectMongoDB()
-    const { id } = params
+    const params = await Promise.resolve(context.params);
+    const id = params.id;
 
-    const deleted = await Chemical.findByIdAndDelete(id)
+    const deleted = await Chemical.findByIdAndDelete(id);
     if (!deleted) {
-      return NextResponse.json({ message: "Chemical not found" }, { status: 404 })
+      return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
-    return NextResponse.json({ message: "Chemical deleted" }, { status: 200 })
+    return NextResponse.json({ message: "Chemical deleted" }, { status: 200 });
   } catch (err) {
-    return NextResponse.json({ message: err.message }, { status: 500 })
+    console.error('DELETE /api/chemicals/[id] error:', err);
+    return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
+
+// Wrap handlers with authentication
+export const GET = withAuth(getChemical);
+export const PUT = withAuth(updateChemical);
+export const DELETE = withRole(withAuth(deleteChemical), ['admin']);

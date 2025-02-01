@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -9,9 +9,12 @@ import { QRCodeSVG } from "qrcode.react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialogTrigger,
+  AlertDialogContent as AlertContent,
+  AlertDialogHeader as AlertHeader,
+  AlertDialogTitle as AlertTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 import {
   Toast,
@@ -19,15 +22,15 @@ import {
   ToastViewport,
   ToastTitle,
   ToastDescription,
+  ToastAction,
 } from "@/components/ui/toast";
-
-// Check your path carefully. Possibly "../../EditLotDialog" or "../../../../EditLotDialog"
-import EditLotDialog from "../../../../EditLotDialog"; 
-
+import EditLotDialog from "../../../../EditLotDialog";
 import { cn } from "@/lib/utils";
+import { CheckCircle } from "lucide-react"; // Import CheckCircle icon
 
 export default function LotDetailsPage() {
   const params = useParams();
+  const router = useRouter();
   const [lot, setLot] = useState(null);
   const [product, setProduct] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -36,13 +39,14 @@ export default function LotDetailsPage() {
 
   const [transactionType, setTransactionType] = useState("subtract"); // "subtract" or "add"
   const [quantity, setQuantity] = useState("");
-  
+
   // For the confirmation alert
   const [alertOpen, setAlertOpen] = useState(false);
 
   // For the toast notification
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [toastTitle, setToastTitle] = useState("");
 
   useEffect(() => {
     const fetchLotDetails = async () => {
@@ -80,6 +84,9 @@ export default function LotDetailsPage() {
     const updatedLot = updatedProduct.Lots.find((l) => l._id === lot._id);
     setLot(updatedLot);
     setEditOpen(false);
+    setToastTitle("Saved");
+    setToastMessage("Changes have been saved.");
+    setToastOpen(true);
   };
 
   // Subtract or add items
@@ -114,6 +121,7 @@ export default function LotDetailsPage() {
       setProduct(updatedProduct);
       setLot(updatedLot);
       setQuantity("");
+      setToastTitle("Success");
       setToastMessage(
         `${transactionType === "subtract" ? "Subtracted" : "Added"} ${quantity} items successfully.`
       );
@@ -121,6 +129,27 @@ export default function LotDetailsPage() {
     } catch (err) {
       console.error("Error updating lot quantity:", err);
       alert("Failed to process the transaction.");
+    }
+  };
+
+  // Handle Lot Deletion
+  const handleDeleteLot = async () => {
+    try {
+      const res = await fetch(`/api/products/${params.id}/lots/${lot._id}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) throw new Error("Failed to delete lot");
+
+      setToastTitle("Deleted");
+      setToastMessage("Lot has been deleted successfully.");
+      setToastOpen(true);
+      router.push("/"); // Navigate back to Home
+    } catch (err) {
+      console.error("Error deleting lot:", err);
+      setToastTitle("Error");
+      setToastMessage("Failed to delete the lot.");
+      setToastOpen(true);
     }
   };
 
@@ -169,24 +198,21 @@ export default function LotDetailsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Lot Number */}
+            {/* Lot Details */}
             <div className="flex flex-col space-y-2">
               <span className="text-sm text-gray-600">Lot Number</span>
               <span className="text-lg font-medium text-gray-800">{lot.LotNumber}</span>
             </div>
-            {/* Quantity */}
             <div className="flex flex-col space-y-2">
               <span className="text-sm text-gray-600">Quantity</span>
               <span className="text-lg font-medium text-gray-800">{lot.Quantity}</span>
             </div>
-            {/* Expiration Date => either manual or calculated */}
             <div className="flex flex-col space-y-2">
               <span className="text-sm text-gray-600">Expiration Date</span>
               <span className="text-lg font-medium text-gray-800">
                 {formatDate(lot.ExpirationDate || lot.calculatedExpirationDate)}
               </span>
             </div>
-            {/* Availability */}
             <div className="flex flex-col space-y-2">
               <span className="text-sm text-gray-600">Availability</span>
               <span
@@ -234,6 +260,33 @@ export default function LotDetailsPage() {
                 View QR
               </Button>
               <Button onClick={() => setEditOpen(true)}>Edit Lot</Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive">Delete Lot</Button>
+                </AlertDialogTrigger>
+                <AlertContent>
+                  <AlertHeader>
+                    <AlertTitle>Confirm Deletion</AlertTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete this lot? This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertHeader>
+                  <AlertDialogFooter>
+                    <Button variant="outline" onClick={() => setAlertOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        setAlertOpen(false);
+                        handleDeleteLot();
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </AlertDialogFooter>
+                </AlertContent>
+              </AlertDialog>
             </div>
           </CardContent>
         </Card>
@@ -264,12 +317,12 @@ export default function LotDetailsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* AlertDialog with open/close handling */}
+        {/* AlertDialog for Transaction Confirmation */}
         <AlertDialog open={alertOpen} onOpenChange={setAlertOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Confirm Transaction</AlertDialogTitle>
-            </AlertDialogHeader>
+          <AlertContent>
+            <AlertHeader>
+              <AlertTitle>Confirm Transaction</AlertTitle>
+            </AlertHeader>
             <div className="space-y-4">
               <p>
                 Are you sure you want to{" "}
@@ -279,8 +332,9 @@ export default function LotDetailsPage() {
                 <span className="font-semibold">{quantity}</span> items from this lot?
               </p>
             </div>
-            <div className="flex justify-end space-x-4 mt-6">
-              <Button variant="outline" onClick={() => setAlertOpen(false)}>
+            <AlertDialogFooter>
+              <Button variant="outline" onClick={() => {
+                setAlertOpen(false)}}>
                 Cancel
               </Button>
               <Button
@@ -291,17 +345,20 @@ export default function LotDetailsPage() {
               >
                 Confirm
               </Button>
-            </div>
-          </AlertDialogContent>
+            </AlertDialogFooter>
+          </AlertContent>
         </AlertDialog>
 
         {/* Toast Notification */}
-        {toastMessage && (
-          <Toast open={toastOpen} onOpenChange={setToastOpen}>
-            <ToastTitle>Transaction Successful</ToastTitle>
-            <ToastDescription>{toastMessage}</ToastDescription>
-          </Toast>
-        )}
+        <Toast open={toastOpen} onOpenChange={setToastOpen}>
+          <div className="flex items-center space-x-2">
+            <CheckCircle className="h-6 w-6 text-green-500" />
+            <div>
+              <ToastTitle>{toastTitle}</ToastTitle>
+              <ToastDescription>{toastMessage}</ToastDescription>
+            </div>
+          </div>
+        </Toast>
         <ToastViewport />
       </div>
     </ToastProvider>

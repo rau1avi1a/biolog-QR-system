@@ -1,85 +1,56 @@
-/**
- * scripts/seed.js
- *
- * Run this script with:
- *   node scripts/seed.js
- * 
- * It will connect to MongoDB, remove old data, and insert new sample items.
- */
-import dotenv from "dotenv"
-import "dotenv/config"
+// scripts/seed.js
+import mongoose from 'mongoose';
+import User from '../models/User.js'; // Adjust the path as necessary
+import connectMongoDB from '../lib/mongo/index.js';
+import bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
 
-import connectMongoDB from "../lib/mongo/index.js"    // or the correct path to your connect file
-import Product from "../models/Product.js"
-import Chemical from "../models/Chemical.js"
+dotenv.config(); // Load environment variables from .env file
 
-// Top-level await if your environment supports it, or wrap in a main() function
-await main()
+const seedUsers = [
+  {
+    name: 'Admin User',
+    email: 'admin@example.com',
+    password: 'AdminPassword123', // Use a strong password
+    role: 'admin',
+  },
+  // Add more users as needed
+];
 
-async function main() {
+async function seedDatabase() {
   try {
-    await connectMongoDB()
+    await connectMongoDB();
 
-    // Remove old data to start fresh
-    // await Product.deleteMany({})
-    // await Chemical.deleteMany({})
+    for (const userData of seedUsers) {
+      // Check if the user already exists
+      const existingUser = await User.findOne({ email: userData.email });
+      if (existingUser) {
+        console.log(`User with email ${userData.email} already exists.`);
+        continue;
+      }
 
-    // Create sample products
-    const p1 = await Product.create({
-      CatalogNumber: "1000",
-      ProductName: "Gen III",
-      Lots: [
-        {
-          LotNumber: "G3-LotA",
-          Quantity: 100,
-          ExpirationDate: new Date("2024-12-31"),
-        },
-        {
-          LotNumber: "G3-LotB",
-          Quantity: 200,
-          ExpirationDate: new Date("2025-06-30"),
-        },
-      ],
-    })
+      // Hash the password
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(userData.password, salt);
 
-    const p2 = await Product.create({
-      CatalogNumber: "2000",
-      ProductName: "Eco MicroPlate",
-      Lots: [
-        {
-          LotNumber: "Eco-10",
-          Quantity: 50,
-        },
-      ],
-    })
+      // Create the user
+      const newUser = new User({
+        name: userData.name,
+        email: userData.email,
+        password: hashedPassword,
+        role: userData.role,
+      });
 
-    // Create sample chemicals
-    const c1 = await Chemical.create({
-      BiologNumber: "24-000001",
-      ChemicalName: "Acetic Acid",
-      CASNumber: "64-19-7",
-      Location: "Room Temperature",
-      Lots: [
-        { LotNumber: "AA-01", Quantity: 10 },
-        { LotNumber: "AA-02", Quantity: 5 },
-      ],
-    })
+      await newUser.save();
+      console.log(`User ${userData.email} created successfully.`);
+    }
 
-    const c2 = await Chemical.create({
-      BiologNumber: "24-000002",
-      ChemicalName: "Lactic Acid",
-      CASNumber: "50-21-5",
-      Location: "Fridge",
-      Lots: [
-        { LotNumber: "LA-01", Quantity: 20 },
-      ],
-    })
-
-    console.log("Seeding complete! 🍀")
-    process.exit(0)
-  } catch (err) {
-    console.error("Seeding error:", err)
-    process.exit(1)
+    console.log('Database seeding completed.');
+    process.exit(0);
+  } catch (error) {
+    console.error('Database seeding error:', error);
+    process.exit(1);
   }
 }
 
+seedDatabase();

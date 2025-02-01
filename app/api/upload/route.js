@@ -1,142 +1,132 @@
-import { NextResponse } from "next/server"
-import { read, utils } from "xlsx"
-import connectMongoDB from "@/lib/mongo/index.js"
-import Product from "@/models/Product"
+// app/api/upload/route.js
+import { NextResponse } from 'next/server';
+import { parse } from 'csv-parse/sync';
+import connectMongoDB from '@/lib/mongo/index.js';
+import Chemical from '@/models/Chemical';
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
+const readFile = async (file) => {
+  const buffer = await file.arrayBuffer();
+  return Buffer.from(buffer).toString('utf-8');
 };
 
-// 1) Read entire raw body
-async function getFullRequestBuffer(req) {
-  const chunks = [];
-  for await (const chunk of req.body) {
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
+function parseLots(lotString) {
+  if (!lotString) return [];
+  
+  const lots = lotString.split(',').map(lot => {
+    const match = lot.trim().match(/([A-Za-z0-9-]+)\(([0-9.]+)\)/);
+    if (!match) return null;
+    
+    return {
+      LotNumber: match[1],
+      Quantity: parseFloat(match[2]),
+      isAvailable: parseFloat(match[2]) > 0,
+      lastUpdated: new Date()
+    };
+  }).filter(Boolean);
+
+  return lots;
 }
 
-// 2) Extract XML
-function extractXMLString(fullString) {
-  const startIndex = fullString.indexOf('<?xml');
-  if (startIndex < 0) {
-    throw new Error("No '<?xml' found. Are you sure this is Excel-XML?");
-  }
-  const endTag = '</Workbook>';
-  const endIndex = fullString.indexOf(endTag);
-  if (endIndex < 0) {
-    throw new Error("No '</Workbook>' found. Possibly incomplete file.");
-  }
-  return fullString.substring(startIndex, endIndex + endTag.length);
-}
-
-// 3) Parse with sheetjs
-function parseRowsFromXML(xmlString) {
-  const workbook = read(xmlString, { type: "string" });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const rows = utils.sheet_to_json(sheet, { header: 1 });
-  return rows;
-}
-
-/**
- * 4) Transform => product docs
- */
-function transformRowsToProducts(rows) {
-  // Skip the header row
-  const dataRows = rows.slice(1);
-
-  const products = [];
-  const invalidRows = [];
-
-  dataRows.forEach((row, idx) => {
-    // console.log(`=== DEBUG Row #${idx} ===`);
-    // console.log("Full row =>", JSON.stringify(row));
-
-    const catalogNum = (row[0] || "").toString().trim();
-    const productName = (row[1] || "").toString().trim();
-    const lotString = (row[2] || "").toString().trim();
-
-    // console.log(" => CatalogNumber:", catalogNum);
-    // console.log(" => ProductName:", productName);
-    // console.log(" => LotString:", lotString);
-
-    if (!catalogNum || !productName) {
-      console.warn(`Invalid row #${idx}: Missing CatalogNumber or ProductName.`);
-      invalidRows.push(row);
-      return;
-    }
-
-    const lots = [];
-    if (lotString) {
-      // Split multiple lots separated by commas
-      const pieces = lotString.split(",");
-      for (const piece of pieces) {
-        const match = piece.match(/^([\w-]+)\((\d+)\)$/);
-        if (match) {
-          const lotNum = match[1];
-          const qty = parseInt(match[2], 10) || 0;
-          lots.push({
-            LotNumber: lotNum,
-            Quantity: qty,
-            ExpirationDate: null, // Adjust if ExpirationDate is added later
-            isAvailable: qty > 0,
-          });
-        } else {
-          console.warn(" => Lot string does not match expected format:", piece);
-        }
-      }
-    } else {
-      console.warn(` => LotString is empty for CatalogNumber: ${catalogNum}`);
-    }
-
-    // console.log(" => Final lots array:", lots);
-    // console.log("======================================\n");
-
-    products.push({
-      CatalogNumber: catalogNum,
-      ProductName: productName,
-      Lots: lots,
-    });
-  });
-
-  if (invalidRows.length) {
-    console.warn("Invalid rows detected:", JSON.stringify(invalidRows));
-  }
-
-  return products;
-}
-
-export async function POST(req) {
+function parseCSVToChemicals(csvData) {
   try {
-    // A) Read entire raw body
-    const fullBuffer = await getFullRequestBuffer(req);
-    const fullString = fullBuffer.toString("utf-8");
+    const lines = csvData.split('\n').map(line => line.trim()).filter(line => line);
+    const dataLines = lines.slice(5);
+    const records = parse(dataLines.join('\n'), {
+      skip_empty_lines: true,
+      relax_column_count: true,
+    });
+    
+    const chemicals = records.slice(1).map(row => {
+      const [itemNumber, displayName, lotString] = row;
+      
+      if (!itemNumber?.trim() || !displayName?.trim()) {
+        console.warn("Invalid chemical record: Missing required fields", row);
+        return null;
+      }
 
-    // B) Extract <Workbook>...
-    const xmlString = extractXMLString(fullString);
+      const lots = parseLots(lotString);
 
-    // C) Parse => array-of-arrays
-    const rows = parseRowsFromXML(xmlString);
+      return {
+        BiologNumber: itemNumber.trim(),
+        ChemicalName: displayName.trim(),
+        Lots: lots,
+        lastUpdated: new Date()
+      };
+    });
 
-    // D) Transform => product docs
-    const products = transformRowsToProducts(rows);
-    if (!products.length) {
-      throw new Error("No valid product rows found after parsing.");
+    return chemicals.filter(Boolean);
+  } catch (error) {
+    console.error('Error parsing CSV:', error);
+    throw new Error(`Failed to parse CSV: ${error.message}`);
+  }
+}
+
+export async function POST(request) {
+  try {
+    const formData = await request.formData();
+    const file = formData.get('file');
+
+    if (!file) {
+      return NextResponse.json(
+        { error: 'No file uploaded.' }, 
+        { status: 400 }
+      );
     }
 
-    // E) Connect + seed
-    await connectMongoDB();
-    await Product.deleteMany({});
-    await Product.insertMany(products);
+    const csvData = await readFile(file);
+    const chemicals = parseCSVToChemicals(csvData);
 
-    return NextResponse.json({ message: "Database seeded successfully!" });
-  } catch (err) {
-    console.error("Error seeding from NetSuite Excel:", err);
+    if (!chemicals.length) {
+      return NextResponse.json(
+        { error: 'No valid chemical records found in the CSV file.' }, 
+        { status: 400 }
+      );
+    }
+
+    await connectMongoDB();
+
+    // For each chemical, first get existing data
+    const bulkOps = await Promise.all(chemicals.map(async chemical => {
+      const existingChem = await Chemical.findOne({ BiologNumber: chemical.BiologNumber });
+      
+      return {
+        updateOne: {
+          filter: { BiologNumber: chemical.BiologNumber },
+          update: { 
+            $set: {
+              ChemicalName: chemical.ChemicalName,
+              Lots: chemical.Lots, // Replace entire Lots array
+              lastUpdated: new Date(),
+              // Preserve existing fields if they exist
+              ...(existingChem?.CASNumber && { CASNumber: existingChem.CASNumber }),
+              ...(existingChem?.Location && { Location: existingChem.Location }),
+              // If you add new fields, you can preserve them here
+              ...(existingChem?.Synonyms && { Synonyms: existingChem.Synonyms })
+            }
+          },
+          upsert: true
+        }
+      };
+    }));
+
+    const result = await Chemical.bulkWrite(bulkOps);
+
     return NextResponse.json(
-      { error: "Failed to seed. Check logs.", details: err.message },
+      { 
+        message: 'Chemicals updated successfully!',
+        modifiedCount: result.modifiedCount,
+        upsertedCount: result.upsertedCount
+      }, 
+      { status: 200 }
+    );
+
+  } catch (error) {
+    console.error('Error processing chemicals:', error);
+    return NextResponse.json(
+      { 
+        error: 'Failed to process chemicals', 
+        details: error.message 
+      }, 
       { status: 500 }
     );
   }

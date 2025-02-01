@@ -10,7 +10,9 @@ const userSchema = new Schema(
         role: { type: String, enum: ["admin", "user"], default: "user" }, // Role-based access
         createdAt: { type: Date, default: Date.now }, // Timestamp for account creation
     },
-    { timestamps: true }
+    { timestamps: true,
+        strict: false
+     }
 );
 
 // Pre-save hook to hash passwords before saving

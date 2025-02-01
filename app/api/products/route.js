@@ -1,8 +1,11 @@
+// app/api/products/route.js
+
 import Product from "@/models/Product";
 import connectMongoDB from "@lib/mongo/index.js";
 import { NextResponse } from "next/server";
+import { revalidatePath } from 'next/cache'; // Import revalidatePath for On-Demand Revalidation
 
-// In Next.js 13 with the App Router, you often need to force dynamic if you rely on params:
+// Force dynamic route handling if needed
 export const dynamic = "force-dynamic";
 
 /**
@@ -10,6 +13,7 @@ export const dynamic = "force-dynamic";
  *
  * Returns an array of all Product documents.
  * Each product includes virtuals, and lots' expiration dates are formatted to "YYYY-MM-DD".
+ * Caches the response for 60 seconds on the CDN.
  */
 export async function GET() {
   try {
@@ -28,12 +32,22 @@ export async function GET() {
           let expirationDate;
 
           // Use `calculatedExpirationDate` if it's valid
-          if (lot.calculatedExpirationDate instanceof Date && !isNaN(lot.calculatedExpirationDate)) {
-            expirationDate = lot.calculatedExpirationDate.toISOString().split("T")[0];
+          if (
+            lot.calculatedExpirationDate instanceof Date &&
+            !isNaN(lot.calculatedExpirationDate)
+          ) {
+            expirationDate = lot.calculatedExpirationDate
+              .toISOString()
+              .split("T")[0];
           }
           // Use `ExpirationDate` if it's valid
-          else if (lot.ExpirationDate instanceof Date && !isNaN(lot.ExpirationDate)) {
-            expirationDate = new Date(lot.ExpirationDate).toISOString().split("T")[0];
+          else if (
+            lot.ExpirationDate instanceof Date &&
+            !isNaN(lot.ExpirationDate)
+          ) {
+            expirationDate = new Date(lot.ExpirationDate)
+              .toISOString()
+              .split("T")[0];
           } else {
             expirationDate = "N/A"; // Fallback if both dates are invalid
           }
@@ -48,7 +62,14 @@ export async function GET() {
       return doc;
     });
 
-    return NextResponse.json(formatted, { status: 200 });
+    // Create response with Cache-Control header
+    const response = NextResponse.json(formatted, { status: 200 });
+    response.headers.set(
+      "Cache-Control",
+      "s-maxage=60, stale-while-revalidate=30"
+    ); // Cache for 60 seconds
+
+    return response;
   } catch (err) {
     console.error("GET /api/products error:", err);
     return NextResponse.json({ message: err.message }, { status: 500 });
@@ -70,6 +91,7 @@ export async function GET() {
  *  }
  *
  * Returns the created doc, with each lot's ExpirationDate also formatted as "YYYY-MM-DD" if present.
+ * Triggers revalidation of the GET /api/products route to update cached data immediately.
  */
 export async function POST(request) {
   try {
@@ -105,10 +127,20 @@ export async function POST(request) {
         let expirationDate;
 
         // Use `calculatedExpirationDate` if it exists
-        if (lot.calculatedExpirationDate instanceof Date && !isNaN(lot.calculatedExpirationDate)) {
-          expirationDate = lot.calculatedExpirationDate.toISOString().split("T")[0];
-        } else if (lot.ExpirationDate instanceof Date && !isNaN(lot.ExpirationDate)) {
-          expirationDate = new Date(lot.ExpirationDate).toISOString().split("T")[0];
+        if (
+          lot.calculatedExpirationDate instanceof Date &&
+          !isNaN(lot.calculatedExpirationDate)
+        ) {
+          expirationDate = lot.calculatedExpirationDate
+            .toISOString()
+            .split("T")[0];
+        } else if (
+          lot.ExpirationDate instanceof Date &&
+          !isNaN(lot.ExpirationDate)
+        ) {
+          expirationDate = new Date(lot.ExpirationDate)
+            .toISOString()
+            .split("T")[0];
         } else {
           expirationDate = "N/A";
         }
@@ -120,7 +152,14 @@ export async function POST(request) {
       });
     }
 
-    return NextResponse.json(doc, { status: 201 });
+    // Create response with Cache-Control header to prevent caching of POST responses
+    const response = NextResponse.json(doc, { status: 201 });
+    response.headers.set("Cache-Control", "no-store"); // Do not cache POST responses
+
+    // Trigger On-Demand Revalidation for GET /api/products
+    await revalidatePath('/api/products');
+
+    return response;
   } catch (err) {
     console.error("POST /api/products error:", err);
     return NextResponse.json({ message: err.message }, { status: 500 });

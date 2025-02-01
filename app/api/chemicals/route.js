@@ -1,3 +1,5 @@
+// app/api/chemicals/route.js
+
 import Chemical from "@/models/Chemical"
 import connectMongoDB from "@/lib/mongo/index.js"
 import { NextResponse } from "next/server"
@@ -7,7 +9,6 @@ export const dynamic = "force-dynamic"
 /**
  * GET /api/chemicals
  * Returns an array of chemicals, each with embedded lots.
- * Optionally format each lot's ExpirationDate if you want to store dates in them.
  */
 export async function GET() {
   try {
@@ -19,7 +20,7 @@ export async function GET() {
       const doc = chem.toObject()
       if (Array.isArray(doc.Lots)) {
         doc.Lots = doc.Lots.map((lot) => {
-          // If you have an ExpirationDate field in chemical lots, format it:
+          // Format ExpirationDate if applicable
           // if (lot.ExpirationDate) {
           //   lot.ExpirationDate = new Date(lot.ExpirationDate)
           //     .toISOString()
@@ -41,16 +42,7 @@ export async function GET() {
 /**
  * POST /api/chemicals
  * Creates a new chemical with top-level fields + optional lots.
- * Expects JSON body like:
- * {
- *   "BiologNumber": "24-000001",
- *   "ChemicalName": "Acetic Acid",
- *   "CASNumber": "64-19-7",
- *   "Location": "Room Temperature",
- *   "Lots": [
- *     { "LotNumber": "AA-01", "Quantity": 10 }
- *   ]
- * }
+ * Expects JSON body.
  */
 export async function POST(request) {
   try {
@@ -75,8 +67,7 @@ export async function POST(request) {
     })
 
     const doc = newChemical.toObject()
-    // format lots if you have an ExpirationDate, etc.
-    // doc.Lots = doc.Lots.map(...)
+    // Format lots if necessary
     return NextResponse.json(doc, { status: 201 })
   } catch (err) {
     console.error("POST /api/chemicals error:", err)

@@ -29,7 +29,7 @@ const catalogNumberFormats = {
 // The subdoc schema
 const lotSchema = new Schema({
   LotNumber: { type: String, required: true },
-  Quantity: { type: Number, required: true },
+  Quantity: { type: Number, required: true, min: 0 },
   ExpirationDate: { type: Date, required: false },
   isAvailable: { type: Boolean, required: false, default: true },
 });
@@ -37,12 +37,14 @@ const lotSchema = new Schema({
 // The product schema
 const productSchema = new Schema(
   {
-    CatalogNumber: { type: String, required: true },
-    ProductName: { type: String, required: true },
+    CatalogNumber: { type: String, required: true, index: true },
+    ProductName: { type: String, required: true, index: true },
     Lots: { type: [lotSchema], default: [] },
     ShelfLife: { type: Number, required: false, default: 12 },
   },
-  { timestamps: true }
+  { timestamps: true,
+    strict: false
+   }
 );
 
 // ---- VIRTUALS ------------------------------------------------------------

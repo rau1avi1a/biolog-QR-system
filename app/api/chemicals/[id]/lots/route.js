@@ -1,38 +1,66 @@
-import Chemical from "@/models/Chemical"
-import connectMongoDB from "@/lib/mongo/index.js"
-import { NextResponse } from "next/server"
+// app/api/chemicals/[id]/lots/route.js
+import Chemical from "@/models/Chemical";
+import ChemicalAudit from "@/models/ChemicalAudit";
+import connectMongoDB from "@/lib/mongo/index.js";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api-auth";
 
-export const dynamic = "force-dynamic"
+export const dynamic = "force-dynamic";
 
-/**
- * POST /api/chemicals/[id]/lots
- * Adds a new lot to that chemical's "Lots" array.
- */
-export async function POST(request, { params }) {
+async function addLot(request, context) {
   try {
-    await connectMongoDB()
-    const { id } = params
-    const body = await request.json() // { LotNumber, Quantity, etc. }
+    const params = await Promise.resolve(context.params);
+    const { id } = params;
+    const user = context.user;
+    
+    await connectMongoDB();
+    const body = await request.json();
 
-    const chem = await Chemical.findById(id)
+    const chem = await Chemical.findById(id);
     if (!chem) {
-      return NextResponse.json({ message: "Chemical not found" }, { status: 404 })
+      return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    chem.Lots.push({
+    // Create new lot
+    const newLot = {
       LotNumber: body.LotNumber ?? "NewLot",
       Quantity: body.Quantity ?? 0,
-      // if you have ExpirationDate for chemical lots:
-      // ExpirationDate: body.ExpirationDate ?? null
-    })
+      // Add any other lot fields here
+    };
 
-    await chem.save()
+    chem.Lots.push(newLot);
+    await chem.save();
 
-    const doc = chem.toObject()
-    // format lots if needed
-    return NextResponse.json(doc, { status: 201 })
+    // Create audit entry for new lot
+    await ChemicalAudit.create({
+      chemical: {
+        BiologNumber: chem.BiologNumber,
+        ChemicalName: chem.ChemicalName,
+        CASNumber: chem.CASNumber,
+        Location: chem.Location
+      },
+      lot: {
+        LotNumber: newLot.LotNumber,
+        QuantityUsed: newLot.Quantity,  // Initial quantity is "used" amount
+        QuantityRemaining: newLot.Quantity
+      },
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email
+      },
+      action: "ADD",  // New action type
+      notes: `New lot created with initial quantity ${newLot.Quantity}`,
+      project: body.project,
+      department: body.department
+    });
+
+    const doc = chem.toObject();
+    return NextResponse.json(doc, { status: 201 });
   } catch (err) {
-    console.error("POST /api/chemicals/[id]/lots error:", err)
-    return NextResponse.json({ message: err.message }, { status: 500 })
+    console.error("POST /api/chemicals/[id]/lots error:", err);
+    return NextResponse.json({ message: err.message }, { status: 500 });
   }
 }
+
+export const POST = withAuth(addLot);
