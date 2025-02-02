@@ -1,7 +1,6 @@
-// /app/api/docs/annotations/route.js
 import { NextResponse } from 'next/server';
 import connectMongoDB from '@/lib';
-import { PDFDocument } from 'pdf-lib'; // npm install pdf-lib
+import { PDFDocument } from 'pdf-lib';
 import SubSheets from '@/models/SubSheets';
 import DocumentAuditTrail from '@/models/DocumentAuditTrail';
 
@@ -10,59 +9,56 @@ export async function POST(request) {
     await connectMongoDB();
     const { docId, drawingData, status, metadata } = await request.json();
 
-    // 1. Fetch the SubSheets doc so we can get the original PDF bytes
+    // 1. Fetch the SubSheets doc
     const subSheet = await SubSheets.findById(docId);
     if (!subSheet?.pdf?.data) {
       return NextResponse.json({ error: 'No PDF data found' }, { status: 404 });
     }
 
-    // Convert stored Buffer to Uint8Array for pdf-lib
-    const existingPdfBytes = new Uint8Array(subSheet.pdf.data.buffer);
+    // 2. Convert stored Buffer to Uint8Array for pdf-lib
+    const existingPdfBytes = new Uint8Array(subSheet.pdf.data);
 
-    // 2. Load the PDFDocument from pdf-lib
+    // 3. Load the PDFDocument
     const pdfDoc = await PDFDocument.load(existingPdfBytes);
 
-    // 3. Convert the base64 "data:image/png;base64,..." to actual bytes
-    // Strip off the "data:image/png;base64," prefix
+    // 4. Convert the drawing data to bytes
     const base64Data = drawingData.replace(/^data:image\/png;base64,/, '');
     const drawingBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
 
-    // 4. Embed the PNG into the PDF
+    // 5. Embed the PNG
     const pngImage = await pdfDoc.embedPng(drawingBytes);
 
-    // 5. Draw the image onto the first page (or loop if you have multi-page logic)
+    // 6. Draw onto first page
     const pages = pdfDoc.getPages();
     const firstPage = pages[0];
-
-    // You can place it at (x=0, y=0) or somewhere else, and scale to fit:
     const { width, height } = firstPage.getSize();
-    // if your canvas matches the PDF’s actual size, you can just do:
+    
     firstPage.drawImage(pngImage, {
       x: 0,
       y: 0,
-      width: width,
-      height: height
+      width,
+      height
     });
 
-    // 6. Save the PDF with the new annotations “baked in”
+    // 7. Save the PDF
     const updatedPdfBytes = await pdfDoc.save();
 
-    // 7. Store the updated PDF bytes back into your SubSheets doc
-    subSheet.pdf.data = updatedPdfBytes; // a Buffer or Byte array
-    subSheet.status = status;           // e.g., "inProgress"
-    // Optional: store the annotation image in subSheet if you want
-    // subSheet.annotationImage = drawingData;
+    // 8. Convert Uint8Array to Buffer before saving to MongoDB
+    const updatedPdfBuffer = Buffer.from(updatedPdfBytes);
+    
+    // 9. Update the document
+    subSheet.pdf.data = updatedPdfBuffer;
+    subSheet.status = status;
     await subSheet.save();
 
-    // 8. Create an AuditTrail entry (with "annotations" stored if needed)
+    // 10. Create audit trail
     const auditEntry = await DocumentAuditTrail.create({
       documentId: docId,
       status,
-      annotations: drawingData || '', // store the base64 if you want
+      annotations: drawingData || '',
       metadata: metadata || {},
     });
 
-    // Finally return the updated doc
     return NextResponse.json({
       message: 'Annotations saved and PDF updated',
       document: subSheet,
