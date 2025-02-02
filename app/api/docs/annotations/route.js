@@ -1,139 +1,77 @@
-// app/api/docs/route.js
-import { NextResponse } from "next/server";
-import connectMongoDB from "@/lib/index";
-import SubSheets from "@/models/SubSheets";
-import DocumentVersion from "@/models/DocumentVersion";
+// /app/api/docs/annotations/route.js
+import { NextResponse } from 'next/server';
+import connectMongoDB from '@/lib';
+import { PDFDocument } from 'pdf-lib'; // npm install pdf-lib
+import SubSheets from '@/models/SubSheets';
+import DocumentAuditTrail from '@/models/DocumentAuditTrail';
 
-export async function GET(request) {
+export async function POST(request) {
   try {
     await connectMongoDB();
-    const { searchParams } = new URL(request.url);
-    const docId = searchParams.get("docId");
-    const status = searchParams.get("status");
-    const page = parseInt(searchParams.get("page")) || 1;
-    const limit = parseInt(searchParams.get("limit")) || 10;
-    const skip = (page - 1) * limit;
+    const { docId, drawingData, status, metadata } = await request.json();
 
-    if (docId) {
-      // Single document fetch - no change needed
-      const existingVersion = await DocumentVersion.findOne({
-        originalDocumentId: docId,
-        status: { $ne: "completed" }
-      }).lean();
-
-      if (existingVersion) {
-        return NextResponse.json({
-          _id: existingVersion._id.toString(),
-          originalDocumentId: existingVersion.originalDocumentId.toString(),
-          fileName: existingVersion.fileName,
-          status: existingVersion.status,
-          version: existingVersion.version,
-          currentAnnotations: existingVersion.currentAnnotations,
-          metadata: existingVersion.metadata,
-          pdf: existingVersion.pdf ? `data:application/pdf;base64,${existingVersion.pdf.data.toString('base64')}` : null
-        });
-      }
-
-      const doc = await SubSheets.findById(docId).lean();
-      if (!doc) {
-        return NextResponse.json({ error: "Document not found" }, { status: 404 });
-      }
-
-      return NextResponse.json({
-        _id: doc._id.toString(),
-        fileName: doc.fileName,
-        solutionName: doc.SolutionName,
-        status: "new",
-        product: {
-          catalogNumber: doc.product?.catalogNumber || null,
-          productReference: doc.product?.productReference?.toString() || null,
-        },
-        pdf: doc.pdf?.data ? `data:application/pdf;base64,${doc.pdf.data.toString('base64')}` : null
-      });
-    } else {
-      // List documents with pagination
-      const query = {};
-      
-      if (status === "new") {
-        // Only fetch original docs that don't have active versions
-        const activeVersionDocs = await DocumentVersion.distinct('originalDocumentId', { 
-          status: { $ne: "completed" } 
-        });
-        query._id = { $nin: activeVersionDocs };
-      }
-
-      // First get total count for pagination
-      const totalDocs = await SubSheets.countDocuments(query);
-
-      // Then get the actual documents for current page
-      const docs = await SubSheets.find(query, {
-        fileName: 1,
-        'product.catalogNumber': 1,
-        SolutionName: 1,
-        createdAt: 1
-      })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .allowDiskUse(true) // Add this option
-        .lean();
-
-      const docsList = docs.map(d => ({
-        _id: d._id.toString(),
-        fileName: d.fileName,
-        solutionName: d.SolutionName,
-        status: "new",
-        product: {
-          catalogNumber: d.product?.catalogNumber || null,
-        },
-      }));
-
-      // If not looking for new docs, get versions
-      if (status !== "new") {
-        const versionDocs = await DocumentVersion.find(
-          { status },
-          {
-            fileName: 1,
-            status: 1,
-            version: 1,
-            originalDocumentId: 1,
-            'metadata.product.catalogNumber': 1
-          }
-        )
-          .populate('originalDocumentId', 'product.catalogNumber')
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit)
-          .allowDiskUse(true) // Add this option
-          .lean();
-
-        docsList = versionDocs.map(v => ({
-          _id: v._id.toString(),
-          fileName: v.fileName,
-          originalDocumentId: v.originalDocumentId._id.toString(),
-          status: v.status,
-          version: v.version,
-          product: {
-            catalogNumber: v.originalDocumentId?.product?.catalogNumber || null,
-          },
-        }));
-      }
-
-      return NextResponse.json({
-        docs: docsList,
-        pagination: {
-          currentPage: page,
-          totalPages: Math.ceil(totalDocs / limit),
-          totalDocs,
-          hasNextPage: skip + docs.length < totalDocs,
-          hasPrevPage: page > 1
-        }
-      });
+    // 1. Fetch the SubSheets doc so we can get the original PDF bytes
+    const subSheet = await SubSheets.findById(docId);
+    if (!subSheet?.pdf?.data) {
+      return NextResponse.json({ error: 'No PDF data found' }, { status: 404 });
     }
-  } catch (error) {
-    console.error("Error fetching documents:", error);
+
+    // Convert stored Buffer to Uint8Array for pdf-lib
+    const existingPdfBytes = new Uint8Array(subSheet.pdf.data.buffer);
+
+    // 2. Load the PDFDocument from pdf-lib
+    const pdfDoc = await PDFDocument.load(existingPdfBytes);
+
+    // 3. Convert the base64 "data:image/png;base64,..." to actual bytes
+    // Strip off the "data:image/png;base64," prefix
+    const base64Data = drawingData.replace(/^data:image\/png;base64,/, '');
+    const drawingBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+
+    // 4. Embed the PNG into the PDF
+    const pngImage = await pdfDoc.embedPng(drawingBytes);
+
+    // 5. Draw the image onto the first page (or loop if you have multi-page logic)
+    const pages = pdfDoc.getPages();
+    const firstPage = pages[0];
+
+    // You can place it at (x=0, y=0) or somewhere else, and scale to fit:
+    const { width, height } = firstPage.getSize();
+    // if your canvas matches the PDF’s actual size, you can just do:
+    firstPage.drawImage(pngImage, {
+      x: 0,
+      y: 0,
+      width: width,
+      height: height
+    });
+
+    // 6. Save the PDF with the new annotations “baked in”
+    const updatedPdfBytes = await pdfDoc.save();
+
+    // 7. Store the updated PDF bytes back into your SubSheets doc
+    subSheet.pdf.data = updatedPdfBytes; // a Buffer or Byte array
+    subSheet.status = status;           // e.g., "inProgress"
+    // Optional: store the annotation image in subSheet if you want
+    // subSheet.annotationImage = drawingData;
+    await subSheet.save();
+
+    // 8. Create an AuditTrail entry (with "annotations" stored if needed)
+    const auditEntry = await DocumentAuditTrail.create({
+      documentId: docId,
+      status,
+      annotations: drawingData || '', // store the base64 if you want
+      metadata: metadata || {},
+    });
+
+    // Finally return the updated doc
+    return NextResponse.json({
+      message: 'Annotations saved and PDF updated',
+      document: subSheet,
+      auditEntry,
+    });
+  } catch (err) {
+    console.error('Error saving annotations:', err);
     return NextResponse.json(
-      { error: "Failed to fetch documents" },
+      { error: 'Failed to save annotations' },
       { status: 500 }
     );
   }

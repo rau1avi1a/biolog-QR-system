@@ -12,15 +12,11 @@ const documentAuditTrailSchema = new Schema({
     enum: ["new", "inProgress", "review", "completed"],
     required: true,
   },
-  annotations: [{
-    type: {
-      type: String,
-      required: true,
-    },
-    path: [[Number]],
-    page: Number,
-    timestamp: Date,
-  }],
+  // Store the drawing data as a base64 string
+  annotations: {
+    type: String,
+    required: false,
+  },
   metadata: {
     operator: String,
     verifier: String,
@@ -40,10 +36,9 @@ const documentAuditTrailSchema = new Schema({
   timestamps: true
 });
 
-// Index for efficient querying
 documentAuditTrailSchema.index({ documentId: 1, timestamp: -1 });
 
-const DocumentAuditTrail = mongoose.models.DocumentAuditTrail || 
+const DocumentAuditTrail = mongoose.models.DocumentAuditTrail ||
   mongoose.model("DocumentAuditTrail", documentAuditTrailSchema);
 
 export default DocumentAuditTrail;

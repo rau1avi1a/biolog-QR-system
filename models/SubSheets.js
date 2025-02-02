@@ -33,12 +33,13 @@ const subSheetsSchema = new Schema({
   currentAnnotations: [{
     type: {
       type: String,
-      required: true
+      required: false
     },
     path: [[Number]],
     page: Number,
     timestamp: Date
-  }]
+  }],
+  annotationImage: { type: String },
 });
 
 const SubSheets = mongoose.models.SubSheets || mongoose.model("SubSheets", subSheetsSchema);
