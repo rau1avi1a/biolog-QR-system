@@ -1,6 +1,15 @@
+'use client';
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Pencil, Undo, Save, CheckCircle } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
+import { Document, Page } from 'react-pdf';
+import { pdfjs } from 'react-pdf';
+
+// Configure PDF.js worker
+if (typeof window !== "undefined") {
+  pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+}
 
 const PDFEditor = ({ doc, onStatusChange }) => {
   const [isDrawMode, setIsDrawMode] = useState(true);
@@ -9,12 +18,13 @@ const PDFEditor = ({ doc, onStatusChange }) => {
   const [undoHistory, setUndoHistory] = useState([]);
   const [workingPdf, setWorkingPdf] = useState(null);
   const [pdfDimensions, setPdfDimensions] = useState(null);
+  const [numPages, setNumPages] = useState(null);
+  const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1);
   
   const canvasRef = useRef(null);
   const contextRef = useRef(null);
   const pdfContainerRef = useRef(null);
-  const embedRef = useRef(null);
 
   // Initialize working PDF
   useEffect(() => {
@@ -39,35 +49,30 @@ const PDFEditor = ({ doc, onStatusChange }) => {
     }
   }, [doc?.pdf]);
 
-  // Update scale when PDF embed loads or container size changes
-  useEffect(() => {
-    const updateScale = () => {
-      if (!embedRef.current || !pdfDimensions) return;
-      
-      const embedWidth = embedRef.current.clientWidth;
-      const newScale = embedWidth / pdfDimensions.width;
-      setScale(newScale);
-    };
+  function onDocumentLoadSuccess({ numPages }) {
+    setNumPages(numPages);
+    if (pdfContainerRef.current) {
+      const { width, height } = pdfContainerRef.current.getBoundingClientRect();
+      setPdfDimensions({ width, height });
+    }
+  }
 
-    updateScale();
-    window.addEventListener('resize', updateScale);
-    return () => window.removeEventListener('resize', updateScale);
+  // Update scale when PDF dimensions change
+  useEffect(() => {
+    if (pdfDimensions) {
+      setupCanvas();
+    }
   }, [pdfDimensions]);
 
   const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    const container = embedRef.current;
-    if (!canvas || !container || !pdfDimensions || !scale) return;
+    if (!canvas || !pdfDimensions) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const scaledWidth = pdfDimensions.width * scale;
-    const scaledHeight = pdfDimensions.height * scale;
-    
-    // Set canvas dimensions to match scaled PDF size
-    canvas.width = scaledWidth * dpr;
-    canvas.height = scaledHeight * dpr;
-    canvas.style.width = `${scaledWidth}px`;
-    canvas.style.height = `${scaledHeight}px`;
+    canvas.width = pdfDimensions.width * dpr;
+    canvas.height = pdfDimensions.height * dpr;
+    canvas.style.width = `${pdfDimensions.width}px`;
+    canvas.style.height = `${pdfDimensions.height}px`;
 
     const context = canvas.getContext('2d');
     context.setTransform(1, 0, 0, 1, 0, 0);
@@ -77,69 +82,49 @@ const PDFEditor = ({ doc, onStatusChange }) => {
     context.lineWidth = 2;
     contextRef.current = context;
 
-    // Restore drawings if they exist
     if (drawings) {
       const img = new Image();
       img.onload = () => {
         context.clearRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(img, 0, 0, scaledWidth, scaledHeight);
+        context.drawImage(img, 0, 0, pdfDimensions.width, pdfDimensions.height);
       };
       img.src = drawings;
-    } else {
-      context.clearRect(0, 0, canvas.width, canvas.height);
     }
-  }, [drawings, pdfDimensions, scale]);
+  }, [drawings, pdfDimensions]);
 
-  useEffect(() => {
-    setupCanvas();
-  }, [setupCanvas, scale]);
+  const getMousePos = useCallback((evt) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
 
-  const getMousePos = useCallback((canvas, evt) => {
-    if (!embedRef.current) return { x: 0, y: 0 };
-
-    // Get all scrollable parents
-    const getScrollOffsets = (element) => {
-      let offsetX = 0;
-      let offsetY = 0;
-      let current = element;
-
-      while (current) {
-        offsetX += current.scrollLeft || 0;
-        offsetY += current.scrollTop || 0;
-        current = current.parentElement;
-      }
-      return { offsetX, offsetY };
-    };
-
-    const { offsetX, offsetY } = getScrollOffsets(canvas);
-    const pdfRect = embedRef.current.getBoundingClientRect();
-    
-    // Calculate position relative to the PDF, accounting for scroll
-    const x = evt.clientX + offsetX - pdfRect.left;
-    const y = evt.clientY + offsetY - pdfRect.top;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const x = (evt.clientX - rect.left) * (canvas.width / (rect.width * dpr));
+    const y = (evt.clientY - rect.top) * (canvas.height / (rect.height * dpr));
     
     return { x, y };
   }, []);
 
-  const startDrawing = useCallback((e) => {
-    if (!isDrawMode || !canvasRef.current || !contextRef.current) return;
-    const pos = getMousePos(canvasRef.current, e);
+  const handlePointerDown = useCallback((e) => {
+    if (!isDrawMode || !contextRef.current) return;
+    const pos = getMousePos(e);
     contextRef.current.beginPath();
     contextRef.current.moveTo(pos.x, pos.y);
     setIsDrawing(true);
 
-    const currentDrawing = canvasRef.current.toDataURL();
-    setUndoHistory(prev => [...prev, currentDrawing]);
+    if (canvasRef.current) {
+      const currentDrawing = canvasRef.current.toDataURL();
+      setUndoHistory(prev => [...prev, currentDrawing]);
+    }
   }, [isDrawMode, getMousePos]);
 
-  const draw = useCallback((e) => {
+  const handlePointerMove = useCallback((e) => {
     if (!isDrawMode || !isDrawing || !contextRef.current) return;
-    const pos = getMousePos(canvasRef.current, e);
+    const pos = getMousePos(e);
     contextRef.current.lineTo(pos.x, pos.y);
     contextRef.current.stroke();
   }, [isDrawMode, isDrawing, getMousePos]);
 
-  const stopDrawing = useCallback(() => {
+  const handlePointerUp = useCallback(() => {
     if (!isDrawMode || !contextRef.current) return;
     contextRef.current.closePath();
     setIsDrawing(false);
@@ -166,12 +151,38 @@ const PDFEditor = ({ doc, onStatusChange }) => {
     }
 
     try {
+      // Create a copy of the original PDF with drawings
+      const pdfData = doc.pdf.split(',')[1];
+      const pdfBytes = Uint8Array.from(atob(pdfData), c => c.charCodeAt(0));
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      
+      // Convert drawing to PDF-compatible format
+      const drawingData = drawings.split(',')[1];
+      const drawingBytes = Uint8Array.from(atob(drawingData), c => c.charCodeAt(0));
+      const drawingImage = await pdfDoc.embedPng(drawingBytes);
+      
+      const page = pdfDoc.getPages()[0];
+      const { width, height } = page.getSize();
+      
+      // Add drawing to the PDF copy
+      page.drawImage(drawingImage, {
+        x: 0,
+        y: 0,
+        width,
+        height,
+      });
+      
+      // Save the modified PDF
+      const modifiedPdfBytes = await pdfDoc.save();
+      const base64PDF = `data:application/pdf;base64,${Buffer.from(modifiedPdfBytes).toString('base64')}`;
+
       const response = await fetch('/api/docs/annotations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           docId: doc._id,
           drawingData: drawings,
+          updatedPdf: base64PDF,
           status: 'inProgress',
           metadata: {},
         }),
@@ -183,14 +194,12 @@ const PDFEditor = ({ doc, onStatusChange }) => {
 
       const result = await response.json();
       
-      // Update working PDF with the one returned from server
       if (result.document?.pdf?.data) {
         const pdfBlob = new Blob([Buffer.from(result.document.pdf.data)], { type: 'application/pdf' });
         const pdfUrl = URL.createObjectURL(pdfBlob);
         setWorkingPdf(pdfUrl);
       }
 
-      // Clear canvas for new drawings
       setDrawings(null);
       setUndoHistory([]);
       if (contextRef.current && canvasRef.current) {
@@ -291,18 +300,32 @@ const PDFEditor = ({ doc, onStatusChange }) => {
         </div>
       </div>
 
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative overflow-auto bg-gray-100">
         <div
           ref={pdfContainerRef}
-          className="relative w-full h-full"
+          className="relative mx-auto bg-white shadow-lg"
+          style={{ 
+            width: '850px',
+            minHeight: '1100px',
+            margin: '2rem auto'
+          }}
         >
-          <embed
-            ref={embedRef}
-            src={workingPdf || doc.pdf}
-            type="application/pdf"
-            className="w-full h-full"
-            style={{ display: 'block' }}
-          />
+          <Document
+            file={workingPdf || doc.pdf}
+            onLoadSuccess={onDocumentLoadSuccess}
+            className="absolute inset-0"
+            loading={<div className="text-center py-4">Loading PDF...</div>}
+            error={<div className="text-center py-4 text-red-500">Error loading PDF!</div>}
+          >
+            <Page 
+              pageNumber={pageNumber}
+              width={850}
+              className="mx-auto"
+              renderAnnotationLayer={false}
+              renderTextLayer={false}
+              loading={<div>Loading page...</div>}
+            />
+          </Document>
           <canvas
             ref={canvasRef}
             className={`absolute inset-0 ${isDrawMode ? 'cursor-crosshair' : 'pointer-events-none'}`}
@@ -311,10 +334,10 @@ const PDFEditor = ({ doc, onStatusChange }) => {
               width: '100%',
               height: '100%'
             }}
-            onMouseDown={startDrawing}
-            onMouseMove={draw}
-            onMouseUp={stopDrawing}
-            onMouseLeave={stopDrawing}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
           />
         </div>
       </div>
