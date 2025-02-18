@@ -1,10 +1,24 @@
 // pages/cyclecount.jsx
 "use client"
+import React from "react";
 import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from '@/components/ui/input';
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import ChemicalAuditTable from "@/components/Chemicals/ChemAuditTable"
 
 export default function CycleCountPage() {
   const [cycleCount, setCycleCount] = useState(null);
   const [updatedItems, setUpdatedItems] = useState([]);
+  const [chemical, setChemical] = React.useState(null);
   const [loading, setLoading] = useState(false);
 
   // Fetch the active cycle count on mount.
@@ -102,6 +116,7 @@ export default function CycleCountPage() {
       {!loading && !cycleCount && (
         <button onClick={handleGenerate}>Generate Cycle Count</button>
       )}
+      
       {!loading && cycleCount && (
         <form onSubmit={handleSubmit}>
           <table border="1" cellPadding="8">
@@ -137,6 +152,8 @@ export default function CycleCountPage() {
           <button type="submit">Submit Cycle Count</button>
         </form>
       )}
+      
     </div>
+    
   );
 }
