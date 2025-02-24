@@ -5,6 +5,7 @@ import connectMongoDB from "@lib/index.js";
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/api-auth";
 import { withRateLimit } from "@/middleware/rateLimit";
+import mongoose from "mongoose";
 
 export const dynamic = "force-dynamic";
 
@@ -13,18 +14,15 @@ export const dynamic = "force-dynamic";
  */
 async function updateLot(request, context) {
   try {
-    // Ensure params is always resolved correctly
     const params = context.params || {};
     const { id, lotId } = params;
     const user = context.user;
     
-    // Add console logging to help debug production issues
     console.log('Update lot request received:', { id, lotId });
     
     await connectMongoDB();
     console.log('MongoDB connected');
 
-    // Use try-catch for body parsing
     let body;
     try {
       body = await request.json();
@@ -34,13 +32,7 @@ async function updateLot(request, context) {
       return NextResponse.json({ message: "Invalid request body" }, { status: 400 });
     }
 
-    // Validate required fields
-    if (body.Quantity === undefined && body.Quantity !== 0) {
-      console.error('Missing required field: Quantity');
-      return NextResponse.json({ message: "Quantity is required" }, { status: 400 });
-    }
-
-    // Find the chemical using a try-catch to catch potential MongoDB errors
+    // Find the chemical
     let chem;
     try {
       chem = await Chemical.findById(id);
@@ -54,12 +46,37 @@ async function updateLot(request, context) {
       return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    // Find the lot using a try-catch and handle potential errors 
-    // with chem.Lots.id method not existing
+    // IMPORTANT FIX: Find lot using alternative method that works in all environments
     let lot;
     try {
+      // Try multiple approaches to find the lot
+      console.log('Finding lot with ID:', lotId);
+      console.log('Lots available:', chem.Lots.length);
+      
+      // Option 1: Using id() method
       lot = chem.Lots.id(lotId);
+      
+      // Option 2: If id() fails, try manual find with toString()
+      if (!lot) {
+        console.log('id() method failed, trying alternative lookup');
+        lot = chem.Lots.find(l => l._id.toString() === lotId);
+      }
+      
+      // Option 3: Try with ObjectId conversion
+      if (!lot) {
+        console.log('Alternative lookup failed, trying with ObjectId conversion');
+        try {
+          const objectId = new mongoose.Types.ObjectId(lotId);
+          lot = chem.Lots.find(l => l._id.equals(objectId));
+        } catch (e) {
+          console.error('ObjectId conversion failed:', e);
+        }
+      }
+      
       console.log('Lot found:', lot ? 'yes' : 'no');
+      
+      // Log all lot IDs for debugging
+      console.log('Available lot IDs:', chem.Lots.map(l => l._id.toString()));
     } catch (err) {
       console.error('Error finding lot:', err);
       return NextResponse.json({ message: "Error finding lot" }, { status: 500 });
