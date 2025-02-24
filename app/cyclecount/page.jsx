@@ -109,50 +109,64 @@ export default function CycleCountPage() {
   }
 
   return (
-    <div>
-      <h1>Cycle Count</h1>
-      {loading && <p>Loading...</p>}
-      {!loading && !cycleCount && (
-        <button onClick={handleGenerate}>Generate Cycle Count</button>
-      )}
-      
-      {!loading && cycleCount && (
-        <form onSubmit={handleSubmit}>
-          <table border="1" cellPadding="8">
-            <thead>
-              <tr>
-                <th>Chemical</th>
-                <th>Lot Number</th>
-                <th>Previous Quantity</th>
-                <th>Counted Quantity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cycleCount.items.map((item, index) => (
-                <tr key={item._id || index}>
-                  <td>{item.ChemicalName}</td>
-                  <td>{item.LotNumber}</td>
-                  <td>{item.previousQuantity}</td>
-                  <td>
-                    <input
-                      type="number"
-                      value={updatedItems[index]?.countedQuantity}
-                      onChange={(e) =>
-                        handleInputChange(index, e.target.value)
-                      }
-                      required
-                    />
-                  </td>
+    <div className="container mx-auto py-10">
+      <Card className="mx-auto max-w-4xl shadow-md">
+        <CardHeader>
+          <CardTitle className="text-2xl">Cycle Count</CardTitle>
+        </CardHeader>
+        
+        {loading && <p>Loading...</p>}
+        {!loading && !cycleCount && (
+          <div className="px-4">
+            <Button
+              className="mb-4"
+              onClick={handleGenerate}
+            >
+              Generate Cycle Count
+            </Button>
+          </div>
+
+        )}
+
+
+
+        {!loading && cycleCount && (
+          <form onSubmit={handleSubmit}>
+            <table border="1" cellPadding="8">
+              <thead>
+                <tr>
+                  <th>Chemical</th>
+                  <th>Lot Number</th>
+                  <th>Previous Quantity</th>
+                  <th>Counted Quantity</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <br />
-          <button type="submit">Submit Cycle Count</button>
-        </form>
-      )}
-      
+              </thead>
+              <tbody>
+                {cycleCount.items.map((item, index) => (
+                  <tr key={item._id || index}>
+                    <td>{item.ChemicalName}</td>
+                    <td>{item.LotNumber}</td>
+                    <td>{item.previousQuantity}</td>
+                    <td>
+                      <input
+                        type="number"
+                        value={updatedItems[index]?.countedQuantity}
+                        onChange={(e) =>
+                          handleInputChange(index, e.target.value)
+                        }
+                        required
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <br />
+            <button type="submit">Submit Cycle Count</button>
+          </form>
+        )}
+      </Card>
     </div>
-    
+
   );
 }
