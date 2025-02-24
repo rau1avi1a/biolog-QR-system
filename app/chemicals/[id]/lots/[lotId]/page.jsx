@@ -66,52 +66,87 @@ export default function ChemicalLotDetailsPage() {
     }
   }
 
-  const handleTransaction = async () => {
-    if (!quantity || isNaN(quantity) || quantity <= 0) {
-      showToast("Error", "Please enter a valid quantity", "error");
+// Updated handleTransaction function to improve error handling
+const handleTransaction = async () => {
+  if (!quantity || isNaN(quantity) || parseFloat(quantity) <= 0) {
+    showToast("Error", "Please enter a valid quantity", "error");
+    return;
+  }
+
+  setProcessing(true);
+  try {
+    const parsedQuantity = parseFloat(quantity);
+    const updatedQuantity = transactionType === "subtract" 
+      ? lot.Quantity - parsedQuantity
+      : lot.Quantity + parsedQuantity;
+
+    if (updatedQuantity < 0) {
+      showToast("Error", "Cannot subtract more than available quantity", "error");
+      setProcessing(false);
       return;
     }
 
-    setProcessing(true);
-    try {
-      const updatedQuantity = transactionType === "subtract" 
-        ? lot.Quantity - parseFloat(quantity)
-        : lot.Quantity + parseFloat(quantity);
-
-      if (updatedQuantity < 0) {
-        showToast("Error", "Cannot subtract more than available quantity", "error");
-        return;
+    console.log('Sending transaction:', {
+      endpoint: `/api/chemicals/${params.id}/lots/${params.lotId}`,
+      method: 'PUT',
+      body: {
+        Quantity: updatedQuantity,
+        notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
       }
+    });
 
-      const response = await fetch(`/api/chemicals/${params.id}/lots/${params.lotId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          Quantity: updatedQuantity,
-          notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
-        }),
+    const response = await fetch(`/api/chemicals/${params.id}/lots/${params.lotId}`, {
+      method: "PUT",
+      headers: { 
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ 
+        Quantity: updatedQuantity,
+        notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
+      }),
+    });
+
+    // Handle non-OK responses better
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Transaction failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorData
       });
-
-      if (!response.ok) throw new Error("Failed to update quantity");
-
-      const updatedChemical = await response.json();
-      setChemical(updatedChemical);
-      setLot(updatedChemical.Lots.find(l => l._id === params.lotId));
-      setQuantity("");
-      showToast(
-        "Success",
-        `Successfully ${transactionType}ed ${quantity} units`,
-        "success"
-      );
-    } catch (error) {
-      console.error("Error:", error);
-      showToast("Error", "Failed to update quantity", "error");
-    } finally {
-      setProcessing(false);
-      setAlertOpen(false);
+      throw new Error(errorData.message || `Error: ${response.status} ${response.statusText}`);
     }
-  };
 
+    const updatedChemical = await response.json();
+    
+    if (!updatedChemical || !updatedChemical.Lots) {
+      console.error('Invalid response data:', updatedChemical);
+      throw new Error('Invalid response data received');
+    }
+    
+    setChemical(updatedChemical);
+    
+    const updatedLot = updatedChemical.Lots.find(l => l._id === params.lotId);
+    if (!updatedLot) {
+      console.error('Updated lot not found in response');
+      throw new Error('Updated lot not found in response');
+    }
+    
+    setLot(updatedLot);
+    setQuantity("");
+    showToast(
+      "Success",
+      `Successfully ${transactionType === 'add' ? 'added' : 'removed'} ${quantity} units`,
+      "success"
+    );
+  } catch (error) {
+    console.error("Transaction error:", error);
+    showToast("Error", error.message || "Failed to update quantity", "error");
+  } finally {
+    setProcessing(false);
+    setAlertOpen(false);
+  }
+};
   const showToast = (title, message, type = "success") => {
     setToast({ open: true, title, message, type });
   };
