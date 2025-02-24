@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,8 @@ import {
   Minus,
   Loader2,
   AlertCircle,
-  Check
+  Check,
+  Download
 } from "lucide-react";
 
 export default function ChemicalLotDetailsPage() {
@@ -39,6 +40,8 @@ export default function ChemicalLotDetailsPage() {
   const [alertOpen, setAlertOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [toast, setToast] = useState({ open: false, title: "", message: "", type: "success" });
+  const qrRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -111,6 +114,59 @@ export default function ChemicalLotDetailsPage() {
 
   const showToast = (title, message, type = "success") => {
     setToast({ open: true, title, message, type });
+  };
+
+  // Function to download QR code
+  const downloadQRCode = () => {
+    setDownloading(true);
+    try {
+      if (!qrRef.current) return;
+
+      // Get the SVG element
+      const svgElement = qrRef.current.querySelector('svg');
+      if (!svgElement) return;
+
+      // Create a canvas element
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Set canvas size for 1x1 inch at 300 DPI
+      canvas.width = 300;  // 1 inch at 300 DPI
+      canvas.height = 300; // 1 inch at 300 DPI
+
+      // Create an image from the SVG
+      const img = new Image();
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      img.onload = () => {
+        // Clear the canvas and draw the image
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // Convert canvas to blob
+        canvas.toBlob((blob) => {
+          // Create download link
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `QR_${chemical?.ChemicalName || 'chemical'}_Lot_${lot?.LotNumber || ''}.png`;
+          link.click();
+
+          // Clean up
+          URL.revokeObjectURL(link.href);
+          URL.revokeObjectURL(url);
+          setDownloading(false);
+        }, 'image/png');
+      };
+
+      img.src = url;
+    } catch (error) {
+      console.error("Error downloading QR code:", error);
+      showToast("Error", "Failed to download QR code", "error");
+      setDownloading(false);
+    }
   };
 
   if (loading) {
@@ -217,14 +273,37 @@ export default function ChemicalLotDetailsPage() {
             <DialogHeader>
               <DialogTitle>QR Code</DialogTitle>
             </DialogHeader>
-            <div className="flex flex-col items-center gap-4">
+            <div className="flex flex-col items-center gap-4" ref={qrRef}>
               <QRCodeSVG
                 value={`${window.location.href}`}
                 size={200}
                 level="H"
                 includeMargin
               />
-              <Button onClick={() => setQrDialogOpen(false)}>Close</Button>
+              <div className="flex gap-2 w-full">
+                <Button 
+                  variant="outline" 
+                  className="flex-1"
+                  onClick={() => setQrDialogOpen(false)}
+                >
+                  Close
+                </Button>
+                <Button 
+                  className="flex-1"
+                  onClick={downloadQRCode}
+                  disabled={downloading}
+                >
+                  {downloading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Download
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500 text-center">
+                QR code sized for 1×1 inch printing
+              </p>
             </div>
           </DialogContent>
         </Dialog>
