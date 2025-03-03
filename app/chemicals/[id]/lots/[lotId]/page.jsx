@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,8 @@ import {
   Minus,
   Loader2,
   AlertCircle,
-  Check
+  Check,
+  Download
 } from "lucide-react";
 
 export default function ChemicalLotDetailsPage() {
@@ -39,6 +40,8 @@ export default function ChemicalLotDetailsPage() {
   const [alertOpen, setAlertOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [toast, setToast] = useState({ open: false, title: "", message: "", type: "success" });
+  const qrRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -63,54 +66,142 @@ export default function ChemicalLotDetailsPage() {
     }
   }
 
-  const handleTransaction = async () => {
-    if (!quantity || isNaN(quantity) || quantity <= 0) {
-      showToast("Error", "Please enter a valid quantity", "error");
+// Updated handleTransaction function to improve error handling
+const handleTransaction = async () => {
+  if (!quantity || isNaN(quantity) || parseFloat(quantity) <= 0) {
+    showToast("Error", "Please enter a valid quantity", "error");
+    return;
+  }
+
+  setProcessing(true);
+  try {
+    const parsedQuantity = parseFloat(quantity);
+    const updatedQuantity = transactionType === "subtract" 
+      ? lot.Quantity - parsedQuantity
+      : lot.Quantity + parsedQuantity;
+
+    if (updatedQuantity < 0) {
+      showToast("Error", "Cannot subtract more than available quantity", "error");
+      setProcessing(false);
       return;
     }
 
-    setProcessing(true);
-    try {
-      const updatedQuantity = transactionType === "subtract" 
-        ? lot.Quantity - parseFloat(quantity)
-        : lot.Quantity + parseFloat(quantity);
-
-      if (updatedQuantity < 0) {
-        showToast("Error", "Cannot subtract more than available quantity", "error");
-        return;
+    console.log('Sending transaction:', {
+      endpoint: `/api/chemicals/${params.id}/lots/${params.lotId}`,
+      method: 'PUT',
+      body: {
+        Quantity: updatedQuantity,
+        notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
       }
+    });
 
-      const response = await fetch(`/api/chemicals/${params.id}/lots/${params.lotId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          Quantity: updatedQuantity,
-          notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
-        }),
+    const response = await fetch(`/api/chemicals/${params.id}/lots/${params.lotId}`, {
+      method: "PUT",
+      headers: { 
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ 
+        Quantity: updatedQuantity,
+        notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
+      }),
+    });
+
+    // Handle non-OK responses better
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Transaction failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorData
       });
-
-      if (!response.ok) throw new Error("Failed to update quantity");
-
-      const updatedChemical = await response.json();
-      setChemical(updatedChemical);
-      setLot(updatedChemical.Lots.find(l => l._id === params.lotId));
-      setQuantity("");
-      showToast(
-        "Success",
-        `Successfully ${transactionType}ed ${quantity} units`,
-        "success"
-      );
-    } catch (error) {
-      console.error("Error:", error);
-      showToast("Error", "Failed to update quantity", "error");
-    } finally {
-      setProcessing(false);
-      setAlertOpen(false);
+      throw new Error(errorData.message || `Error: ${response.status} ${response.statusText}`);
     }
-  };
 
+    const updatedChemical = await response.json();
+    
+    if (!updatedChemical || !updatedChemical.Lots) {
+      console.error('Invalid response data:', updatedChemical);
+      throw new Error('Invalid response data received');
+    }
+    
+    setChemical(updatedChemical);
+    
+    const updatedLot = updatedChemical.Lots.find(l => l._id === params.lotId);
+    if (!updatedLot) {
+      console.error('Updated lot not found in response');
+      throw new Error('Updated lot not found in response');
+    }
+    
+    setLot(updatedLot);
+    setQuantity("");
+    showToast(
+      "Success",
+      `Successfully ${transactionType === 'add' ? 'added' : 'removed'} ${quantity} units`,
+      "success"
+    );
+  } catch (error) {
+    console.error("Transaction error:", error);
+    showToast("Error", error.message || "Failed to update quantity", "error");
+  } finally {
+    setProcessing(false);
+    setAlertOpen(false);
+  }
+};
   const showToast = (title, message, type = "success") => {
     setToast({ open: true, title, message, type });
+  };
+
+  // Function to download QR code
+  const downloadQRCode = () => {
+    setDownloading(true);
+    try {
+      if (!qrRef.current) return;
+
+      // Get the SVG element
+      const svgElement = qrRef.current.querySelector('svg');
+      if (!svgElement) return;
+
+      // Create a canvas element
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Set canvas size for 1x1 inch at 300 DPI
+      canvas.width = 300;  // 1 inch at 300 DPI
+      canvas.height = 300; // 1 inch at 300 DPI
+
+      // Create an image from the SVG
+      const img = new Image();
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      img.onload = () => {
+        // Clear the canvas and draw the image
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // Convert canvas to blob
+        canvas.toBlob((blob) => {
+          // Create download link
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `QR_${chemical?.ChemicalName || 'chemical'}_Lot_${lot?.LotNumber || ''}.png`;
+          link.click();
+
+          // Clean up
+          URL.revokeObjectURL(link.href);
+          URL.revokeObjectURL(url);
+          setDownloading(false);
+        }, 'image/png');
+      };
+
+      img.src = url;
+    } catch (error) {
+      console.error("Error downloading QR code:", error);
+      showToast("Error", "Failed to download QR code", "error");
+      setDownloading(false);
+    }
   };
 
   if (loading) {
@@ -217,14 +308,37 @@ export default function ChemicalLotDetailsPage() {
             <DialogHeader>
               <DialogTitle>QR Code</DialogTitle>
             </DialogHeader>
-            <div className="flex flex-col items-center gap-4">
+            <div className="flex flex-col items-center gap-4" ref={qrRef}>
               <QRCodeSVG
                 value={`${window.location.href}`}
                 size={200}
                 level="H"
                 includeMargin
               />
-              <Button onClick={() => setQrDialogOpen(false)}>Close</Button>
+              <div className="flex gap-2 w-full">
+                <Button 
+                  variant="outline" 
+                  className="flex-1"
+                  onClick={() => setQrDialogOpen(false)}
+                >
+                  Close
+                </Button>
+                <Button 
+                  className="flex-1"
+                  onClick={downloadQRCode}
+                  disabled={downloading}
+                >
+                  {downloading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Download
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500 text-center">
+                QR code sized for 1×1 inch printing
+              </p>
             </div>
           </DialogContent>
         </Dialog>
