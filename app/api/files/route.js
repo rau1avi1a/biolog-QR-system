@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { connectMongoDB } from '@/lib/index';
+import connectMongoDB from '@/lib/index';
 import Files from '@/models/Files';
 
 // List files and folders
