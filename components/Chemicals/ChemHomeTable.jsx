@@ -114,7 +114,7 @@ export function ChemicalTable({ data, onEditParent, onAddLot }) {
               onClick={(e) => e.stopPropagation()}
             >
               <DropdownMenuItem onClick={() => onEditParent(chemical)}>
-                Edit Parent
+                Edit Chemical
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onAddLot(chemical)}>
                 Add New Lot
@@ -198,7 +198,7 @@ export function ChemicalTable({ data, onEditParent, onAddLot }) {
                   colSpan={columns.length}
                   className="h-24 text-center"
                 >
-                  No results.
+                  Loading...
                 </TableCell>
               </TableRow>
             )}
