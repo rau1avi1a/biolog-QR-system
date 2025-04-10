@@ -1,6 +1,5 @@
 // app/chemicals/layout.js
 import { basicAuth } from "@/lib/auth";
-import NavBar from "@/components/NavBar";
 
 export default async function HomeLayout({ children }) {
 
@@ -8,7 +7,6 @@ export default async function HomeLayout({ children }) {
 
   return (
     <>
-      <NavBar user={user} />
       {children}
     </>
   );

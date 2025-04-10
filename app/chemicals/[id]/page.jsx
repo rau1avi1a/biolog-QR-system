@@ -76,7 +76,7 @@ export default function ChemicalDetail() {
       <Button
         variant="outline"
         className="mb-4"
-        onClick={() => router.push(`/`)}
+        onClick={() => router.push(`/home`)}
       >
         <ChevronLeft className="mr-2 h-4 w-4" />
         Back

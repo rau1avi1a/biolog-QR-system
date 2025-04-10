@@ -56,16 +56,45 @@ export default function ChemicalLotDetailsPage() {
       const chemData = await response.json();
       setChemical(chemData);
       
-      const foundLot = chemData.Lots.find(l => l._id === params.lotId);
-      setLot(foundLot);
+      // Fix: More robust lot finding that handles string/ObjectId differences
+      const foundLot = chemData.Lots.find(l => {
+        // Try multiple comparison methods
+        return (
+          l._id === params.lotId || // Direct comparison
+          l._id.toString() === params.lotId || // String comparison
+          l._id === params.lotId.toString() // Another string comparison variant
+        );
+      });
+      
+      // Log for debugging
+      console.log('Looking for lot ID:', params.lotId);
+      console.log('Available lot IDs:', chemData.Lots.map(l => l._id));
+      console.log('Found lot:', foundLot);
+      
+      if (!foundLot) {
+        // If still not found, try a case-insensitive search as a last resort
+        const foundLotCaseInsensitive = chemData.Lots.find(l => 
+          typeof l._id === 'string' && 
+          typeof params.lotId === 'string' && 
+          l._id.toLowerCase() === params.lotId.toLowerCase()
+        );
+        setLot(foundLotCaseInsensitive);
+        
+        if (!foundLotCaseInsensitive) {
+          console.error('Lot not found in chemical data');
+          throw new Error('Lot not found in chemical data');
+        }
+      } else {
+        setLot(foundLot);
+      }
     } catch (error) {
       console.error("Error:", error);
-      showToast("Error", "Failed to load data", "error");
+      showToast("Error", "Failed to load data: " + error.message, "error");
     } finally {
       setLoading(false);
     }
   }
-
+  
 // Updated handleTransaction function to improve error handling
 const handleTransaction = async () => {
   if (!quantity || isNaN(quantity) || parseFloat(quantity) <= 0) {
