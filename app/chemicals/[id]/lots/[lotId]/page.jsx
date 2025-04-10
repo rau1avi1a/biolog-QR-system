@@ -124,7 +124,7 @@ export default function ChemicalLotDetailsPage() {
       showToast("Error", "Please enter a valid quantity", "error");
       return;
     }
-
+  
     setProcessing(true);
     setError(null);
     
@@ -133,23 +133,30 @@ export default function ChemicalLotDetailsPage() {
       const updatedQuantity = transactionType === "subtract" 
         ? lot.Quantity - parsedQuantity
         : lot.Quantity + parsedQuantity;
-
+  
       if (updatedQuantity < 0) {
         showToast("Error", "Cannot subtract more than available quantity", "error");
         setProcessing(false);
         return;
       }
-
+  
+      // IMPORTANT: Fix the lotId by removing any "lot" prefix
+      const cleanLotId = params.lotId.replace(/^lot/, '');
+      
       console.log('Sending transaction:', {
-        endpoint: `/api/chemicals/${params.id}/lots/${params.lotId}`,
+        endpoint: `/api/chemicals/${params.id}/lots/${cleanLotId}`,
         method: 'PUT',
+        lotId: {
+          original: params.lotId,
+          cleaned: cleanLotId
+        },
         body: {
           Quantity: updatedQuantity,
           notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
         }
       });
-
-      const response = await fetch(`/api/chemicals/${params.id}/lots/${params.lotId}`, {
+  
+      const response = await fetch(`/api/chemicals/${params.id}/lots/${cleanLotId}`, {
         method: "PUT",
         headers: { 
           "Content-Type": "application/json"
@@ -159,7 +166,7 @@ export default function ChemicalLotDetailsPage() {
           notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
         }),
       });
-
+      
       // Handle non-OK responses with better error reporting
       if (!response.ok) {
         let errorMessage = `Error: ${response.status} ${response.statusText}`;
