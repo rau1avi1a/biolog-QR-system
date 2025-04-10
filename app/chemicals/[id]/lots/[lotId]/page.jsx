@@ -25,7 +25,8 @@ import {
   Loader2,
   AlertCircle,
   Check,
-  Download
+  Download,
+  Printer
 } from "lucide-react";
 
 export default function ChemicalLotDetailsPage() {
@@ -238,50 +239,127 @@ export default function ChemicalLotDetailsPage() {
     setDownloading(true);
     try {
       if (!qrRef.current) return;
-
+  
       // Get the SVG element
       const svgElement = qrRef.current.querySelector('svg');
       if (!svgElement) return;
-
-      // Create a canvas element
+  
+      // Create a canvas element with higher resolution
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      // Set canvas size for 1x1 inch at 300 DPI
-      canvas.width = 300;  // 1 inch at 300 DPI
-      canvas.height = 300; // 1 inch at 300 DPI
-
+      // Set canvas size for 1×1 inch at 600 DPI (much higher resolution for printing)
+      canvas.width = 600;  // 1 inch at 600 DPI
+      canvas.height = 600; // 1 inch at 600 DPI
+  
       // Create an image from the SVG
       const img = new Image();
       const svgData = new XMLSerializer().serializeToString(svgElement);
       const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
-
+  
       img.onload = () => {
         // Clear the canvas and draw the image
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         
-        // Convert canvas to blob
+        // Draw the image with a small margin to ensure it fits nicely on the label
+        const margin = canvas.width * 0.05; // 5% margin
+        ctx.drawImage(img, margin, margin, canvas.width - (margin * 2), canvas.height - (margin * 2));
+        
+        // Add a border around the QR code to make it more visible
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(margin - 1, margin - 1, canvas.width - (margin * 2) + 2, canvas.height - (margin * 2) + 2);
+        
+        // Convert canvas to blob with maximum quality
         canvas.toBlob((blob) => {
           // Create download link
           const link = document.createElement('a');
           link.href = URL.createObjectURL(blob);
           link.download = `QR_${chemical?.ChemicalName || 'chemical'}_Lot_${lot?.LotNumber || ''}.png`;
           link.click();
-
+  
           // Clean up
           URL.revokeObjectURL(link.href);
           URL.revokeObjectURL(url);
           setDownloading(false);
-        }, 'image/png');
+        }, 'image/png', 1.0); // Set quality to maximum (1.0)
       };
-
+  
       img.src = url;
     } catch (error) {
       console.error("Error downloading QR code:", error);
       showToast("Error", "Failed to download QR code", "error");
+      setDownloading(false);
+    }
+  };
+  
+  // Optional: New function to print QR code directly
+  const printQRCode = () => {
+    setDownloading(true);
+    try {
+      if (!qrRef.current) return;
+      
+      const svgElement = qrRef.current.querySelector('svg');
+      if (!svgElement) return;
+      
+      // Create a print window
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        alert('Please allow pop-ups to print QR codes');
+        setDownloading(false);
+        return;
+      }
+      
+      // Write print-optimized HTML
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Print QR Code - ${lot?.LotNumber || 'Lot'}</title>
+          <style>
+            @page {
+              size: 1in 1in;
+              margin: 0;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: 1in;
+              height: 1in;
+            }
+            .qr-container {
+              width: 0.95in;
+              height: 0.95in;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              background: white;
+              border: 1px solid #ddd;
+            }
+            svg {
+              width: 0.9in !important;
+              height: 0.9in !important;
+            }
+          </style>
+        </head>
+        <body onload="setTimeout(function() { window.print(); window.close(); }, 500)">
+          <div class="qr-container">
+            ${svgElement.outerHTML}
+          </div>
+        </body>
+        </html>
+      `);
+      
+      printWindow.document.close();
+      setDownloading(false);
+    } catch (error) {
+      console.error("Error printing QR code:", error);
+      showToast("Error", "Failed to print QR code", "error");
       setDownloading(false);
     }
   };
@@ -441,18 +519,23 @@ export default function ChemicalLotDetailsPage() {
         )}
 
         {/* QR Dialog */}
+        {/* QR Dialog - Enhanced for better printing */}
         <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>QR Code</DialogTitle>
+              <DialogTitle>QR Code for {lot?.LotNumber}</DialogTitle>
             </DialogHeader>
             <div className="flex flex-col items-center gap-4" ref={qrRef}>
-              <QRCodeSVG
-                value={`${window.location.href}`}
-                size={200}
-                level="H"
-                includeMargin
-              />
+              <div className="border border-gray-200 p-2 bg-white">
+                <QRCodeSVG
+                  value={`${window.location.href}`}
+                  size={250} // Larger size for better visibility
+                  level="H"  // High error correction level
+                  includeMargin={true}
+                  bgColor={"#FFFFFF"}
+                  fgColor={"#000000"}
+                />
+              </div>
               <div className="flex gap-2 w-full">
                 <Button 
                   variant="outline" 
@@ -473,10 +556,20 @@ export default function ChemicalLotDetailsPage() {
                   )}
                   Download
                 </Button>
+                <Button 
+                  variant="outline"
+                  className="flex-1"
+                  onClick={printQRCode}
+                  disabled={downloading}
+                >
+                  <Printer className="h-4 w-4 mr-2" />
+                  Print
+                </Button>
               </div>
-              <p className="text-xs text-gray-500 text-center">
-                QR code sized for 1×1 inch printing
-              </p>
+              <div className="text-xs text-gray-500 space-y-1 text-center">
+                <p>QR code optimized for 1×1 inch labels</p>
+                <p>For best results, print at actual size (100%) without scaling</p>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
