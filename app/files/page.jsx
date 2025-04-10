@@ -10,37 +10,36 @@ import {
   CheckCircleIcon,
   ClockIcon,
   PencilIcon,
+  Upload,
+  FolderPlus,
 } from "lucide-react";
-import PDFAnnotator from "@/components/PDFAnnotator";
+import PDFAnnotator from "@/components/PDFEditor";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
-/**
- * This page:
- * - Lists folders/files from Dropbox
- * - Lets you select a file to display in <PDFAnnotator>
- * - Keeps a dictionary { [filePath]: annotationArray } so each file has its own scribbles
- * - "Save Draft" => Moves the file to In Progress
- * - "Submit" => Flatten scribbles into final PDF in Completed + Audit
- */
 export default function FilesPage() {
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("production");
+  const [currentPath, setCurrentPath] = useState("");
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isNewFolderDialogOpen, setIsNewFolderDialogOpen] = useState(false);
 
   // Dictionary of annotations keyed by file path
   const [annotationsByFile, setAnnotationsByFile] = useState({});
 
   useEffect(() => {
-    fetchFiles(activeTab);
-  }, [activeTab]);
+    fetchFiles(currentPath);
+  }, [currentPath, activeTab]);
 
-  async function fetchFiles(folder) {
+  async function fetchFiles(path) {
     try {
       setLoading(true);
-      const res = await fetch(`/api/dropbox?folder=${encodeURIComponent(folder)}`);
+      const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
       if (!res.ok) throw new Error("Failed to fetch files");
       const data = await res.json();
-      setFiles(data);
+      setFiles(data.items);
     } catch (error) {
       console.error("Error fetching files:", error);
     } finally {
@@ -49,33 +48,81 @@ export default function FilesPage() {
   }
 
   async function handleFileSelect(file) {
-    if (file[".tag"] === "folder") {
-      // If folder, load that folder's contents
-      await fetchFiles(file.path_lower);
+    if (file.type === "folder") {
+      setCurrentPath(currentPath ? `${currentPath}/${file.name}` : file.name);
       return;
     }
 
-    // If it's a file, fetch a temporary link to display the PDF
     try {
-      const tempRes = await fetch(
-        `/api/dropbox/temp?path=${encodeURIComponent(file.path_lower)}`
-      );
-      if (!tempRes.ok) throw new Error("Failed to get temporary link");
-      const tempData = await tempRes.json();
+      // Fetch the full file with PDF data
+      const res = await fetch(`/api/files?fileId=${file._id}`);
+      if (!res.ok) throw new Error("Failed to fetch file");
+      const data = await res.json();
+      
+      // Convert Buffer to Blob
+      const buffer = Buffer.from(data.file.data);
+      const blob = new Blob([buffer], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
 
       setSelectedFile({
         ...file,
-        content: tempData.link, // direct link for PDFAnnotator
+        content: url,
       });
     } catch (err) {
-      console.error("Error getting temp link:", err);
+      console.error("Error getting file:", err);
     }
   }
 
-  /**
-   * Called by <PDFAnnotator> whenever user finishes a stroke or modifies annotations.
-   * We store them in a dictionary keyed by file path.
-   */
+  async function handleFileUpload(e) {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    try {
+      const formData = new FormData();
+      files.forEach(file => {
+        formData.append('files', file);
+      });
+      formData.append('path', currentPath);
+      formData.append('operation', 'upload');
+
+      const response = await fetch('/api/files', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+      fetchFiles(currentPath);
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('Failed to upload files');
+    }
+  }
+
+  async function handleCreateFolder() {
+    if (!newFolderName.trim()) return;
+
+    try {
+      const formData = new FormData();
+      formData.append('operation', 'createFolder');
+      formData.append('path', currentPath);
+      formData.append('name', newFolderName);
+
+      const response = await fetch('/api/files', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Failed to create folder');
+
+      setNewFolderName('');
+      setIsNewFolderDialogOpen(false);
+      fetchFiles(currentPath);
+    } catch (error) {
+      console.error('Create folder error:', error);
+      alert('Failed to create folder');
+    }
+  }
+
   function handleAnnotationsChange(filePath, newAnnotations) {
     setAnnotationsByFile((prev) => ({
       ...prev,
@@ -83,53 +130,29 @@ export default function FilesPage() {
     }));
   }
 
-  /**
-   * Called by <PDFAnnotator> when user clicks "Save Draft" or "Submit"
-   */
   async function handleSaveAnnotations(annotations, status) {
     if (!selectedFile) return;
 
-    const filePath = selectedFile.path_lower;
+    try {
+      // Create a new version of the PDF with annotations
+      const formData = new FormData();
+      formData.append('operation', 'upload');
+      formData.append('path', status); // Use status as the path ('inProgress' or 'review')
+      formData.append('files', annotations); // This should be your annotated PDF file
+      
+      const response = await fetch('/api/files', {
+        method: 'POST',
+        body: formData,
+      });
 
-    if (status === "inProgress") {
-      // Move from current path -> In Progress
-      try {
-        const formData = new FormData();
-        formData.append("currentPath", filePath); // from
-        formData.append("targetFolder", "inProgress"); // to
-        formData.append("filename", selectedFile.name);
-
-        const moveRes = await fetch("/api/dropbox", {
-          method: "PUT",
-          body: formData,
-        });
-        if (!moveRes.ok) {
-          const err = await moveRes.json();
-          throw new Error(err.message || "Failed to move file to In Progress");
-        }
-        fetchFiles(activeTab);
-      } catch (err) {
-        console.error("Save Draft error:", err);
-      }
-    } else if (status === "review") {
-      // Flatten scribbles => Completed + Audit
-      try {
-        const patchRes = await fetch("/api/dropbox", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            dropboxPath: filePath,
-            annotations,
-          }),
-        });
-        if (!patchRes.ok) {
-          const e = await patchRes.json();
-          throw new Error(e.message || "Failed to flatten PDF");
-        }
-        fetchFiles(activeTab);
-      } catch (error) {
-        console.error("Submit error:", error);
-      }
+      if (!response.ok) throw new Error('Failed to save annotated PDF');
+      
+      // Refresh the current directory
+      fetchFiles(currentPath);
+      setSelectedFile(null);
+    } catch (error) {
+      console.error('Save annotations error:', error);
+      alert('Failed to save annotations');
     }
   }
 
@@ -159,8 +182,43 @@ export default function FilesPage() {
           <div className="grid md:grid-cols-3 gap-4">
             {/* LEFT: file list */}
             <Card className="md:col-span-1">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle>Files</CardTitle>
+                <div className="flex space-x-2">
+                  <Dialog open={isNewFolderDialogOpen} onOpenChange={setIsNewFolderDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="icon">
+                        <FolderPlus className="h-4 w-4" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Create New Folder</DialogTitle>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <Input
+                          placeholder="Folder name"
+                          value={newFolderName}
+                          onChange={(e) => setNewFolderName(e.target.value)}
+                        />
+                        <Button onClick={handleCreateFolder}>Create</Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                  
+                  <label>
+                    <Button variant="outline" size="icon">
+                      <Upload className="h-4 w-4" />
+                    </Button>
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={handleFileUpload}
+                      multiple
+                      accept=".pdf"
+                    />
+                  </label>
+                </div>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -169,14 +227,27 @@ export default function FilesPage() {
                   </div>
                 ) : (
                   <div className="space-y-2">
+                    {currentPath && (
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start"
+                        onClick={() => {
+                          const newPath = currentPath.split('/').slice(0, -1).join('/');
+                          setCurrentPath(newPath);
+                        }}
+                      >
+                        <FolderIcon className="mr-2 h-4 w-4" />
+                        ..
+                      </Button>
+                    )}
                     {files.map((file) => (
                       <Button
-                        key={file.id}
+                        key={file._id}
                         variant="ghost"
                         className="w-full justify-start"
                         onClick={() => handleFileSelect(file)}
                       >
-                        {file[".tag"] === "folder" ? (
+                        {file.type === "folder" ? (
                           <FolderIcon className="mr-2 h-4 w-4" />
                         ) : (
                           <FileIcon className="mr-2 h-4 w-4" />
@@ -200,11 +271,9 @@ export default function FilesPage() {
                 {selectedFile ? (
                   <PDFAnnotator
                     file={selectedFile}
-                    // Provide any saved annotations for this file
-                    initialAnnotations={annotationsByFile[selectedFile.path_lower] || []}
-                    // Called once per stroke, so no infinite loop
+                    initialAnnotations={annotationsByFile[selectedFile._id] || []}
                     onAnnotationsChange={(anns) =>
-                      handleAnnotationsChange(selectedFile.path_lower, anns)
+                      handleAnnotationsChange(selectedFile._id, anns)
                     }
                     onSave={handleSaveAnnotations}
                   />
