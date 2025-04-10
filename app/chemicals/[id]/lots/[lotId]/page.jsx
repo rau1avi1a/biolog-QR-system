@@ -42,140 +42,186 @@ export default function ChemicalLotDetailsPage() {
   const [toast, setToast] = useState({ open: false, title: "", message: "", type: "success" });
   const qrRef = useRef(null);
   const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchData();
   }, [params?.id, params?.lotId]);
 
+  // Helper function to safely compare ObjectIds or their string representations
+  function isSameId(id1, id2) {
+    if (!id1 || !id2) return false;
+    
+    // Try different comparison methods
+    return (
+      id1 === id2 ||
+      id1.toString() === id2.toString() ||
+      id1 === id2.toString() ||
+      id1.toString() === id2
+    );
+  }
+
   async function fetchData() {
-    if (!params?.id || !params?.lotId) return;
+    if (!params?.id || !params?.lotId) {
+      setError("Missing chemical ID or lot ID parameters");
+      setLoading(false);
+      return;
+    }
     
     try {
+      console.log(`Fetching chemical data for ID: ${params.id}`);
       const response = await fetch(`/api/chemicals/${params.id}`);
-      if (!response.ok) throw new Error("Failed to fetch chemical");
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        console.error(`Failed to fetch chemical: ${response.status} ${errorText}`);
+        throw new Error(`Failed to fetch chemical: ${response.status}`);
+      }
+      
       const chemData = await response.json();
+      console.log("Chemical data received:", chemData.ChemicalName);
       setChemical(chemData);
       
-      // Fix: More robust lot finding that handles string/ObjectId differences
-      const foundLot = chemData.Lots.find(l => {
-        // Try multiple comparison methods
-        return (
-          l._id === params.lotId || // Direct comparison
-          l._id.toString() === params.lotId || // String comparison
-          l._id === params.lotId.toString() // Another string comparison variant
-        );
-      });
+      // Improved lot finding logic
+      console.log("Looking for lot ID:", params.lotId);
+      console.log("Available lot IDs:", chemData.Lots.map(l => l._id));
       
-      // Log for debugging
-      console.log('Looking for lot ID:', params.lotId);
-      console.log('Available lot IDs:', chemData.Lots.map(l => l._id));
-      console.log('Found lot:', foundLot);
+      // Try multiple methods to find the lot
+      let foundLot = null;
+      
+      // Method 1: Direct comparison
+      foundLot = chemData.Lots.find(l => l._id === params.lotId);
+      
+      // Method 2: String comparison
+      if (!foundLot) {
+        foundLot = chemData.Lots.find(l => l._id.toString() === params.lotId.toString());
+      }
+      
+      // Method 3: Various string comparisons
+      if (!foundLot) {
+        foundLot = chemData.Lots.find(l => isSameId(l._id, params.lotId));
+      }
+      
+      console.log("Found lot:", foundLot);
       
       if (!foundLot) {
-        // If still not found, try a case-insensitive search as a last resort
-        const foundLotCaseInsensitive = chemData.Lots.find(l => 
-          typeof l._id === 'string' && 
-          typeof params.lotId === 'string' && 
-          l._id.toLowerCase() === params.lotId.toLowerCase()
-        );
-        setLot(foundLotCaseInsensitive);
-        
-        if (!foundLotCaseInsensitive) {
-          console.error('Lot not found in chemical data');
-          throw new Error('Lot not found in chemical data');
-        }
-      } else {
-        setLot(foundLot);
+        throw new Error(`Lot with ID ${params.lotId} not found in chemical data`);
       }
+      
+      setLot(foundLot);
     } catch (error) {
       console.error("Error:", error);
-      showToast("Error", "Failed to load data: " + error.message, "error");
+      setError(error.message || "Failed to load data");
+      showToast("Error", error.message || "Failed to load data", "error");
     } finally {
       setLoading(false);
     }
   }
-  
-// Updated handleTransaction function to improve error handling
-const handleTransaction = async () => {
-  if (!quantity || isNaN(quantity) || parseFloat(quantity) <= 0) {
-    showToast("Error", "Please enter a valid quantity", "error");
-    return;
-  }
 
-  setProcessing(true);
-  try {
-    const parsedQuantity = parseFloat(quantity);
-    const updatedQuantity = transactionType === "subtract" 
-      ? lot.Quantity - parsedQuantity
-      : lot.Quantity + parsedQuantity;
-
-    if (updatedQuantity < 0) {
-      showToast("Error", "Cannot subtract more than available quantity", "error");
-      setProcessing(false);
+  // Updated handleTransaction function with improved error handling
+  const handleTransaction = async () => {
+    if (!quantity || isNaN(quantity) || parseFloat(quantity) <= 0) {
+      showToast("Error", "Please enter a valid quantity", "error");
       return;
     }
 
-    console.log('Sending transaction:', {
-      endpoint: `/api/chemicals/${params.id}/lots/${params.lotId}`,
-      method: 'PUT',
-      body: {
-        Quantity: updatedQuantity,
-        notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
+    setProcessing(true);
+    setError(null);
+    
+    try {
+      const parsedQuantity = parseFloat(quantity);
+      const updatedQuantity = transactionType === "subtract" 
+        ? lot.Quantity - parsedQuantity
+        : lot.Quantity + parsedQuantity;
+
+      if (updatedQuantity < 0) {
+        showToast("Error", "Cannot subtract more than available quantity", "error");
+        setProcessing(false);
+        return;
       }
-    });
 
-    const response = await fetch(`/api/chemicals/${params.id}/lots/${params.lotId}`, {
-      method: "PUT",
-      headers: { 
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ 
-        Quantity: updatedQuantity,
-        notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
-      }),
-    });
-
-    // Handle non-OK responses better
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('Transaction failed:', {
-        status: response.status,
-        statusText: response.statusText,
-        errorData
+      console.log('Sending transaction:', {
+        endpoint: `/api/chemicals/${params.id}/lots/${params.lotId}`,
+        method: 'PUT',
+        body: {
+          Quantity: updatedQuantity,
+          notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
+        }
       });
-      throw new Error(errorData.message || `Error: ${response.status} ${response.statusText}`);
-    }
 
-    const updatedChemical = await response.json();
-    
-    if (!updatedChemical || !updatedChemical.Lots) {
-      console.error('Invalid response data:', updatedChemical);
-      throw new Error('Invalid response data received');
+      const response = await fetch(`/api/chemicals/${params.id}/lots/${params.lotId}`, {
+        method: "PUT",
+        headers: { 
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ 
+          Quantity: updatedQuantity,
+          notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
+        }),
+      });
+
+      // Handle non-OK responses with better error reporting
+      if (!response.ok) {
+        let errorMessage = `Error: ${response.status} ${response.statusText}`;
+        
+        try {
+          const errorData = await response.json();
+          console.error('Transaction failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorData
+          });
+          
+          errorMessage = errorData.message || errorMessage;
+          
+          // If we have detailed error data, show it for debugging
+          if (errorData.lotIdRequested && errorData.availableLots) {
+            console.error('Lot ID mismatch:', {
+              requested: errorData.lotIdRequested,
+              available: errorData.availableLots
+            });
+          }
+        } catch (e) {
+          console.error('Could not parse error response', e);
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const updatedChemical = await response.json();
+      
+      if (!updatedChemical || !updatedChemical.Lots) {
+        console.error('Invalid response data:', updatedChemical);
+        throw new Error('Invalid response data received');
+      }
+      
+      setChemical(updatedChemical);
+      
+      // Use the improved lot finding method for consistency
+      const updatedLot = updatedChemical.Lots.find(l => isSameId(l._id, params.lotId));
+      
+      if (!updatedLot) {
+        console.error('Updated lot not found in response');
+        throw new Error('Updated lot not found in response');
+      }
+      
+      setLot(updatedLot);
+      setQuantity("");
+      showToast(
+        "Success",
+        `Successfully ${transactionType === 'add' ? 'added' : 'removed'} ${quantity} units`,
+        "success"
+      );
+    } catch (error) {
+      console.error("Transaction error:", error);
+      setError(error.message || "Failed to update quantity");
+      showToast("Error", error.message || "Failed to update quantity", "error");
+    } finally {
+      setProcessing(false);
+      setAlertOpen(false);
     }
-    
-    setChemical(updatedChemical);
-    
-    const updatedLot = updatedChemical.Lots.find(l => l._id === params.lotId);
-    if (!updatedLot) {
-      console.error('Updated lot not found in response');
-      throw new Error('Updated lot not found in response');
-    }
-    
-    setLot(updatedLot);
-    setQuantity("");
-    showToast(
-      "Success",
-      `Successfully ${transactionType === 'add' ? 'added' : 'removed'} ${quantity} units`,
-      "success"
-    );
-  } catch (error) {
-    console.error("Transaction error:", error);
-    showToast("Error", error.message || "Failed to update quantity", "error");
-  } finally {
-    setProcessing(false);
-    setAlertOpen(false);
-  }
-};
+  };
+
   const showToast = (title, message, type = "success") => {
     setToast({ open: true, title, message, type });
   };
@@ -241,6 +287,34 @@ const handleTransaction = async () => {
     );
   }
 
+  if (error && !lot) {
+    return (
+      <div className="container max-w-md mx-auto p-4">
+        <Button
+          variant="ghost"
+          onClick={() => router.back()}
+          className="mb-4"
+        >
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back
+        </Button>
+        
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center gap-4 py-8">
+              <AlertCircle className="h-12 w-12 text-red-500" />
+              <h1 className="text-xl font-semibold text-center">Error Loading Lot</h1>
+              <p className="text-center text-gray-600">{error}</p>
+              <Button onClick={() => fetchData()}>
+                Try Again
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <ToastProvider>
       <div className="container max-w-md mx-auto p-4">
@@ -291,6 +365,16 @@ const handleTransaction = async () => {
             <div className="space-y-4">
               <h2 className="text-lg font-medium">Update Quantity</h2>
               
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertCircle className="h-4 w-4" />
+                    <p className="font-medium">Error</p>
+                  </div>
+                  <p>{error}</p>
+                </div>
+              )}
+              
               <div className="flex gap-2">
                 <Button
                   variant={transactionType === "subtract" ? "default" : "outline"}
@@ -330,6 +414,24 @@ const handleTransaction = async () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Debug Info Card (only in development) */}
+        {process.env.NODE_ENV === 'development' && (
+          <Card className="mt-6">
+            <CardContent className="pt-6">
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium">Debug Info</h3>
+                <div className="text-xs text-gray-500 space-y-1">
+                  <p>Chemical ID: {params.id}</p>
+                  <p>Lot ID: {params.lotId}</p>
+                  <p>Lot ID Type: {typeof params.lotId}</p>
+                  <p>Found Lot ID: {lot?._id}</p>
+                  <p>Found Lot ID Type: {lot?._id ? typeof lot._id : 'N/A'}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* QR Dialog */}
         <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>

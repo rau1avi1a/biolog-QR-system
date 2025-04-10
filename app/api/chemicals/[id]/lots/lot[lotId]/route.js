@@ -19,6 +19,7 @@ async function updateLot(request, context) {
     const user = context.user;
     
     console.log('Update lot request received:', { id, lotId });
+    console.log('Params type:', typeof params.id, typeof params.lotId);
     
     await connectMongoDB();
     console.log('MongoDB connected');
@@ -37,6 +38,12 @@ async function updateLot(request, context) {
     try {
       chem = await Chemical.findById(id);
       console.log('Chemical found:', chem ? 'yes' : 'no');
+      
+      if (chem) {
+        console.log('Chemical ID:', chem._id.toString());
+        console.log('Available lots:', chem.Lots.length);
+        console.log('Lot IDs:', chem.Lots.map(l => typeof l._id + ': ' + l._id.toString()));
+      }
     } catch (err) {
       console.error('Error finding chemical:', err);
       return NextResponse.json({ message: "Error finding chemical" }, { status: 500 });
@@ -46,44 +53,73 @@ async function updateLot(request, context) {
       return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    // IMPORTANT FIX: Find lot using alternative method that works in all environments
-    let lot;
+    // IMPROVED LOT FINDING
+    let lot = null;
     try {
-      // Try multiple approaches to find the lot
-      console.log('Finding lot with ID:', lotId);
-      console.log('Lots available:', chem.Lots.length);
+      // Log for debugging
+      console.log('Looking for lot with ID (raw):', lotId);
       
-      // Option 1: Using id() method
+      // APPROACH 1: Try direct subdocument access with id()
       lot = chem.Lots.id(lotId);
+      console.log('Approach 1 result:', lot ? 'found' : 'not found');
       
-      // Option 2: If id() fails, try manual find with toString()
+      // APPROACH 2: Try manual find with direct comparison
       if (!lot) {
-        console.log('id() method failed, trying alternative lookup');
-        lot = chem.Lots.find(l => l._id.toString() === lotId);
+        lot = chem.Lots.find(l => l._id.toString() === lotId.toString());
+        console.log('Approach 2 result:', lot ? 'found' : 'not found');
       }
       
-      // Option 3: Try with ObjectId conversion
+      // APPROACH 3: Try with various string comparisons
       if (!lot) {
-        console.log('Alternative lookup failed, trying with ObjectId conversion');
+        for (const l of chem.Lots) {
+          if (l._id.toString() === lotId || 
+              l._id === lotId || 
+              String(l._id) === String(lotId)) {
+            lot = l;
+            console.log('Approach 3 found match');
+            break;
+          }
+        }
+      }
+      
+      // APPROACH 4: Try with ObjectId
+      if (!lot) {
         try {
           const objectId = new mongoose.Types.ObjectId(lotId);
           lot = chem.Lots.find(l => l._id.equals(objectId));
+          console.log('Approach 4 result:', lot ? 'found' : 'not found');
         } catch (e) {
           console.error('ObjectId conversion failed:', e);
         }
       }
       
-      console.log('Lot found:', lot ? 'yes' : 'no');
+      // APPROACH 5: Last resort - try case-insensitive if strings
+      if (!lot) {
+        lot = chem.Lots.find(l => 
+          l._id.toString().toLowerCase() === lotId.toString().toLowerCase()
+        );
+        console.log('Approach 5 result:', lot ? 'found' : 'not found');
+      }
       
-      // Log all lot IDs for debugging
-      console.log('Available lot IDs:', chem.Lots.map(l => l._id.toString()));
+      // Final check
+      console.log('Final lot finding result:', lot ? 'found' : 'not found');
     } catch (err) {
       console.error('Error finding lot:', err);
-      return NextResponse.json({ message: "Error finding lot" }, { status: 500 });
+      return NextResponse.json({ 
+        message: "Error finding lot", 
+        error: err.message,
+        lotId: lotId,
+        availableLots: chem.Lots.map(l => l._id.toString())
+      }, { status: 500 });
     }
 
     if (!lot) {
-      return NextResponse.json({ message: "Lot not found" }, { status: 404 });
+      return NextResponse.json({ 
+        message: "Lot not found", 
+        lotIdRequested: lotId,
+        availableLots: chem.Lots.map(l => l._id.toString()),
+        chemicalId: id
+      }, { status: 404 });
     }
 
     // Store old values for audit
@@ -140,7 +176,10 @@ async function updateLot(request, context) {
     return NextResponse.json(doc, { status: 200 });
   } catch (err) {
     console.error('Error updating lot:', err);
-    return NextResponse.json({ message: err.message || "Internal server error" }, { status: 500 });
+    return NextResponse.json({ 
+      message: err.message || "Internal server error",
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    }, { status: 500 });
   }
 }
 
@@ -148,44 +187,113 @@ async function updateLot(request, context) {
  * DELETE handler for removing a lot
  */
 async function deleteLot(request, context) {
-  // [DELETE function remains unchanged]
   try {
     const params = await Promise.resolve(context.params);
     const { id, lotId } = params;
     const user = context.user;
     
+    console.log('Delete lot request received:', { id, lotId });
+    
     await connectMongoDB();
+    console.log('MongoDB connected');
 
     const chem = await Chemical.findById(id);
     if (!chem) {
+      console.log('Chemical not found');
       return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    const lot = chem.Lots.id(lotId);
+    // IMPROVED LOT FINDING - same approach as in updateLot
+    let lot = null;
+    
+    // APPROACH 1: Try direct subdocument access with id()
+    lot = chem.Lots.id(lotId);
+    console.log('Approach 1 result:', lot ? 'found' : 'not found');
+    
+    // APPROACH 2: Try manual find with direct comparison
     if (!lot) {
-      return NextResponse.json({ message: "Lot not found" }, { status: 404 });
+      lot = chem.Lots.find(l => l._id.toString() === lotId.toString());
+      console.log('Approach 2 result:', lot ? 'found' : 'not found');
+    }
+    
+    // APPROACH 3: Try with various string comparisons
+    if (!lot) {
+      for (const l of chem.Lots) {
+        if (l._id.toString() === lotId || 
+            l._id === lotId || 
+            String(l._id) === String(lotId)) {
+          lot = l;
+          console.log('Approach 3 found match');
+          break;
+        }
+      }
+    }
+    
+    // APPROACH 4: Try with ObjectId
+    if (!lot) {
+      try {
+        const objectId = new mongoose.Types.ObjectId(lotId);
+        lot = chem.Lots.find(l => l._id.equals(objectId));
+        console.log('Approach 4 result:', lot ? 'found' : 'not found');
+      } catch (e) {
+        console.error('ObjectId conversion failed:', e);
+      }
+    }
+    
+    // APPROACH 5: Last resort - try case-insensitive if strings
+    if (!lot) {
+      lot = chem.Lots.find(l => 
+        l._id.toString().toLowerCase() === lotId.toString().toLowerCase()
+      );
+      console.log('Approach 5 result:', lot ? 'found' : 'not found');
+    }
+
+    if (!lot) {
+      console.log('Lot not found. Available lots:', chem.Lots.map(l => l._id.toString()));
+      return NextResponse.json({ 
+        message: "Lot not found",
+        lotIdRequested: lotId,
+        availableLots: chem.Lots.map(l => l._id.toString()) 
+      }, { status: 404 });
     }
 
     // Create audit entry for removal
-    await ChemicalAudit.logUsage({
-      chemical: chem,
-      lotNumber: lot.LotNumber,
-      quantityUsed: lot.Quantity,
-      quantityRemaining: 0,
-      user,
-      notes: 'Lot removed',
-      action: 'REMOVE'
-    });
+    try {
+      await ChemicalAudit.logUsage({
+        chemical: chem,
+        lotNumber: lot.LotNumber,
+        quantityUsed: lot.Quantity,
+        quantityRemaining: 0,
+        user,
+        notes: 'Lot removed',
+        action: 'REMOVE'
+      });
+      console.log('Audit entry created for lot removal');
+    } catch (err) {
+      console.error('Error creating audit entry for removal:', err);
+      // Continue even if audit fails
+    }
 
-    // Remove the lot
-    chem.Lots = chem.Lots.filter((l) => l._id.toString() !== lotId);
+    // Remove the lot - IMPROVED: use filter with multiple comparison methods
+    chem.Lots = chem.Lots.filter((l) => {
+      return !(
+        l._id.toString() === lotId.toString() ||
+        l._id === lotId ||
+        String(l._id) === String(lotId)
+      );
+    });
+    
     await chem.save();
+    console.log('Chemical saved after lot removal');
 
     const doc = chem.toObject();
     return NextResponse.json(doc, { status: 200 });
   } catch (err) {
     console.error('Error deleting lot:', err);
-    return NextResponse.json({ message: err.message }, { status: 500 });
+    return NextResponse.json({ 
+      message: err.message || "Internal server error",
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    }, { status: 500 });
   }
 }
 
