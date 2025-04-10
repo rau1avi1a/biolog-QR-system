@@ -15,12 +15,20 @@ export const dynamic = "force-dynamic";
 async function updateLot(request, context) {
   try {
     const params = context.params || {};
-    const { id, lotId } = params;
+    let { id, lotId } = params;
     const user = context.user;
     
-    console.log('Update lot request received:', { id, lotId });
-    console.log('Params type:', typeof params.id, typeof params.lotId);
+    console.log('Update lot request received (raw params):', { id, lotId });
     
+    // IMPORTANT: Clean the lotId by removing any "lot" prefix
+    if (lotId && lotId.startsWith('lot')) {
+      lotId = lotId.replace(/^lot/, '');
+      console.log('Cleaned lot ID by removing "lot" prefix:', lotId);
+    }
+    
+    console.log('Using cleaned params:', { id, lotId });
+    
+    // Connect to MongoDB
     await connectMongoDB();
     console.log('MongoDB connected');
 
