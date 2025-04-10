@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata = {
   title: "biolog",
-  description: "Minimal global layout",
+  description: "Biolog MFG",
 };
 
 export default function RootLayout({ children }) {
