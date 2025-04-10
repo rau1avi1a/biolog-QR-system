@@ -35,25 +35,52 @@ export default function ChemAddLotDialog({
   async function handleSave() {
     if (!chemicalId) return
     try {
-      const res = await fetch(`/api/chemicals/${chemicalId}/lots`, {
+      // First validate the inputs
+      if (!formValues.LotNumber.trim()) {
+        alert("Please enter a Lot Number");
+        return;
+      }
+      
+      if (!formValues.Quantity || isNaN(parseFloat(formValues.Quantity)) || parseFloat(formValues.Quantity) <= 0) {
+        alert("Please enter a valid Quantity");
+        return;
+      }
+      
+      // Clean the chemical ID by removing any potential prefix
+      const cleanChemicalId = chemicalId.replace(/^chem/, '');
+      
+      console.log('Adding new lot:', {
+        endpoint: `/api/chemicals/${cleanChemicalId}/lots`,
+        data: {
+          LotNumber: formValues.LotNumber,
+          Quantity: parseFloat(formValues.Quantity) || 0
+        }
+      });
+      
+      const res = await fetch(`/api/chemicals/${cleanChemicalId}/lots`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           LotNumber: formValues.LotNumber,
-          Quantity: parseInt(formValues.Quantity, 10) || 0
+          Quantity: parseFloat(formValues.Quantity) || 0
           // ExpirationDate: formValues.ExpirationDate || null
         })
       })
-      if (!res.ok) throw new Error("Failed to add lot")
-      const updatedDoc = await res.json()
-      onLotAdded(updatedDoc)
-      onClose()
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to add lot");
+      }
+      
+      const updatedDoc = await res.json();
+      onLotAdded(updatedDoc);
+      onClose();
     } catch (err) {
-      console.error(err)
-      alert(err.message)
+      console.error("Error adding lot:", err);
+      alert(err.message || "Failed to add lot. Please try again.");
     }
   }
-
+  
   function handleChange(e) {
     setFormValues({ ...formValues, [e.target.name]: e.target.value })
   }

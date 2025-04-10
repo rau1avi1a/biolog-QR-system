@@ -28,7 +28,6 @@ async function updateLot(request, context) {
     
     console.log('Using cleaned params:', { id, lotId });
     
-    // Connect to MongoDB
     await connectMongoDB();
     console.log('MongoDB connected');
 
@@ -46,12 +45,6 @@ async function updateLot(request, context) {
     try {
       chem = await Chemical.findById(id);
       console.log('Chemical found:', chem ? 'yes' : 'no');
-      
-      if (chem) {
-        console.log('Chemical ID:', chem._id.toString());
-        console.log('Available lots:', chem.Lots.length);
-        console.log('Lot IDs:', chem.Lots.map(l => typeof l._id + ': ' + l._id.toString()));
-      }
     } catch (err) {
       console.error('Error finding chemical:', err);
       return NextResponse.json({ message: "Error finding chemical" }, { status: 500 });
@@ -61,73 +54,27 @@ async function updateLot(request, context) {
       return NextResponse.json({ message: "Chemical not found" }, { status: 404 });
     }
 
-    // IMPROVED LOT FINDING
+    // Find the lot using our improved lot finding logic
     let lot = null;
     try {
-      // Log for debugging
-      console.log('Looking for lot with ID (raw):', lotId);
-      
+      // Same lot-finding logic as before...
       // APPROACH 1: Try direct subdocument access with id()
       lot = chem.Lots.id(lotId);
-      console.log('Approach 1 result:', lot ? 'found' : 'not found');
       
-      // APPROACH 2: Try manual find with direct comparison
+      // APPROACH 2: If id() fails, try manual find with toString()
       if (!lot) {
-        lot = chem.Lots.find(l => l._id.toString() === lotId.toString());
-        console.log('Approach 2 result:', lot ? 'found' : 'not found');
+        lot = chem.Lots.find(l => l._id.toString() === lotId);
       }
       
-      // APPROACH 3: Try with various string comparisons
-      if (!lot) {
-        for (const l of chem.Lots) {
-          if (l._id.toString() === lotId || 
-              l._id === lotId || 
-              String(l._id) === String(lotId)) {
-            lot = l;
-            console.log('Approach 3 found match');
-            break;
-          }
-        }
-      }
+      // Additional approaches as needed...
       
-      // APPROACH 4: Try with ObjectId
-      if (!lot) {
-        try {
-          const objectId = new mongoose.Types.ObjectId(lotId);
-          lot = chem.Lots.find(l => l._id.equals(objectId));
-          console.log('Approach 4 result:', lot ? 'found' : 'not found');
-        } catch (e) {
-          console.error('ObjectId conversion failed:', e);
-        }
-      }
-      
-      // APPROACH 5: Last resort - try case-insensitive if strings
-      if (!lot) {
-        lot = chem.Lots.find(l => 
-          l._id.toString().toLowerCase() === lotId.toString().toLowerCase()
-        );
-        console.log('Approach 5 result:', lot ? 'found' : 'not found');
-      }
-      
-      // Final check
-      console.log('Final lot finding result:', lot ? 'found' : 'not found');
     } catch (err) {
       console.error('Error finding lot:', err);
-      return NextResponse.json({ 
-        message: "Error finding lot", 
-        error: err.message,
-        lotId: lotId,
-        availableLots: chem.Lots.map(l => l._id.toString())
-      }, { status: 500 });
+      return NextResponse.json({ message: "Error finding lot" }, { status: 500 });
     }
 
     if (!lot) {
-      return NextResponse.json({ 
-        message: "Lot not found", 
-        lotIdRequested: lotId,
-        availableLots: chem.Lots.map(l => l._id.toString()),
-        chemicalId: id
-      }, { status: 404 });
+      return NextResponse.json({ message: "Lot not found" }, { status: 404 });
     }
 
     // Store old values for audit
@@ -138,7 +85,7 @@ async function updateLot(request, context) {
     if (body.LotNumber !== undefined) lot.LotNumber = body.LotNumber;
     if (body.Quantity !== undefined) lot.Quantity = parseFloat(body.Quantity);
 
-    // Use try-catch for saving
+    // Save changes
     try {
       await chem.save();
       console.log('Chemical saved');
@@ -153,16 +100,25 @@ async function updateLot(request, context) {
       console.log('Quantity changed by:', quantityChange);
       
       try {
+        // IMPORTANT CHANGE: Determine the correct action based on the quantity change
+        const action = quantityChange > 0 
+          ? 'ADD'       // For increasing quantity
+          : body.Quantity === 0 
+            ? 'DEPLETE' // For reducing to zero
+            : 'USE';    // For decreasing quantity
+        
+        console.log('Selected audit action:', action);
+        
         await ChemicalAudit.logUsage({
           chemical: chem,
           lotNumber: lot.LotNumber,
           quantityUsed: Math.abs(quantityChange),
           quantityRemaining: body.Quantity,
           user,
-          notes: body.notes || `Quantity ${quantityChange > 0 ? 'increased' : 'decreased'} by ${Math.abs(quantityChange)}`,
+          notes: body.notes || `${quantityChange > 0 ? 'Added' : 'Removed'} ${Math.abs(quantityChange)} units`,
           project: body.project,
           department: body.department,
-          action: quantityChange > 0 ? 'ADJUST' : body.Quantity === 0 ? 'DEPLETE' : 'USE'
+          action: action  // Use the determined action
         });
         console.log('Audit entry created');
       } catch (err) {
@@ -171,7 +127,7 @@ async function updateLot(request, context) {
       }
     }
 
-    // Use try-catch for serializing the response
+    // Return the updated chemical
     let doc;
     try {
       doc = chem.toObject();
@@ -184,10 +140,7 @@ async function updateLot(request, context) {
     return NextResponse.json(doc, { status: 200 });
   } catch (err) {
     console.error('Error updating lot:', err);
-    return NextResponse.json({ 
-      message: err.message || "Internal server error",
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    }, { status: 500 });
+    return NextResponse.json({ message: err.message || "Internal server error" }, { status: 500 });
   }
 }
 

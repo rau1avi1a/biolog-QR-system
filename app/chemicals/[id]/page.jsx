@@ -1,7 +1,6 @@
-// app/chemicals/[id]/page.jsx
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -13,9 +12,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronLeft } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ChevronLeft, MoreHorizontal, Trash, Edit } from "lucide-react";
 import { formatDistance } from 'date-fns';
-import ChemicalAuditTable from "@/components/Chemicals/ChemAuditTable"
+import ChemicalAuditTable from "@/components/Chemicals/ChemAuditTable";
 
 export default function ChemicalDetail() {
   const router = useRouter();
@@ -23,6 +38,9 @@ export default function ChemicalDetail() {
   const [chemical, setChemical] = React.useState(null);
   const [auditHistory, setAuditHistory] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [deletingLot, setDeletingLot] = useState(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   React.useEffect(() => {
     async function fetchData() {
@@ -50,6 +68,37 @@ export default function ChemicalDetail() {
 
     fetchData();
   }, [params?.id]);
+
+  const handleDeleteLot = async () => {
+    if (!deletingLot) return;
+    
+    setDeleteLoading(true);
+    try {
+      // Clean the lot ID by removing any "lot" prefix to ensure it works in production
+      const cleanLotId = deletingLot._id.replace(/^lot/, '');
+      
+      const response = await fetch(`/api/chemicals/${chemical._id}/lots/${cleanLotId}`, {
+        method: "DELETE",
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to delete lot");
+      }
+      
+      // Update the chemical data after deletion
+      const updatedChemical = await response.json();
+      setChemical(updatedChemical);
+      
+      // Close the dialog
+      setDeleteDialogOpen(false);
+      setDeletingLot(null);
+    } catch (error) {
+      console.error("Error deleting lot:", error);
+      alert("Failed to delete lot. Please try again.");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -83,8 +132,6 @@ export default function ChemicalDetail() {
       </Button>
 
       <div className="grid gap-6">
-{/* Previous imports remain the same */}
-
         <Card>
           <CardHeader>
             <CardTitle>Chemical Information</CardTitle>
@@ -121,7 +168,7 @@ export default function ChemicalDetail() {
           </CardContent>
         </Card>
 
-        {/* Update the Lots table section */}
+        {/* Updated Lots table section with dropdown menu */}
         <Card>
           <CardHeader>
             <CardTitle>Current Lots</CardTitle>
@@ -141,13 +188,39 @@ export default function ChemicalDetail() {
                     <TableCell>{lot.LotNumber}</TableCell>
                     <TableCell>{lot.Quantity}</TableCell>
                     <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => router.push(`/chemicals/${chemical._id}/lots/${lot._id}`)}
-                      >
-                        View Lot Details
-                      </Button>
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            // Clean the lot ID by removing any "lot" prefix to ensure it works in production
+                            const cleanLotId = lot._id.replace(/^lot/, '');
+                            router.push(`/chemicals/${chemical._id}/lots/${cleanLotId}`);
+                          }}
+                        >
+                          View Lot Details
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Open menu</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              className="text-red-600 cursor-pointer flex items-center"
+                              onClick={() => {
+                                setDeletingLot(lot);
+                                setDeleteDialogOpen(true);
+                              }}
+                            >
+                              <Trash className="mr-2 h-4 w-4" />
+                              Delete Lot
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -155,6 +228,7 @@ export default function ChemicalDetail() {
             </Table>
           </CardContent>
         </Card>
+        
         <Card>
           <CardHeader>
             <CardTitle>Recent Transactions</CardTitle>
@@ -164,6 +238,32 @@ export default function ChemicalDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the lot &quot;{deletingLot?.LotNumber}&quot;.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteLot();
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={deleteLoading}
+            >
+              {deleteLoading ? "Deleting..." : "Delete Lot"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
