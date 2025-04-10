@@ -14,8 +14,9 @@ export const dynamic = "force-dynamic";
  */
 async function updateLot(request, context) {
   try {
-    const params = context.params || {};
-    let { id, lotId } = params;
+    // Instead of destructuring params immediately, await it first
+    const params = await Promise.resolve(context.params);
+    let { id, lotId } = params;  // Now it's safe to destructure
     const user = context.user;
     
     console.log('Update lot request received (raw params):', { id, lotId });
