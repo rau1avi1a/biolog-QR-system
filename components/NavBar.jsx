@@ -30,7 +30,7 @@ export default function NavBar({ user }) {
       if (!res.ok) throw new Error('Failed to logout');
 
       // Redirect to login page after logout
-      router.push('/auth/login');
+      router.push('/');
     } catch (error) {
       console.error('Logout failed:', error);
       // Optionally, display an error message to the user
@@ -41,7 +41,7 @@ export default function NavBar({ user }) {
     <nav className="relative z-50 flex justify-between items-center bg-slate-800 px-8 py-3">
       <div className="flex space-x-6">
         <Link
-          href="/"
+          href="/home"
           className="text-white hover:text-gray-300 transition-colors">
           Home
         </Link>
