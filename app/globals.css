@@ -79,4 +79,21 @@
   body {
     @apply bg-background text-foreground;
   }
+  @media print {
+    body * {
+      visibility: hidden !important;
+    }
+    .pdf-print-area,
+    .pdf-print-area * {
+      visibility: visible !important;
+    }
+    .pdf-print-area {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+    }
+  }
 }

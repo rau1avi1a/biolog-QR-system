@@ -235,58 +235,80 @@ export default function ChemicalLotDetailsPage() {
   };
 
   // Function to download QR code
+  // Updated downloadQRCode function with small text in the QR code margin
   const downloadQRCode = () => {
     setDownloading(true);
     try {
       if (!qrRef.current) return;
-  
+
       // Get the SVG element
       const svgElement = qrRef.current.querySelector('svg');
       if (!svgElement) return;
-  
+
       // Create a canvas element with higher resolution
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      // Set canvas size for 1×1 inch at 600 DPI (much higher resolution for printing)
-      canvas.width = 600;  // 1 inch at 600 DPI
-      canvas.height = 600; // 1 inch at 600 DPI
-  
+      // Set canvas size for 1×1 inch at 600 DPI
+      const size = 600;  // 1 inch at 600 DPI
+      canvas.width = size;
+      canvas.height = size;
+
       // Create an image from the SVG
       const img = new Image();
       const svgData = new XMLSerializer().serializeToString(svgElement);
       const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
-  
+
       img.onload = () => {
-        // Clear the canvas and draw the image
+        // Clear the canvas with white background
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Draw the image with a small margin to ensure it fits nicely on the label
-        const margin = canvas.width * 0.05; // 5% margin
-        ctx.drawImage(img, margin, margin, canvas.width - (margin * 2), canvas.height - (margin * 2));
+        // Calculate margins - we'll make the bottom margin slightly larger for text
+        const sideMargin = size * 0.05; // 5% margin for sides
+        const topMargin = size * 0.05;  // 5% margin for top
+        const bottomMargin = size * 0.08; // 8% margin for bottom to fit text
         
-        // Add a border around the QR code to make it more visible
+        // Calculate QR code size
+        const qrWidth = size - (sideMargin * 2);
+        const qrHeight = size - topMargin - bottomMargin;
+        
+        // Draw the QR code
+        ctx.drawImage(img, sideMargin, topMargin, qrWidth, qrHeight);
+        
+        // Add a border around the QR code
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 1;
-        ctx.strokeRect(margin - 1, margin - 1, canvas.width - (margin * 2) + 2, canvas.height - (margin * 2) + 2);
+        ctx.strokeRect(sideMargin - 1, topMargin - 1, qrWidth + 2, qrHeight + 2);
+        
+        // Add chemical number at the bottom margin - very small
+        const biologNumber = chemical?.BiologNumber || '';
+        const lotNumber = lot?.LotNumber || '';
+        
+        ctx.fillStyle = 'black';
+        ctx.font = '14px Arial'; // Small font
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        
+        // Draw at the bottom margin
+        ctx.fillText(biologNumber, size / 2, size - bottomMargin + 4, qrWidth);
         
         // Convert canvas to blob with maximum quality
         canvas.toBlob((blob) => {
           // Create download link
           const link = document.createElement('a');
           link.href = URL.createObjectURL(blob);
-          link.download = `QR_${chemical?.ChemicalName || 'chemical'}_Lot_${lot?.LotNumber || ''}.png`;
+          link.download = `QR_${biologNumber || 'chemical'}_${lotNumber || ''}.png`;
           link.click();
-  
+
           // Clean up
           URL.revokeObjectURL(link.href);
           URL.revokeObjectURL(url);
           setDownloading(false);
         }, 'image/png', 1.0); // Set quality to maximum (1.0)
       };
-  
+
       img.src = url;
     } catch (error) {
       console.error("Error downloading QR code:", error);
@@ -294,8 +316,8 @@ export default function ChemicalLotDetailsPage() {
       setDownloading(false);
     }
   };
-  
-  // Optional: New function to print QR code directly
+
+  // Updated printQRCode function with small text in the QR code margin
   const printQRCode = () => {
     setDownloading(true);
     try {
@@ -303,6 +325,10 @@ export default function ChemicalLotDetailsPage() {
       
       const svgElement = qrRef.current.querySelector('svg');
       if (!svgElement) return;
+      
+      // Get chemical info
+      const biologNumber = chemical?.BiologNumber || '';
+      const lotNumber = lot?.LotNumber || '';
       
       // Create a print window
       const printWindow = window.open('', '_blank');
@@ -317,7 +343,7 @@ export default function ChemicalLotDetailsPage() {
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Print QR Code - ${lot?.LotNumber || 'Lot'}</title>
+          <title>Print QR Code - ${biologNumber}</title>
           <style>
             @page {
               size: 1in 1in;
@@ -327,29 +353,39 @@ export default function ChemicalLotDetailsPage() {
               margin: 0;
               padding: 0;
               display: flex;
+              flex-direction: column;
               align-items: center;
               justify-content: center;
               width: 1in;
               height: 1in;
+              font-family: Arial, sans-serif;
             }
             .qr-container {
+              position: relative;
               width: 0.95in;
               height: 0.95in;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              background: white;
-              border: 1px solid #ddd;
+              padding-bottom: 0.05in; /* Extra space at bottom for text */
             }
             svg {
               width: 0.9in !important;
-              height: 0.9in !important;
+              height: 0.87in !important; /* Slightly smaller to make room for text */
+            }
+            .tiny-text {
+              position: absolute;
+              bottom: 0;
+              left: 0;
+              right: 0;
+              text-align: center;
+              font-size: 5pt;
+              line-height: 1;
+              margin-bottom: 0.11in;
             }
           </style>
         </head>
         <body onload="setTimeout(function() { window.print(); window.close(); }, 500)">
           <div class="qr-container">
             ${svgElement.outerHTML}
+            <div class="tiny-text">${biologNumber}</div>
           </div>
         </body>
         </html>
@@ -363,15 +399,6 @@ export default function ChemicalLotDetailsPage() {
       setDownloading(false);
     }
   };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
-
   if (error && !lot) {
     return (
       <div className="container max-w-md mx-auto p-4">
@@ -411,38 +438,40 @@ export default function ChemicalLotDetailsPage() {
           <ChevronLeft className="h-4 w-4 mr-2" />
           Back
         </Button>
-
+  
         {/* Main Info Card */}
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="space-y-4">
-              <div>
-                <h1 className="text-xl font-semibold">{chemical.ChemicalName}</h1>
-                <p className="text-sm text-gray-500">{chemical.BiologNumber}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+        {chemical && lot && (
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <div className="space-y-4">
                 <div>
-                  <label className="text-sm text-gray-500">Lot Number</label>
-                  <p className="font-medium">{lot.LotNumber}</p>
+                  <h1 className="text-xl font-semibold">{chemical.ChemicalName}</h1>
+                  <p className="text-sm text-gray-500">{chemical.BiologNumber}</p>
                 </div>
-                <div>
-                  <label className="text-sm text-gray-500">Current Quantity</label>
-                  <p className="font-medium">{lot.Quantity}</p>
+  
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm text-gray-500">Lot Number</label>
+                    <p className="font-medium">{lot.LotNumber}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-500">Current Quantity</label>
+                    <p className="font-medium">{lot.Quantity}</p>
+                  </div>
                 </div>
+  
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => setQrDialogOpen(true)}
+                >
+                  <QrCode className="h-4 w-4 mr-2" />
+                  View QR Code
+                </Button>
               </div>
-
-              <Button 
-                variant="outline" 
-                className="w-full"
-                onClick={() => setQrDialogOpen(true)}
-              >
-                <QrCode className="h-4 w-4 mr-2" />
-                View QR Code
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Transaction Card */}
         <Card>
