@@ -1,176 +1,103 @@
-import { NextResponse } from 'next/server';
-import connectMongoDB from '@/lib/index';
-import Files from '@/models/Files';
+//app/api/files/route.js
+import { NextResponse } from "next/server";
+import connectMongoDB from "@/lib/index";
+import File   from "@/models/File";
+import Folder from "@/models/Folder";
 
-// List files and folders
-export async function GET(request) {
-  try {
-    await connectMongoDB();
-    const { searchParams } = new URL(request.url);
-    const currentPath = searchParams.get('path') || '';
-    const fileId = searchParams.get('fileId');
+export const dynamic = "force-dynamic";
 
-    if (fileId) {
-      // If fileId is provided, return the specific file with its data
-      const file = await Files.findById(fileId);
-      if (!file) {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
-      }
-      return NextResponse.json({ file });
-    }
+/* small helper – extract the <input type=file> part */
+async function parseUpload(req) {
+  const form = await req.formData();
+  const blob   = form.get("file");           // File object (edge‑runtime)
+  if (!blob)  throw new Error("file missing");
 
-    // Otherwise, list files and folders without the data field
-    const items = await Files.find(
-      { path: currentPath },
-      { data: 0 } // Exclude the data field
-    );
-    return NextResponse.json({ items });
-  } catch (error) {
-    console.error('Error listing files:', error);
-    return NextResponse.json({ error: 'Failed to list files' }, { status: 500 });
-  }
+  const array  = await blob.arrayBuffer();
+  return {
+    buffer:      Buffer.from(array),
+    fileName:    form.get("fileName")    || blob.name,
+    folderId:    form.get("folderId")    || null,
+    description: form.get("description") || "",
+  };
 }
 
-// Upload files and create folders
-export async function POST(request) {
-  try {
-    await connectMongoDB();
-    const formData = await request.formData();
-    const operation = formData.get('operation');
+/* ----------  GET  (list OR single)  ---------- */
+export async function GET(req) {
+  await connectMongoDB();
+  const { searchParams } = new URL(req.url);
+  const id      = searchParams.get("id");          // ?id=xxxxx
+  const partial = searchParams.get("partial");     // ?partial=YT F11
+  const folder  = searchParams.get("folderId");    // ?folderId=xxxxx
 
-    // Handle file upload
-    if (operation === 'upload') {
-      const files = formData.getAll('files');
-      const folderPath = formData.get('path') || '';
+  /* --- single by id --- */
+  if (id) {
+    const f = await File.findById(id).select("+pdf").lean();
+    if (!f) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-      const savedFiles = [];
-      for (const file of files) {
-        const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-
-        // Save file info and data to database
-        const fileDoc = await Files.create({
-          name: file.name,
-          type: 'file',
-          path: folderPath,
-          size: file.size,
-          mimeType: file.type,
-          data: buffer,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        });
-
-        // Return file info without the data
-        const { data, ...fileInfo } = fileDoc.toObject();
-        savedFiles.push(fileInfo);
-      }
-
-      return NextResponse.json({ files: savedFiles });
-    }
-
-    // Handle folder creation
-    if (operation === 'createFolder') {
-      const folderPath = formData.get('path') || '';
-      const folderName = formData.get('name');
-
-      // Save folder info to database
-      const folder = await Files.create({
-        name: folderName,
-        type: 'folder',
-        path: folderPath,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-
-      return NextResponse.json({ folder });
-    }
-
-    return NextResponse.json({ error: 'Invalid operation' }, { status: 400 });
-  } catch (error) {
-    console.error('Error processing request:', error);
-    return NextResponse.json({ error: 'Operation failed' }, { status: 500 });
+    const pdf =
+      f.pdf?.data
+        ? `data:${f.pdf.contentType};base64,${f.pdf.data.toString("base64")}`
+        : null;
+    delete f.pdf;
+    return NextResponse.json({ file: { ...f, pdf } });
   }
+
+  /* --- single by partial filename --- */
+  if (partial) {
+    const tokens = partial.split(/\s+/).filter(Boolean);
+    const and    = tokens.map((t) => ({
+      fileName: { $regex: `\\b${t}\\b`, $options: "i" },
+    }));
+    const f = await File.findOne({ $and: and }).select("+pdf").lean();
+    if (!f) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    const pdf =
+      f.pdf?.data
+        ? `data:${f.pdf.contentType};base64,${f.pdf.data.toString("base64")}`
+        : null;
+    delete f.pdf;
+    return NextResponse.json({ file: { ...f, pdf } });
+  }
+
+  /* --- list (optionally inside a folder) --- */
+  const files = await File.find({
+      folderId: folder ?? null,
+      $or: [
+        { status: { $exists: false } },   // legacy rows
+        { status: "New" }                 // only “New” for explorer
+      ]
+    })
+      .select("-pdf")
+      .sort({ createdAt: -1 })
+      .lean();
+  return NextResponse.json({ files });
 }
 
-// Delete files or folders
-export async function DELETE(request) {
+/* ----------  POST  (upload)  ---------- */
+export async function POST(req) {
   try {
     await connectMongoDB();
-    const { path: itemPath, type } = await request.json();
+    const { buffer, fileName, folderId, description } = await parseUpload(req);
 
-    if (type === 'folder') {
-      // Delete folder and all its contents from database
-      await Files.deleteMany({
-        $or: [
-          { path: itemPath },
-          { path: new RegExp(`^${itemPath}/`) }
-        ]
-      });
-    } else {
-      // Delete single file from database
-      await Files.deleteOne({
-        path: itemPath.substring(0, itemPath.lastIndexOf('/')),
-        name: itemPath.substring(itemPath.lastIndexOf('/') + 1)
-      });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting item:', error);
-    return NextResponse.json({ error: 'Failed to delete item' }, { status: 500 });
-  }
-}
-
-// Update file or folder (rename)
-export async function PATCH(request) {
-  try {
-    await connectMongoDB();
-    const { oldPath, newName, type } = await request.json();
-    const oldName = oldPath.split('/').pop();
-    const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
-
-    if (type === 'folder') {
-      // Get all items in and under this folder
-      const items = await Files.find({
-        $or: [
-          { path: oldPath },
-          { path: new RegExp(`^${oldPath}/`) }
-        ]
-      });
-
-      // Update each item's path
-      for (const item of items) {
-        const newPath = item.path.replace(oldPath, `${parentPath}/${newName}`);
-        await Files.updateOne(
-          { _id: item._id },
-          {
-            $set: {
-              path: newPath,
-              name: item.path === oldPath ? newName : item.name,
-              updatedAt: new Date()
-            }
-          }
-        );
-      }
-    } else {
-      // Update single file
-      await Files.updateOne(
-        {
-          path: parentPath,
-          name: oldName
-        },
-        {
-          $set: {
-            name: newName,
-            updatedAt: new Date()
-          }
-        }
+    /* folder guard */
+    if (folderId && !(await Folder.exists({ _id: folderId }))) {
+      return NextResponse.json(
+        { error: "folderId does not exist" },
+        { status: 400 }
       );
     }
 
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Error updating item:', error);
-    return NextResponse.json({ error: 'Failed to update item' }, { status: 500 });
+    const file = await File.create({
+      fileName,
+      description,
+      folderId: folderId || null,
+      pdf: { data: buffer, contentType: "application/pdf" },
+    });
+
+    /* do NOT include the PDF buffer back */
+    return NextResponse.json({ file: { ...file.toObject(), pdf: undefined } });
+  } catch (e) {
+    console.error("POST /files", e);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

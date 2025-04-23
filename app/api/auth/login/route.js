@@ -52,7 +52,7 @@ export async function POST(request) {
       secure: process.env.NODE_ENV === 'production', // Ensures HTTPS in production
       sameSite: 'lax', // Mitigates CSRF attacks
       path: '/', // Accessible on all routes
-      maxAge: 60 * 60 * 24 // 1 day in seconds
+      maxAge: 60 * 60 * 24 * 365// 1 day in seconds
     });
 
     return response;

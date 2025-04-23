@@ -1,4 +1,4 @@
-// app/docs/[id]/layout.js
+// app/docs/layout.js
 import { basicAuth } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
 
