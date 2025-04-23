@@ -20,6 +20,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["**/*.js", "**/*.jsx"],
+  "include": ["**/*.js", "**/*.jsx", "app/api/files/[id]/versions/route.ts", "app/api/folders/route.ts"],
   "exclude": ["node_modules", ".env"]
 }

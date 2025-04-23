@@ -52,7 +52,7 @@ export default function NavBar({ user }) {
           Cycle Count
         </Link>
         <Link
-        href="/docs"
+        href="/files"
         className="text-white hover:text-gray-300 transition-colors"
         >
           Files

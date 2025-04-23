@@ -1,4 +1,4 @@
-// app/docs/[id]/layout.js
+// app/files/layout.js
 import { basicAuth } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
 
@@ -8,7 +8,7 @@ export default async function HomeLayout({ children }) {
 
   return (
     <>
-      <NavBar user={user} />
+      {/* <NavBar user={user} /> */}
       {children}
     </>
   );
