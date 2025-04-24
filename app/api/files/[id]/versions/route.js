@@ -12,24 +12,25 @@ export const dynamic = "force-dynamic";
 export async function POST(request, { params }) {
   await connectMongoDB();
 
+  const { id } = await params;                 // ←–––– async params
   const { overlayPng = "", actor = "unknown", metadata = {} } =
     await request.json();
   const mustClone = new URL(request.url).searchParams.get("clone") === "true";
 
   /* 0. load master or working copy */
-  let file = await File.findById(params.id).select("+pdf");
+  let file = await File.findById(id).select("+pdf");
   if (!file)
     return NextResponse.json({ error: "File not found" }, { status: 404 });
 
   /* 1. clone once, tag as In-Progress */
   if (mustClone && (!file.status || file.status === "New")) {
     file = await File.create({
-      fileName: file.fileName,
-      description: file.description,
-      folderId: file.folderId,
+      fileName:   file.fileName,
+      description:file.description,
+      folderId:   file.folderId,
       productRef: file.productRef,
-      pdf: file.pdf,
-      status: "In Progress",
+      pdf:        file.pdf,
+      status:     "In Progress",
     });
   }
 
@@ -43,13 +44,12 @@ export async function POST(request, { params }) {
     const page  = pdfDoc.getPage(metadata.page ? metadata.page - 1 : 0);
     const { width: pw, height: ph } = page.getSize();
 
-    /* —— scale the PNG to fit the page exactly —— */
     const scale = Math.min(pw / img.width, ph / img.height);
     const w     = img.width  * scale;
     const h     = img.height * scale;
 
-    const x = (pw - w) / 2;   // centred horizontally
-    const y = ph - h;         // stick to the top edge
+    const x = (pw - w) / 2;
+    const y = ph - h;
 
     page.drawImage(img, { x, y, width: w, height: h });
   }
@@ -59,7 +59,7 @@ export async function POST(request, { params }) {
   /* 3. add FileVersion */
   await FileVersion.create({
     fileId: file._id,
-    pdf: { data: outBuf, contentType: file.pdf.contentType },
+    pdf:    { data: outBuf, contentType: file.pdf.contentType },
     createdBy: actor,
     overlayPng,
     metadata,
@@ -72,7 +72,7 @@ export async function POST(request, { params }) {
     { _id: file._id },
     {
       $set: {
-        pdf: { data: outBuf, contentType: file.pdf.contentType },
+        pdf:    { data: outBuf, contentType: file.pdf.contentType },
         status: nextStatus,
       },
     }
@@ -83,7 +83,7 @@ export async function POST(request, { params }) {
   if (mustClone) {
     newFile = dto({
       ...file.toObject(),
-      pdf: { data: outBuf, contentType: file.pdf.contentType },
+      pdf:    { data: outBuf, contentType: file.pdf.contentType },
       status: "In Progress",
     });
   }
@@ -108,18 +108,19 @@ function dto(doc) {
 /* ------------------------------------------------------------------ */
 export async function GET(_, { params }) {
   await connectMongoDB();
+  const { id } = await params;                 // ←–––– async params
 
-  const versions = await FileVersion.find({ fileId: params.id })
+  const versions = await FileVersion.find({ fileId: id })
     .sort({ version: -1 })
     .lean();
 
   return NextResponse.json({
     versions: versions.map((v) => ({
-      _id: v._id.toString(),
-      version: v.version,
-      createdAt: v.createdAt,
-      createdBy: v.createdBy,
-      metadata: v.metadata,
+      _id:        v._id.toString(),
+      version:    v.version,
+      createdAt:  v.createdAt,
+      createdBy:  v.createdBy,
+      metadata:   v.metadata,
     })),
   });
 }

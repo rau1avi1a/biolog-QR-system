@@ -1,13 +1,13 @@
-// app/api/files/[id]/status/route.js
 import { NextResponse } from "next/server";
 import connectMongoDB from "@/lib/index";
-import File, { FILE_STATUSES } from "@/models/File";   //  ← enum comes from model
+import File, { FILE_STATUSES } from "@/models/File";
 
 export const dynamic = "force-dynamic";
 
 /* PATCH  /api/files/:id/status  */
 export async function PATCH(request, { params }) {
   await connectMongoDB();
+  const { id } = await params;                 // ←–––– async params
 
   const { status } = await request.json();
   if (!status || !FILE_STATUSES.includes(status))
@@ -17,7 +17,7 @@ export async function PATCH(request, { params }) {
     );
 
   const updated = await File.findByIdAndUpdate(
-    params.id,
+    id,
     { status },
     { new: true, lean: true }
   ).select("-pdf");
