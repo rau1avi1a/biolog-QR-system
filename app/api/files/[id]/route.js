@@ -1,19 +1,44 @@
 // app/api/files/[id]/route.js
-import { NextResponse } from "next/server";
-import connectMongoDB from "@/lib/index";
-import File from "@/models/File";
+import { NextResponse } from 'next/server';
+import {
+  getFileById,
+  updateFileMeta,
+  updateFileStatus,
+  deleteFile,          // if you expose DELETE
+} from '@/services/file.service';
 
-export async function GET(_, { params }) {
-  await connectMongoDB();
+/* ---------- GET (single file) ---------- */
+export async function GET(_req, { params }) {
+  // ✅ first await is already implicit (we’re async), so warning is gone
+  const { id } = params;
 
-  const file = await File.findById(params.id).select("+pdf").lean();
-  if (!file) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const file = await getFileById(id, { includePdf: true });
+  if (!file) {
+    // status ≠ 500 because “id” might simply be “status” or “favicon.ico”
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  return NextResponse.json({ file });
+}
 
-  const dataUrl =
-    file.pdf?.data
-      ? `data:${file.pdf.contentType};base64,${file.pdf.data.toString("base64")}`
-      : null;
+/* ---------- PATCH (meta OR status) ------ */
+export async function PATCH(req, { params }) {
+  const { id } = params;
+  const body   = await req.json();
 
-  delete file.pdf;
-  return NextResponse.json({ file: { ...file, pdf: dataUrl } });
+  /* status change ? */
+  if ('status' in body) {
+    const f = await updateFileStatus(id, body.status);
+    return NextResponse.json({ file: f });
+  }
+
+  /* metadata update */
+  const f = await updateFileMeta(id, body);
+  return NextResponse.json({ file: f });
+}
+
+/* (optional) DELETE */
+export async function DELETE(_req, { params }) {
+  const { id } = params;
+  await deleteFile(id);
+  return NextResponse.json({ ok: true });
 }

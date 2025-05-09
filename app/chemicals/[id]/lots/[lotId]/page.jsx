@@ -71,16 +71,26 @@ export default function ChemicalLotDetailsPage() {
     
     try {
       console.log(`Fetching chemical data for ID: ${params.id}`);
-      const response = await fetch(`/api/chemicals/${params.id}`);
+      const response = await fetch(`/api/items/${params.id}`);
       
       if (!response.ok) {
         const errorText = await response.text().catch(() => "Unknown error");
         console.error(`Failed to fetch chemical: ${response.status} ${errorText}`);
         throw new Error(`Failed to fetch chemical: ${response.status}`);
       }
-      
-      const chemData = await response.json();
-      console.log("Chemical data received:", chemData.ChemicalName);
+      const { item } = await response.json();
+
+      const chemData = {
+        _id:          item.id,
+        BiologNumber: item.sku,
+        ChemicalName: item.displayName,
+        Lots:         (item.Lots||[]).map(l => ({
+                        _id:       l.LotNumber,
+                        LotNumber: l.LotNumber,
+                        Quantity:  l.Quantity
+                      })),
+        // …etc…
+      };
       setChemical(chemData);
       
       // Improved lot finding logic
@@ -121,6 +131,7 @@ export default function ChemicalLotDetailsPage() {
 
   // Updated handleTransaction function with improved error handling
   const handleTransaction = async () => {
+    // 1️⃣ validate
     if (!quantity || isNaN(quantity) || parseFloat(quantity) <= 0) {
       showToast("Error", "Please enter a valid quantity", "error");
       return;
@@ -128,102 +139,54 @@ export default function ChemicalLotDetailsPage() {
   
     setProcessing(true);
     setError(null);
-    
+  
+    // 2️⃣ compute the change
+    const parsedQuantity = parseFloat(quantity);
+    // positive delta = add, negative = subtract
+    const delta = transactionType === "subtract"
+      ? -parsedQuantity
+      : parsedQuantity;
+  
     try {
-      const parsedQuantity = parseFloat(quantity);
-      const updatedQuantity = transactionType === "subtract" 
-        ? lot.Quantity - parsedQuantity
-        : lot.Quantity + parsedQuantity;
-  
-      if (updatedQuantity < 0) {
-        showToast("Error", "Cannot subtract more than available quantity", "error");
-        setProcessing(false);
-        return;
-      }
-  
-      // IMPORTANT: Fix the lotId by removing any "lot" prefix
+      // 3️⃣ clean the lotId
       const cleanLotId = params.lotId.replace(/^lot/, '');
-      
-      console.log('Sending transaction:', {
-        endpoint: `/api/chemicals/${params.id}/lots/${cleanLotId}`,
-        method: 'PUT',
-        lotId: {
-          original: params.lotId,
-          cleaned: cleanLotId
-        },
-        body: {
-          Quantity: updatedQuantity,
-          notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
-        }
-      });
   
-      const response = await fetch(`/api/chemicals/${params.id}/lots/${cleanLotId}`, {
-        method: "PUT",
-        headers: { 
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ 
-          Quantity: updatedQuantity,
-          notes: `${transactionType === 'add' ? 'Added' : 'Removed'} ${quantity} units`,
-        }),
-      });
-      
-      // Handle non-OK responses with better error reporting
-      if (!response.ok) {
-        let errorMessage = `Error: ${response.status} ${response.statusText}`;
-        
-        try {
-          const errorData = await response.json();
-          console.error('Transaction failed:', {
-            status: response.status,
-            statusText: response.statusText,
-            errorData
-          });
-          
-          errorMessage = errorData.message || errorMessage;
-          
-          // If we have detailed error data, show it for debugging
-          if (errorData.lotIdRequested && errorData.availableLots) {
-            console.error('Lot ID mismatch:', {
-              requested: errorData.lotIdRequested,
-              available: errorData.availableLots
-            });
-          }
-        } catch (e) {
-          console.error('Could not parse error response', e);
+      // 4️⃣ call the new transactions API
+      const res = await fetch(
+        `/api/items/${params.id}/lots/${cleanLotId}/transactions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            qty: delta,
+            memo: `${transactionType === "add" ? "Added" : "Removed"} ${parsedQuantity} units`
+          })
         }
-        
-        throw new Error(errorMessage);
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Status ${res.status}`);
       }
-
-      const updatedChemical = await response.json();
-      
-      if (!updatedChemical || !updatedChemical.Lots) {
-        console.error('Invalid response data:', updatedChemical);
-        throw new Error('Invalid response data received');
-      }
-      
+  
+      // 5️⃣ pull back the updated item from the response
+      const { item: updatedChemical } = await res.json();
+  
+      // 6️⃣ update React state so UI refreshes
       setChemical(updatedChemical);
-      
-      // Use the improved lot finding method for consistency
-      const updatedLot = updatedChemical.Lots.find(l => isSameId(l._id, params.lotId));
-      
-      if (!updatedLot) {
-        console.error('Updated lot not found in response');
-        throw new Error('Updated lot not found in response');
-      }
-      
+      const updatedLot = updatedChemical.Lots.find(l =>
+        isSameId(l._id, params.lotId)
+      );
       setLot(updatedLot);
       setQuantity("");
       showToast(
         "Success",
-        `Successfully ${transactionType === 'add' ? 'added' : 'removed'} ${quantity} units`,
+        `Successfully ${transactionType === "add" ? "added" : "removed"} ${parsedQuantity} units`,
         "success"
       );
-    } catch (error) {
-      console.error("Transaction error:", error);
-      setError(error.message || "Failed to update quantity");
-      showToast("Error", error.message || "Failed to update quantity", "error");
+    } catch (err) {
+      console.error("Transaction error:", err);
+      setError(err.message);
+      showToast("Error", err.message, "error");
     } finally {
       setProcessing(false);
       setAlertOpen(false);
@@ -427,6 +390,13 @@ export default function ChemicalLotDetailsPage() {
     );
   }
 
+    const [currentUrl, setCurrentUrl] = useState("");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setCurrentUrl(window.location.href);
+    }
+  }, []);
+
   return (
     <ToastProvider>
       <div className="container max-w-md mx-auto p-4">
@@ -557,7 +527,8 @@ export default function ChemicalLotDetailsPage() {
             <div className="flex flex-col items-center gap-4" ref={qrRef}>
               <div className="border border-gray-200 p-2 bg-white">
                 <QRCodeSVG
-                  value={`${window.location.href}`}
+                  value={currentUrl}
+                  
                   size={250} // Larger size for better visibility
                   level="H"  // High error correction level
                   includeMargin={true}

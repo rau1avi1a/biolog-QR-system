@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { mapItemToChemical } from "../../utils/mapItemToChemical"
 
 export default function ChemEditLotDialog({
   open,
@@ -33,44 +34,61 @@ export default function ChemEditLotDialog({
   if (!lot) return null
 
   async function handleSave() {
-    if (!chemicalId || !lot._id) return
+    if (!chemicalId || !lot) return;
+    
+    const newQty = parseFloat(formValues.Quantity);
+    const delta  = newQty - lot.Quantity;
+    const lotNumber = lot.LotNumber;
+    
+    if (isNaN(newQty)) {
+      alert("Enter a valid quantity");
+      return;
+    }
+    
     try {
-      const res = await fetch(`/api/chemicals/${chemicalId}/lots/${lot._id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          LotNumber: formValues.LotNumber,
-          Quantity: parseInt(formValues.Quantity, 10)
-          // ExpirationDate: formValues.ExpirationDate
-        })
-      })
-      if (!res.ok) throw new Error("Failed to update lot")
-      const updatedDoc = await res.json()
-      onSaved(updatedDoc)
-      onClose()
+      const res = await fetch(
+        `/api/items/${chemicalId}/lots/${encodeURIComponent(lotNumber)}/transactions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            qty: delta,
+            memo: `Adjusted lot ${lotNumber} from ${lot.Quantity} to ${newQty}`
+          })
+        }
+      );
+      if (!res.ok) throw new Error("Failed to adjust lot");
+      
+      const { item } = await res.json();
+      onSaved(mapItemToChemical(item));
+      onClose();
+      
     } catch (err) {
-      console.error(err)
-      alert(err.message)
+      console.error(err);
+      alert(err.message);
     }
   }
 
-  async function handleDelete() {
-    if (!chemicalId || !lot._id) return
-    if (!confirm("Are you sure you want to delete this lot?")) return
-
-    try {
-      const res = await fetch(`/api/chemicals/${chemicalId}/lots/${lot._id}`, {
-        method: "DELETE"
-      })
-      if (!res.ok) throw new Error("Failed to delete lot")
-      const updatedDoc = await res.json()
-      onSaved(updatedDoc)
-      onClose()
-    } catch (err) {
-      console.error(err)
-      alert(err.message)
-    }
+async function handleDelete() {
+  if (!chemicalId || !lot) return;
+  if (!confirm(`Delete lot ${lot.LotNumber}?`)) return;
+  
+  try {
+    const res = await fetch(
+      `/api/items/${chemicalId}/lots/${encodeURIComponent(lot.LotNumber)}`,
+      { method: "DELETE" }
+    );
+    if (!res.ok) throw new Error("Failed to delete lot");
+    
+    const { item } = await res.json();
+    onSaved(mapItemToChemical(item));
+    onClose();
+    
+  } catch (err) {
+    console.error(err);
+    alert(err.message);
   }
+}
 
   function handleChange(e) {
     setFormValues({ ...formValues, [e.target.name]: e.target.value })

@@ -1,39 +1,23 @@
 // app/api/files/status/route.js
-import { NextResponse } from "next/server";
-import connectMongoDB from "@/lib/index";
-import File from "@/models/File";
+import { NextResponse } from 'next/server'
+import { listFiles }   from '@/services/file.service'
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic'
 
-/* ------------------------------------------------------------------ */
-/*  GET  →  /api/files/status                                         */
-/*  - Get files by status                                             */
-/* ------------------------------------------------------------------ */
-export async function GET(request) {
-  await connectMongoDB();
-  
+export async function GET(req) {
   try {
-    // Get query parameters
-    const url = new URL(request.url);
-    const status = url.searchParams.get("status");
-    
-    if (!status) {
-      return NextResponse.json({ error: "Status required" }, { status: 400 });
-    }
-    
-    console.log(`Searching for files with status: "${status}"`);
-    
-    // Find all files with the specified status
-    const files = await File.find({ status: status })
-      .select("-pdf")
-      .sort({ updatedAt: -1 })
-      .lean();
-    
-    console.log(`Found ${files.length} files with status: "${status}"`);
-    
-    return NextResponse.json({ files });
-  } catch (e) {
-    console.error("GET /files/status error:", e);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    const { searchParams } = new URL(req.url)
+    const status = searchParams.get('status')
+
+    // 🚫 turn off the "only new" filter:
+    const all = await listFiles({ folderId: null, onlyNew: false })
+
+    // 🚧 now *filter* in‐memory for the status you asked for:
+    const files = all.filter(f => f.status === status)
+
+    return NextResponse.json({ files })
+  } catch (err) {
+    console.error('GET /api/files/status', err)
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }

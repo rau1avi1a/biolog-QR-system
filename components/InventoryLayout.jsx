@@ -11,32 +11,48 @@ export default function InventoryLayout() {
   const [productData, setProductData] = useState([]);
   const [chemicalData, setChemicalData] = useState([]);
 
-  // Fetch both data sets on mount
   useEffect(() => {
-    // Fetch Product Inventory
-    fetch("/api/products")
+    // 1. Fetch Products from new Items API
+    fetch("/api/items?itemType=product")
       .then((res) => res.json())
-      .then((data) => setProductData(data))
+      .then(({ items }) => {
+        // if your ProductDataSection expects the old shape, map here similarly
+        setProductData(items);
+      })
       .catch(console.error);
 
-    // Fetch Chemical Inventory
-    fetch("/api/chemicals")
+    // 2. Fetch Chemicals from new Items API
+    fetch("/api/items?itemType=chemical")
       .then((res) => res.json())
-      .then((data) => setChemicalData(data))
+      .then(({ items }) => {
+        // Map Item → legacy Chemical shape for your existing UI
+        const chems = items.map((item) => ({
+          _id:           item.id,
+          BiologNumber:  item.sku,
+          ChemicalName:  item.displayName,
+          CASNumber:     item.casNumber  ?? "",
+          Location:      item.location   ?? "",
+          Lots:          (item.lots || []).map((l) => ({
+            _id:       l.LotNumber,          // use the lot ID if you had one
+            LotNumber: l.LotNumber,
+            Quantity:  l.Quantity
+          })),
+          // copy any other fields your UI reads…
+        }));
+        setChemicalData(chems);
+      })
       .catch(console.error);
   }, []);
 
   return (
     <div className="container mx-auto py-10">
-      {/* Outer card wraps the entire inventory layout */}
       <Card className="mx-auto max-w-5xl shadow-md">
         <CardHeader>
           <CardTitle className="text-2xl">Inventory</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Top row: toggle between Product and Chemical Inventory */}
-          <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex gap-4">
             <button
               onClick={() => setActiveSection("chemical")}
               className={`px-4 py-2 font-semibold rounded ${
@@ -45,8 +61,19 @@ export default function InventoryLayout() {
                   : "bg-gray-200 text-black"
               }`}
             >
-              Chemical Inventory
+              Chemicals
             </button>
+            <button
+              onClick={() => setActiveSection("solutions")}
+              className={`px-4 py-2 font-semibold rounded ${
+                activeSection === "product"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-200 text-black"
+              }`}
+            >
+              Solutions
+            </button>
+            
             <button
               onClick={() => setActiveSection("product")}
               className={`px-4 py-2 font-semibold rounded ${
@@ -55,15 +82,18 @@ export default function InventoryLayout() {
                   : "bg-gray-200 text-black"
               }`}
             >
-              Product Inventory
+              Products
             </button>
+
           </div>
 
-          {/* Main content: either ProductDataSection or ChemicalDataSection */}
           {activeSection === "product" ? (
             <ProductDataSection data={productData} setData={setProductData} />
           ) : (
-            <ChemicalDataSection data={chemicalData} setData={setChemicalData} />
+            <ChemicalDataSection
+              data={chemicalData}
+              setData={setChemicalData}
+            />
           )}
         </CardContent>
       </Card>

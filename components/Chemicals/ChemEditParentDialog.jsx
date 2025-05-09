@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { mapItemToChemical } from "../../utils/mapItemToChemical"
 
 export default function ChemEditParentDialog({
   open,
@@ -18,6 +19,7 @@ export default function ChemEditParentDialog({
   onSaved
 }) {
   const [formValues, setFormValues] = React.useState({})
+
 
   React.useEffect(() => {
     if (chemical) {
@@ -34,18 +36,22 @@ export default function ChemEditParentDialog({
 
   async function handleSave() {
     try {
-      const res = await fetch(`/api/chemicals/${chemical._id}`, {
-        method: "PUT",
+      const res = await fetch(`/api/items/${chemical._id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formValues)
-      })
-      if (!res.ok) throw new Error("Failed to update chemical")
-      const updatedDoc = await res.json()
-      onSaved(updatedDoc)
-      onClose()
+        body: JSON.stringify({
+          displayName: formValues.ChemicalName,
+          casNumber:   formValues.CASNumber,
+          location:    formValues.Location
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update chemical");
+      const { item } = await res.json();
+      onSaved(mapItemToChemical(item));
+      onClose();      
     } catch (err) {
-      console.error(err)
-      alert(err.message)
+      console.error(err);
+      alert(err.message);
     }
   }
 
