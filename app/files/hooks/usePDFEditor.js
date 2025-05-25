@@ -1,9 +1,9 @@
-// app/files/components/usePdfEditorLogic.js
+// app/files/hooks/usePDFEditor.js
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { PDFDocument } from 'pdf-lib';
-import { api } from '../lib/api';               // ← client fetch helpers
+import { api } from '../lib/api';
 
 export default function usePdfEditorLogic({
   doc,
@@ -48,17 +48,24 @@ export default function usePdfEditorLogic({
     const cvs = canvasRef.current;
     if (!ctn || !cvs) return;
 
-    /* size → device-pixel ratio aware */
+    /* Get the exact size that the PDF is being rendered at */
     const { width, height } = ctn.getBoundingClientRect();
-    const scale = window.devicePixelRatio > 2 ? 3 : 2;
-    cvs.width  = width  * scale;
-    cvs.height = height * scale;
-    cvs.style.width  = `${width}px`;
-    cvs.style.height = `${height}px`;
+    
+    console.log('Container dimensions:', { width, height });
+    
+    // Use integer pixel dimensions to avoid sub-pixel rendering issues
+    const pixelWidth = Math.round(width);
+    const pixelHeight = Math.round(height);
+    
+    // Set canvas to match the exact container size
+    cvs.width  = pixelWidth;
+    cvs.height = pixelHeight;
+    cvs.style.width  = `${pixelWidth}px`;
+    cvs.style.height = `${pixelHeight}px`;
 
     const ctx = cvs.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(scale, scale);
+    // Don't scale the context - draw at 1:1 pixel ratio
     ctx.lineCap   = 'round';
     ctx.lineJoin  = 'round';
     ctx.strokeStyle = 'black';
@@ -69,7 +76,7 @@ export default function usePdfEditorLogic({
     const o = overlaysRef.current[pageNo];
     if (o) {
       const img = new Image();
-      img.onload = () => ctx.drawImage(img, 0, 0, width, height);
+      img.onload = () => ctx.drawImage(img, 0, 0, pixelWidth, pixelHeight);
       img.src    = o;
     }
     setPageReady(true);
@@ -87,11 +94,32 @@ export default function usePdfEditorLogic({
   useEffect(() => {
     setBlobUri(doc?.pdf || null);
     setPageNo(1);
-    overlaysRef.current  = {};
-    historiesRef.current = {};
-    setOverlay(null);
-    setHistory([]);
-    setHistIdx(-1);
+    
+    // For batches with baked PDFs, don't restore overlays since they're already in the PDF
+    // Only restore overlays if this is an original file or a batch without a signed PDF
+    if (doc?.overlays && !doc?.signedPdf) {
+      overlaysRef.current = doc.overlays;
+      // Set the overlay for page 1 if it exists
+      if (doc.overlays[1]) {
+        setOverlay(doc.overlays[1]);
+        // Initialize history with the saved overlay
+        historiesRef.current[1] = [doc.overlays[1]];
+        setHistory([doc.overlays[1]]);
+        setHistIdx(0);
+      } else {
+        setOverlay(null);
+        setHistory([]);
+        setHistIdx(-1);
+      }
+    } else {
+      // Clear overlays for new documents or baked PDFs
+      overlaysRef.current  = {};
+      historiesRef.current = {};
+      setOverlay(null);
+      setHistory([]);
+      setHistIdx(-1);
+    }
+    
     setPageReady(false);
   }, [doc]);
 
@@ -158,13 +186,9 @@ export default function usePdfEditorLogic({
     if (newIdx >= 0) {
       const img = new Image();
       img.onload = () => {
-        const scl = window.devicePixelRatio > 2 ? 3 : 2;
-        ctxRef.current.drawImage(
-          img,
-          0, 0,
-          canvasRef.current.width  / scl,
-          canvasRef.current.height / scl
-        );
+        // No scaling needed since canvas is now 1:1
+        const canvas = canvasRef.current;
+        ctxRef.current.drawImage(img, 0, 0, canvas.width, canvas.height);
       };
       img.src = hist[newIdx];
       overlaysRef.current[pageNo] = hist[newIdx];
@@ -175,38 +199,150 @@ export default function usePdfEditorLogic({
     }
   }, [histIdx, pageNo]);
 
-/* ─────────────────────── SAVE (→ /api/batches) ────────────────── */
+/* ─────────────────────── SAVE ────────────────────────────────── */
   const save = useCallback(
-    async (advance) => {
+    async (action = 'save') => {
       const overlays = Object.fromEntries(
         Object.entries(overlaysRef.current).filter(([, png]) => png)
       );
+      
+      console.log('Saving with overlays:', overlays);
+      console.log('Action:', action);
+      
+      // For rejection, we don't require new overlays - just change status
+      if (action === 'reject' && Object.keys(overlays).length === 0) {
+        setIsSaving(true);
+        try {
+          const updateData = { status: 'In Progress' };
+          const { batch } = await api.updateBatch(doc._id, updateData);
+          
+          setCurrentDoc({
+            ...doc,
+            ...batch,
+            isBatch: true
+          });
+          
+          refreshFiles?.();
+        } catch (err) {
+          console.error('Rejection error:', err);
+          alert('Error during rejection: ' + (err.message || 'Unknown error'));
+        } finally {
+          setIsSaving(false);
+        }
+        return;
+      }
+      
+      // For other actions, require overlays
       if (Object.keys(overlays).length === 0) {
         alert('No changes to save'); return;
       }
 
+      // Get canvas and PDF container dimensions for proper scaling
+      const canvas = canvasRef.current;
+      const container = pageContainerRef.current;
+      
+      // Get the actual PDF page dimensions from react-pdf
+      const pdfPageElement = container?.querySelector('.react-pdf__Page__canvas');
+      const pdfDimensions = pdfPageElement ? {
+        width: pdfPageElement.width,
+        height: pdfPageElement.height,
+        displayWidth: pdfPageElement.offsetWidth,
+        displayHeight: pdfPageElement.offsetHeight
+      } : null;
+      
+      const canvasDimensions = canvas ? {
+        width: canvas.width,
+        height: canvas.height,
+        displayWidth: canvas.style.width ? parseFloat(canvas.style.width) : canvas.width,
+        displayHeight: canvas.style.height ? parseFloat(canvas.style.height) : canvas.height,
+        pdfDimensions: pdfDimensions
+      } : null;
+
+      console.log('Canvas dimensions:', canvasDimensions);
+      console.log('PDF element dimensions:', pdfDimensions);
+
       setIsSaving(true);
       try {
-        /* 1️⃣ create a Batch – server will copy master PDF + store overlays */
-        const { batch } = await api.newBatch(doc._id, {
-          overlays,
-          advanceStatus: advance,
-        });
+        const isOriginal = !doc.isBatch && !doc.originalFileId;
+        
+        if (isOriginal) {
+          // Original file - create new batch
+          console.log('Creating new batch from original file');
+          const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
+          const { batch } = await api.saveBatchFromEditor(doc._id, {
+            overlayPng: firstOverlay,
+            annotations: overlays,
+            canvasDimensions: canvasDimensions // Pass canvas dimensions for proper scaling
+          }, action);
 
-        /* 2️⃣ reload fresh File (server already updated status/meta) */
-        const { file } = await api.load(batch.fileId);
-        setCurrentDoc(file);
+          console.log('Created batch:', batch);
 
-        /* 3️⃣ reset local drawings */
-        overlaysRef.current  = {};
-        historiesRef.current = {};
-        setOverlay(null);
-        setHistory([]);
-        setHistIdx(-1);
+          // Load the newly created batch and switch to it
+          const { batch: loadedBatch } = await api.getBatch(batch._id);
+          console.log('Loaded batch:', loadedBatch);
+          
+          setCurrentDoc({
+            ...loadedBatch,
+            pdf: loadedBatch.pdf || doc.pdf, // Use baked PDF if available, fallback to original
+            isBatch: true,
+            originalFileId: loadedBatch.fileId
+          });
+          
+          // Clear overlays since they're now baked into the PDF
+          overlaysRef.current  = {};
+          historiesRef.current = {};
+          setOverlay(null);
+          setHistory([]);
+          setHistIdx(-1);
+        } else {
+          // Existing batch - update it
+          console.log('Updating existing batch');
+          const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
+          const updateData = {
+            overlayPng: firstOverlay,
+            annotations: overlays,
+            canvasDimensions: canvasDimensions // Pass canvas dimensions for proper scaling
+          };
+
+          // Update status based on action
+          if (action === 'submit_review') {
+            updateData.status = 'Review';
+          } else if (action === 'submit_final') {
+            updateData.status = 'Completed';
+          } else if (action === 'reject') {
+            updateData.status = 'In Progress';
+            // For rejection, we want to keep the overlay changes
+            // The reviewer's markups should be preserved
+          }
+          // For 'save', keep current status
+
+          const { batch } = await api.updateBatch(doc._id, updateData);
+          console.log('Updated batch:', batch);
+          
+          // Reload the batch to get the updated PDF
+          const { batch: reloadedBatch } = await api.getBatch(doc._id);
+          
+          // Update current doc with new data but keep the view
+          setCurrentDoc({
+            ...doc,
+            ...reloadedBatch,
+            pdf: reloadedBatch.pdf || doc.pdf, // Use updated PDF if available
+            isBatch: true
+          });
+          
+          // Clear overlays since they're now baked into the PDF
+          overlaysRef.current  = {};
+          historiesRef.current = {};
+          setOverlay(null);
+          setHistory([]);
+          setHistIdx(-1);
+        }
+
+        // Don't reset drawings here anymore - they're cleared above after baking
         refreshFiles?.();
       } catch (err) {
-        console.error(err);
-        alert('Save error');
+        console.error('Save error:', err);
+        alert('Save error: ' + (err.message || 'Unknown error'));
       } finally {
         setIsSaving(false);
       }
@@ -217,7 +353,7 @@ export default function usePdfEditorLogic({
 /* expose undo / save to toolbar refs (if parent passed them) */
   useEffect(() => {
     if (externalUndo)  externalUndo.current  = undo;
-    if (externalSave)  externalSave.current  = () => save(false);
+    if (externalSave)  externalSave.current  = () => save('save');
   }, [externalUndo, externalSave, undo, save]);
 
 /* ───────────────────── page navigation ────────────────────────── */
@@ -230,7 +366,7 @@ export default function usePdfEditorLogic({
     setPageReady(false);
   };
 
-/* ───────────────────── “print letter” helper (unchanged) ─────── */
+/* ───────────────────── "print letter" helper (unchanged) ─────── */
   const buildLetterPdf = async (dataUrl) => {
     const [W, H] = [612, 792];
     const bytes  = Uint8Array.from(atob(dataUrl.split(',')[1]), c => c.charCodeAt(0));

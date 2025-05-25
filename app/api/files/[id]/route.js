@@ -9,12 +9,11 @@ import {
 
 /* ---------- GET (single file) ---------- */
 export async function GET(_req, { params }) {
-  // ✅ first await is already implicit (we’re async), so warning is gone
-  const { id } = params;
+  const { id } = await params;
 
   const file = await getFileById(id, { includePdf: true });
   if (!file) {
-    // status ≠ 500 because “id” might simply be “status” or “favicon.ico”
+    // status ≠ 500 because "id" might simply be "status" or "favicon.ico"
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   return NextResponse.json({ file });
@@ -22,7 +21,7 @@ export async function GET(_req, { params }) {
 
 /* ---------- PATCH (meta OR status) ------ */
 export async function PATCH(req, { params }) {
-  const { id } = params;
+  const { id } = await params;
   const body   = await req.json();
 
   /* status change ? */
@@ -38,7 +37,7 @@ export async function PATCH(req, { params }) {
 
 /* (optional) DELETE */
 export async function DELETE(_req, { params }) {
-  const { id } = params;
+  const { id } = await params;
   await deleteFile(id);
   return NextResponse.json({ ok: true });
 }

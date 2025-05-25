@@ -33,6 +33,10 @@ export const api = {
                        body:JSON.stringify({ status:s })
                      }).then(r=>r.json()),
 
+  /* ── NEW: Get files by status (for Status and Archive tabs) ─── */
+  getFilesByStatus: (status) => fetch(`/api/batches?by-status=true&status=${encodeURIComponent(status)}`)
+                               .then(r => r.json()),
+
   /* ── batches ────────────────────────── */
   listBatches: (status, fileId) =>
     fetch(
@@ -40,12 +44,13 @@ export const api = {
       (status  ? `status=${encodeURIComponent(status)}` : '') +
       (fileId  ? `&fileId=${fileId}`                : '')
     ).then(r => r.json()),
-    newBatch: (fileId, extra={}) =>
-      fetch('/api/batches', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json'},
-        body: JSON.stringify({ fileId, ...extra })
-      }).then(r=>r.json()),
+    
+  newBatch: (fileId, extra={}) =>
+    fetch('/api/batches', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json'},
+      body: JSON.stringify({ fileId, ...extra })
+    }).then(r=>r.json()),
       
   getBatch      : (id) => fetch(`/api/batches/${id}`).then(r=>r.json()),
   updateBatch: (id, payload) =>
@@ -54,6 +59,22 @@ export const api = {
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(payload)
     }).then(r => r.json()),
-      deleteBatch   : (id) => fetch(`/api/batches/${id}`, { method:'DELETE' })
-                       .then(r=>r.json()),
+  deleteBatch   : (id) => fetch(`/api/batches/${id}`, { method:'DELETE' })
+                   .then(r=>r.json()),
+
+  /* ── NEW: Save with different actions ─── */
+  saveBatchFromEditor: (originalFileId, editorData, action = 'save') =>
+    fetch('/api/batches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        originalFileId, 
+        editorData,
+        action, // 'save', 'submit_review', 'submit_final', 'reject'
+        status: action === 'save' ? 'In Progress' : 
+                action === 'submit_review' ? 'Review' :
+                action === 'submit_final' ? 'Completed' :
+                action === 'reject' ? 'In Progress' : 'In Progress'
+      })
+    }).then(r => r.json()),
 };

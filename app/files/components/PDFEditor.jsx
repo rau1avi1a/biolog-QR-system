@@ -4,7 +4,7 @@
 import React, { useState } from 'react';
 import {
   Menu, Pencil, Undo, Save, CheckCircle, Printer, Settings,
-  ChevronLeft, ChevronRight, ArrowRightCircle
+  ChevronLeft, ChevronRight, ArrowRightCircle, XCircle
 } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
@@ -40,15 +40,10 @@ export default function PDFEditor(props) {
   const { doc, onToggleDrawer, mobileModeActive, refreshFiles } = props;
   const compact = mobileModeActive;
 
-  /* toolbar helpers */
-  const saveLabel =
-    !doc.status || doc.status==='New' ? 'Save as Draft' :
-    doc.status==='In Progress'        ? 'Submit for Review' :
-    doc.status==='Review'             ? 'Submit Final'      : 'Save Changes';
-
-  const SaveIcon =
-    !doc.status || doc.status==='New' || doc.status==='In Progress'
-      ? ArrowRightCircle : doc.status==='Review' ? CheckCircle : Save;
+  // Determine if this is an original file or a batch
+  const isOriginal = !doc.isBatch && !doc.originalFileId;
+  const isInProgress = doc.status === 'In Progress';
+  const isInReview = doc.status === 'Review';
 
   /* ───────────────────── render ───────────────────── */
   return (
@@ -64,7 +59,10 @@ export default function PDFEditor(props) {
 
           {/* file name + page switch */}
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm truncate max-w-[30vw]">{doc.fileName}</span>
+            <span className="font-semibold text-sm truncate max-w-[30vw]">
+              {doc.fileName}
+              {doc.runNumber && ` (Run ${doc.runNumber})`}
+            </span>
 
             {pages>1 && (
               <div className="flex items-center gap-1">
@@ -80,7 +78,7 @@ export default function PDFEditor(props) {
               </div>
             )}
 
-            {doc.status && doc.status!=='New' && (
+            {doc.status && (
               <Badge variant="outline" className={`text-xs ${
                 doc.status==='In Progress' ? 'bg-amber-100 text-amber-800' :
                 doc.status==='Review'     ? 'bg-blue-100 text-blue-800'   :
@@ -91,7 +89,7 @@ export default function PDFEditor(props) {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* file-properties drawer */}
+          {/* file-properties drawer - always show but read-only for batches */}
           <Tool icon={Settings} label="File properties" onClick={()=>setMetaOpen(true)}/>
 
           <Tool icon={Pencil} label={isDraw?'Draw off':'Draw on'}
@@ -102,18 +100,58 @@ export default function PDFEditor(props) {
                 disabled={histIdx<0}
                 className={histIdx<0?'opacity-50':''}/>
 
-          <Button variant="outline" size="sm"
-                  disabled={!overlay||isSaving} onClick={()=>save(false)}>
-            {isSaving ? (compact ? <Save size={18} className="animate-spin"/> : 'Saving…')
-                      : compact ? <Save size={18}/> : 'Save'}
-          </Button>
+          {/* Different buttons based on file type and status */}
+          {isOriginal && (
+            // Original file - just one save button
+            <Button variant="outline" size="sm"
+                    disabled={!overlay||isSaving} onClick={()=>save('save')}>
+              {isSaving ? (compact ? <Save size={18} className="animate-spin"/> : 'Saving…')
+                        : compact ? <Save size={18}/> : 'Save'}
+            </Button>
+          )}
 
-          <Button variant="outline" size="sm"
-                  disabled={!overlay||isSaving} onClick={()=>save(true)}
-                  className="flex items-center gap-1">
-            <SaveIcon size={16}/>
-            {!compact && <span>{saveLabel}</span>}
-          </Button>
+          {!isOriginal && isInProgress && (
+            // In Progress batch - Save and Submit for Review
+            <>
+              <Button variant="outline" size="sm"
+                      disabled={!overlay||isSaving} onClick={()=>save('save')}>
+                {isSaving ? (compact ? <Save size={18} className="animate-spin"/> : 'Saving…')
+                          : compact ? <Save size={18}/> : 'Save'}
+              </Button>
+              
+              <Button variant="outline" size="sm"
+                      disabled={!overlay||isSaving} onClick={()=>save('submit_review')}
+                      className="flex items-center gap-1">
+                <ArrowRightCircle size={16}/>
+                {!compact && <span>Submit for Review</span>}
+              </Button>
+            </>
+          )}
+
+          {!isOriginal && isInReview && (
+            // In Review batch - Save, Submit Final, and Reject
+            <>
+              <Button variant="outline" size="sm"
+                      disabled={!overlay||isSaving} onClick={()=>save('save')}>
+                {isSaving ? (compact ? <Save size={18} className="animate-spin"/> : 'Saving…')
+                          : compact ? <Save size={18}/> : 'Save'}
+              </Button>
+              
+              <Button variant="outline" size="sm"
+                      disabled={isSaving} onClick={()=>save('reject')}
+                      className="flex items-center gap-1 text-red-600 hover:text-red-700">
+                <XCircle size={16}/>
+                {!compact && <span>Reject</span>}
+              </Button>
+              
+              <Button variant="outline" size="sm"
+                      disabled={!overlay||isSaving} onClick={()=>save('submit_final')}
+                      className="flex items-center gap-1 text-green-600 hover:text-green-700">
+                <CheckCircle size={16}/>
+                {!compact && <span>Submit Final</span>}
+              </Button>
+            </>
+          )}
 
           <Tool icon={Printer} label="Print" onClick={print}/>
         </div>
@@ -149,12 +187,13 @@ export default function PDFEditor(props) {
         </div>
       </div>
 
-      {/* drawer */}
+      {/* drawer - always show but different behavior for batches */}
       <FileMetaDrawer
         file={doc}
         open={metaOpen}
         onOpenChange={setMetaOpen}
         onSaved={refreshFiles}
+        readOnly={!isOriginal}
       />
     </div>
   );

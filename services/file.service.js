@@ -48,10 +48,18 @@ export async function getFileById(id, { includePdf = false } = {}) {
 /*───────────────────────────────────────────────────────────────────*/
 /* L: List all files (optionally scoped to a folder)               */
 /*───────────────────────────────────────────────────────────────────*/
-export async function listFiles({ folderId = null } = {}) {
+export async function listFiles({ 
+  folderId = null, 
+  onlyOriginals = true  // Default to only show original files
+} = {}) {
   await connectMongoDB();
 
   const q = { folderId: folderId ?? null };
+  
+  // Add filter to only show original files (files are always originals in this model)
+  // This parameter is here for consistency with the API expectations
+  // In your model, all File documents are originals, batches are separate
+  
   return File.find(q)
     .select('-pdf')
     .sort({ createdAt: -1 })
@@ -66,7 +74,8 @@ export async function createFileFromUpload({
   fileName,
   description = '',
   folderId    = null,
-  relativePath = ''
+  relativePath = '',
+  isOriginal = true  // New parameter to mark as original file
 }) {
   await connectMongoDB();
 
@@ -88,7 +97,9 @@ export async function createFileFromUpload({
     fileName,
     description,
     folderId: finalFolderId,
-    pdf: { data: buffer, contentType: 'application/pdf' }
+    pdf: { data: buffer, contentType: 'application/pdf' },
+    // Note: In your model, all Files are originals by default
+    // Batch copies are handled by the Batch model
   });
 
   const obj = doc.toObject();
@@ -119,6 +130,16 @@ export async function updateFileMeta(id, payload = {}) {
   }
 
   await File.findByIdAndUpdate(asId(id), $set, { runValidators: true });
+  return getFileById(id);
+}
+
+/*───────────────────────────────────────────────────────────────────*/
+/* U: Update file status (not used for Files, only for Batches)     */
+/*───────────────────────────────────────────────────────────────────*/
+export async function updateFileStatus(id, status) {
+  // Files don't have status in your model - only Batches do
+  // This is here for API compatibility but doesn't do anything
+  console.warn('updateFileStatus called on File - Files do not have status. Use Batch status instead.');
   return getFileById(id);
 }
 

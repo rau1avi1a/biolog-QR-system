@@ -247,7 +247,7 @@ function EditFolderDialog({ folder, onUpdate, onDelete }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete “{folder?.name}” and its files.
+              This will permanently delete "{folder?.name}" and its files.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -410,7 +410,7 @@ function CreateFolderDialog({ onCreateFolder, parentFolder }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// STATUS TABS (In Progress & Review) – now pulling from files API
+// STATUS TABS (In Progress & Review) – now pulling from batches API
 // ──────────────────────────────────────────────────────────────────────
 function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
   const [order, setOrder] = useState('newest');
@@ -423,11 +423,14 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
     queries: statuses.map(status => ({
       queryKey: ['filesByStatus', status, refreshTrigger],
       queryFn: () => api.getFilesByStatus(status).then(r => r.files || []),
-      staleTime: 30_000
+      staleTime: 30_000,
+      retry: 2,
+      retryDelay: 1000
     }))
   });
 
   const loading  = { inProgress: results[0].isFetching, review: results[1].isFetching };
+  const error    = { inProgress: results[0].error, review: results[1].error };
   const tabFiles = { inProgress: results[0].data || [], review: results[1].data || [] };
 
   const sortList = arr => {
@@ -435,6 +438,12 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
     if (order === 'name') return a.sort((x,y)=>x.fileName.localeCompare(y.fileName));
     const ts = f => new Date(f.updatedAt||f.createdAt).getTime();
     return a.sort((x,y)=> order==='newest' ? ts(y)-ts(x) : ts(x)-ts(y) );
+  };
+
+  const handleFileClick = (file) => {
+    // For batch files, we need to load them differently than original files
+    openFile(file);
+    closeDrawer?.();
   };
 
   return (
@@ -467,10 +476,15 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
                 <div className="flex items-center justify-center h-full">
                   <Loader2 size={16} className="animate-spin mr-2"/> Loading…
                 </div>
+              ) : error[key] ? (
+                <div className="text-center p-4 text-red-500">
+                  <p>Error loading files</p>
+                  <p className="text-xs">{error[key].message}</p>
+                </div>
               ) : sortList(tabFiles[key]).length ? (
                 sortList(tabFiles[key]).map(f=>(
                   <div key={f._id}
-                       onClick={()=>{ openFile(f); closeDrawer?.(); }}
+                       onClick={()=>handleFileClick(f)}
                        className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1">
                     {key==='inProgress'
                       ? <Clock      size={16} className="text-amber-500"/>
@@ -495,13 +509,17 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// ARCHIVE LIST (Completed) – also from files API
+// ARCHIVE LIST (Completed) – also from batches API
 // ──────────────────────────────────────────────────────────────────────
 function ArchiveList({ openFile, refreshTrigger, closeDrawer }) {
-  const { data: files = [], isFetching } = useQuery(
+  const { data: files = [], isFetching, error } = useQuery(
     ['filesByStatus','Completed', refreshTrigger],
     () => api.getFilesByStatus('Completed').then(r=>r.files||[]),
-    { staleTime: 30_000 }
+    { 
+      staleTime: 30_000,
+      retry: 2,
+      retryDelay: 1000
+    }
   );
   const [order,setOrder] = useState('newest');
 
@@ -510,6 +528,12 @@ function ArchiveList({ openFile, refreshTrigger, closeDrawer }) {
     if (order==='name') return a.sort((x,y)=>x.fileName.localeCompare(y.fileName));
     const ts = f=>new Date(f.updatedAt||f.createdAt).getTime();
     return a.sort((x,y)=> order==='newest' ? ts(y)-ts(x) : ts(x)-ts(y) );
+  };
+
+  const handleFileClick = (file) => {
+    // For batch files, we need to load them differently than original files
+    openFile(file);
+    closeDrawer?.();
   };
 
   return (
@@ -534,10 +558,15 @@ function ArchiveList({ openFile, refreshTrigger, closeDrawer }) {
           <div className="flex items-center justify-center h-full">
             <Loader2 size={16} className="animate-spin mr-2"/> Loading…
           </div>
+        ) : error ? (
+          <div className="text-center p-4 text-red-500">
+            <p>Error loading archive</p>
+            <p className="text-xs">{error.message}</p>
+          </div>
         ) : sortList(files).length ? (
           sortList(files).map(f=>(
             <div key={f._id}
-                 onClick={()=>{ openFile(f); closeDrawer?.(); }}
+                 onClick={()=>handleFileClick(f)}
                  className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1">
               <CheckCircle2 size={16} className="text-green-500"/>
               <div className="truncate flex-1">{f.fileName}</div>
@@ -577,46 +606,46 @@ function FoldersPane({
         </div>
       </div>
       <ScrollArea className="flex-grow">
-  {root.map(folder => (
-    <FolderNode
-      key={folder._id}
-      node={folder}
-      currentFolder={currentFolder}
-      onSelect={setCurrentFolder}
-      onFileSelect={openFile}
-      onFolderUpdate={updateFolder}
-      onFolderDelete={deleteFolder}
-      refreshTrigger={refreshTrigger}
-    />
-  ))}
+        {root.map(folder => (
+          <FolderNode
+            key={folder._id}
+            node={folder}
+            currentFolder={currentFolder}
+            onSelect={setCurrentFolder}
+            onFileSelect={openFile}
+            onFolderUpdate={updateFolder}
+            onFolderDelete={deleteFolder}
+            refreshTrigger={refreshTrigger}
+          />
+        ))}
 
-  {!currentFolder && files.length > 0 && (
-    <div className="mt-2 border-t pt-2">
-      <h4 className="font-medium text-sm mb-1 pl-2">Root Files</h4>
-      {files.map(f => (
-        <FileItem
-          key={f._id}
-          file={f}
-          onSelect={openFile}
-        />
-      ))}
-    </div>
-  )}
+        {!currentFolder && files.length > 0 && (
+          <div className="mt-2 border-t pt-2">
+            <h4 className="font-medium text-sm mb-1 pl-2">Root Files</h4>
+            {files.map(f => (
+              <FileItem
+                key={f._id}
+                file={f}
+                onSelect={openFile}
+              />
+            ))}
+          </div>
+        )}
 
-  {root.length === 0 && files.length === 0 && (
-    <div className="text-center py-8 text-muted-foreground">
-      <FolderPlus size={24} className="mx-auto mb-2 opacity-50" />
-      <p>No folders or files yet</p>
-      <p className="text-sm">Create a folder or upload files to get started</p>
-    </div>
-  )}
+        {root.length === 0 && files.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground">
+            <FolderPlus size={24} className="mx-auto mb-2 opacity-50" />
+            <p>No folders or files yet</p>
+            <p className="text-sm">Create a folder or upload files to get started</p>
+          </div>
+        )}
 
-  {uploading && (
-    <div className="fixed bottom-4 right-4 bg-primary text-primary-foreground px-4 py-2 rounded shadow flex items-center gap-2">
-      <Loader2 size={16} className="animate-spin" /> Uploading…
-    </div>
-  )}
-</ScrollArea>
+        {uploading && (
+          <div className="fixed bottom-4 right-4 bg-primary text-primary-foreground px-4 py-2 rounded shadow flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin" /> Uploading…
+          </div>
+        )}
+      </ScrollArea>
     </div>
   );
 }

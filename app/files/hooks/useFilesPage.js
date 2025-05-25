@@ -26,9 +26,69 @@ export default function useFilesPage() {
 
   /* helper to open/load a file */
   const openFile = useCallback(async (file) => {
-    const { file: loaded } = await api.load(file._id);
-    setCurrentDoc({ ...loaded, pdf: loaded.pdf });
+    try {
+      if (file.originalFileId) {
+        // This is a batch file, load it via batch API
+        const { batch } = await api.getBatch(file._id);
+        if (batch) {
+          setCurrentDoc({ 
+            ...batch, 
+            pdf: batch.pdf,
+            isBatch: true,
+            originalFileId: batch.fileId
+          });
+        } else {
+          console.error('Batch not found or empty response');
+        }
+      } else {
+        // This is an original file, load normally
+        const { file: loaded } = await api.load(file._id);
+        if (loaded) {
+          setCurrentDoc({ 
+            ...loaded, 
+            pdf: loaded.pdf,
+            isBatch: false
+          });
+        } else {
+          console.error('File not found or empty response');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load file:', error);
+    }
   }, []);
+
+  /* NEW: Save function that handles both original and batch files */
+  const saveFile = useCallback(async (editorData) => {
+    if (!currentDoc) return;
+
+    try {
+      if (currentDoc.isBatch) {
+        // Update existing batch
+        await api.updateBatch(currentDoc._id, {
+          overlayPng: editorData.overlayPng,
+          annotations: editorData.annotations,
+          // Add other editor data as needed
+        });
+      } else {
+        // Create new batch from original file
+        const { batch } = await api.saveBatchFromEditor(currentDoc._id, editorData);
+        
+        // Switch to the newly created batch
+        setCurrentDoc({
+          ...batch,
+          pdf: currentDoc.pdf, // Keep the same PDF data
+          isBatch: true,
+          originalFileId: batch.fileId
+        });
+      }
+      
+      triggerRefresh(); // Refresh the UI
+    } catch (error) {
+      console.error('Failed to save file:', error);
+      throw error;
+    }
+  }, [currentDoc]);
 
   /* ──────────────────────────────────────────────── */
   /*  B.  Navigator-level state                      */
@@ -93,7 +153,7 @@ export default function useFilesPage() {
     currentDoc, setCurrentDoc,
     isDraw,     setIsDraw,
     undoRef,    saveRef,
-    openFile,
+    openFile,   saveFile,  // NEW: expose saveFile
 
     /* tree + list stuff */
     view, setView,

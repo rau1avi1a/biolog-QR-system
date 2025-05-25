@@ -6,7 +6,7 @@ import {
   listFiles,
   getFileById,
   createFileFromUpload,
-} from '@/services/file.service';   // ← singular “service”, not “services”
+} from '@/services/file.service';   // ← singular "service", not "services"
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,7 @@ async function parseUpload(req) {
     fileName     : form.get('fileName')    || blob.name,
     description  : form.get('description') || '',
     folderId     : form.get('folderId')    || null,
-    /* “webkitRelativePath” -> relativePath (drag-n-drop nested folder) */
+    /* "webkitRelativePath" -> relativePath (drag-n-drop nested folder) */
     relativePath : form.get('relativePath')|| '',
   };
 }
@@ -48,7 +48,7 @@ export async function GET(req) {
       return NextResponse.json({ file });
     }
 
-    /* B. quick “filename contains *all* tokens” search ———————— */
+    /* B. quick "filename contains *all* tokens" search ———————— */
     if (partial) {
       const tokens = partial.trim().split(/\s+/).filter(Boolean);
       if (tokens.length === 0) {
@@ -70,7 +70,12 @@ export async function GET(req) {
     }
 
     /* C. list ——————————————————————————————————— */
-    const files = await listFiles({ folderId: folder ?? null });
+    // IMPORTANT: Only return original files, not batch copies
+    // This ensures the file explorer only shows original files
+    const files = await listFiles({ 
+      folderId: folder ?? null,
+      onlyOriginals: true  // Add this filter to your service
+    });
     return NextResponse.json({ files });
   } catch (err) {
     console.error('GET /api/files', err);
@@ -84,7 +89,15 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const data = await parseUpload(req);
-    const file = await createFileFromUpload(data);
+    
+    // Mark this as an original file (not a batch copy)
+    const fileData = {
+      ...data,
+      isOriginal: true,  // Flag to distinguish from batch copies
+      status: null       // Original files don't have workflow status
+    };
+    
+    const file = await createFileFromUpload(fileData);
     return NextResponse.json({ file });
   } catch (err) {
     console.error('POST /api/files', err);

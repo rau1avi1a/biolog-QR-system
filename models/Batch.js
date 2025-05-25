@@ -31,6 +31,7 @@ const batchSchema = new Schema({
 
   /* operator overlay / signed copy */
   overlayPng:String,
+  overlayHistory: [String],
   signedPdf :{ data:Buffer, contentType:String },
 
   status:{ type:String, enum:['In Progress', 'Review', 'Completed'], default:'In Progress' },
