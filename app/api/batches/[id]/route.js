@@ -1,66 +1,134 @@
-// app/api/batches/[id]/route.js
-
+// api/batches/[id]/route.js
 import { NextResponse } from 'next/server';
 import { getBatchById, updateBatch, deleteBatch } from '@/services/batch.service';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(req, { params }) {
+export async function GET(request, { params }) {
   try {
-    const { id } = await params;
+    const { id } = await params; // FIXED: await params
     
     if (!id) {
-      return NextResponse.json({ error: 'Batch ID required' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Batch ID required' },
+        { status: 400 }
+      );
     }
-
-    const batch = await getBatchById(id, { includePdf: true });
+    
+    const batch = await getBatchById(id);
     
     if (!batch) {
-      return NextResponse.json({ error: 'Batch not found' }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: 'Batch not found' },
+        { status: 404 }
+      );
     }
-
-    return NextResponse.json({ batch });
-  } catch (err) {
-    console.error('GET /api/batches/[id]', err);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+    
+    return NextResponse.json({
+      success: true,
+      data: batch
+    });
+    
+  } catch (error) {
+    console.error('GET batch error:', error);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Failed to fetch batch',
+        message: error.message 
+      },
+      { status: 500 }
+    );
   }
 }
 
-export async function PATCH(req, { params }) {
+export async function PATCH(request, { params }) {
   try {
-    const { id } = await params;
-    const data = await req.json();
+    const { id } = await params; // FIXED: await params
+    const payload = await request.json();
     
     if (!id) {
-      return NextResponse.json({ error: 'Batch ID required' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Batch ID required' },
+        { status: 400 }
+      );
     }
-
-    const batch = await updateBatch(id, data);
+    
+    const batch = await updateBatch(id, payload);
     
     if (!batch) {
-      return NextResponse.json({ error: 'Batch not found' }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: 'Batch not found' },
+        { status: 404 }
+      );
     }
-
-    return NextResponse.json({ batch });
-  } catch (err) {
-    console.error('PATCH /api/batches/[id]', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    
+    return NextResponse.json({
+      success: true,
+      data: batch
+    });
+    
+  } catch (error) {
+    console.error('PUT batch error:', error);
+    
+    if (error.message === 'Batch not found') {
+      return NextResponse.json(
+        { success: false, error: 'Batch not found' },
+        { status: 404 }
+      );
+    }
+    
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Failed to update batch',
+        message: error.message 
+      },
+      { status: 500 }
+    );
   }
 }
 
-export async function DELETE(req, { params }) {
+export async function DELETE(request, { params }) {
   try {
-    const { id } = await params;
+    const { id } = await params; // FIXED: await params
     
     if (!id) {
-      return NextResponse.json({ error: 'Batch ID required' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Batch ID required' },
+        { status: 400 }
+      );
     }
-
-    await deleteBatch(id);
     
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error('DELETE /api/batches/[id]', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const batch = await deleteBatch(id);
+    
+    if (!batch) {
+      return NextResponse.json(
+        { success: false, error: 'Batch not found' },
+        { status: 404 }
+      );
+    }
+    
+    return NextResponse.json({
+      success: true,
+      data: batch
+    });
+    
+  } catch (error) {
+    console.error('DELETE batch error:', error);
+    
+    if (error.message === 'Batch not found') {
+      return NextResponse.json(
+        { success: false, error: 'Batch not found' },
+        { status: 404 }
+      );
+    }
+    
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Failed to delete batch',
+        message: error.message 
+      },
+      { status: 500 }
+    );
   }
 }

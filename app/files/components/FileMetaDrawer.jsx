@@ -92,7 +92,7 @@ if (value) {                                  // already chosen ➜ chip + ×
 
 /* ───────── main drawer ───────── */
 export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, readOnly = false }) {
-  const [desc,     setDesc]     = useState('');
+  // Removed desc state since we're not using description
   const [product,  setProduct]  = useState(null);
   const [solution, setSolution] = useState(null);
   const [rows,     setRows]     = useState([]);
@@ -111,7 +111,7 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     
     console.log('Data being used:', data);
     
-    setDesc   (data.description   || '');
+    // Removed description since it's not in the models
     setProduct(data.productRef    || null);
     setSolution(data.solutionRef  || null);
     setOutQty (data.recipeQty     ?? '');
@@ -163,7 +163,7 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     if (!file || readOnly) return;
     setSaving(true);
     await api.updateFileMeta(file._id, {
-      description : desc,
+      // Removed description since it's not in the model
       productRef  : product ?._id  || null,
       solutionRef : solution?._id || null,
       recipeQty   : outQty ? Number(outQty) : null,
@@ -211,15 +211,7 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
             </div>
           )}
 
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Description</p>
-            <Textarea 
-              rows={3} 
-              value={desc} 
-              onChange={e=>setDesc(e.target.value)}
-              disabled={readOnly}
-            />
-          </div>
+          {/* Removed Description section since it's not in the models */}
 
           <AsyncSelect 
             label="Solution produced" 

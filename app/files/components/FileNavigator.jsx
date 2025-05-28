@@ -1,7 +1,7 @@
 // app/files/components/FileNavigator.jsx
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   Clock,
@@ -9,16 +9,20 @@ import {
   Loader2,
   Home,
   ChevronRight,
+  ChevronLeft,        // Added for archive navigation
   ChevronDown as ChevronDownIcon,
   Search,
   Folder as FolderIcon,
   File as FileIcon,
+  FileX,              // Added for empty archive states
   FolderPlus,
   UploadCloud,
   MoreHorizontal,
   Edit2,
   Trash2,
-  CheckCircle2
+  CheckCircle2,
+  Archive,            // Added for archive icon
+  SortAsc             // Added for sort dropdown
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -412,13 +416,15 @@ function CreateFolderDialog({ onCreateFolder, parentFolder }) {
 // ──────────────────────────────────────────────────────────────────────
 // STATUS TABS (In Progress & Review) – now pulling from batches API
 // ──────────────────────────────────────────────────────────────────────
+// Fixed StatusTabs component in FileNavigator.jsx
+
 function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
   const [order, setOrder] = useState('newest');
 
   // two statuses we display
   const statuses = ['In Progress', 'Review'];
 
-  // trigger two parallel queries
+  // FIXED: Use object syntax for TanStack Query v5
   const results = useQueries({
     queries: statuses.map(status => ({
       queryKey: ['filesByStatus', status, refreshTrigger],
@@ -429,52 +435,52 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
     }))
   });
 
-  const loading  = { inProgress: results[0].isFetching, review: results[1].isFetching };
-  const error    = { inProgress: results[0].error, review: results[1].error };
+  const loading = { inProgress: results[0].isFetching, review: results[1].isFetching };
+  const error = { inProgress: results[0].error, review: results[1].error };
   const tabFiles = { inProgress: results[0].data || [], review: results[1].data || [] };
 
   const sortList = arr => {
     const a = [...arr];
-    if (order === 'name') return a.sort((x,y)=>x.fileName.localeCompare(y.fileName));
-    const ts = f => new Date(f.updatedAt||f.createdAt).getTime();
-    return a.sort((x,y)=> order==='newest' ? ts(y)-ts(x) : ts(x)-ts(y) );
+    if (order === 'name') return a.sort((x, y) => x.fileName.localeCompare(y.fileName));
+    const ts = f => new Date(f.updatedAt || f.createdAt).getTime();
+    return a.sort((x, y) => order === 'newest' ? ts(y) - ts(x) : ts(x) - ts(y));
   };
 
   const handleFileClick = (file) => {
-    // For batch files, we need to load them differently than original files
+    // These are batch files, not archived files - don't mark as archived
     openFile(file);
     closeDrawer?.();
   };
-
+  
   return (
     <div className="space-y-4">
       <Tabs defaultValue="inProgress">
         <TabsList className="grid grid-cols-2 mb-4">
-          <TabsTrigger value="inProgress"> <Clock size={14}/> Progress </TabsTrigger>
-          <TabsTrigger value="review">     <CircleDot size={14}/> Review   </TabsTrigger>
+          <TabsTrigger value="inProgress"> <Clock size={14} /> Progress </TabsTrigger>
+          <TabsTrigger value="review">     <CircleDot size={14} /> Review   </TabsTrigger>
         </TabsList>
 
         <div className="mb-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="flex w-full justify-between">
-                Sort by: {order==='newest'?'Newest':order==='oldest'?'Oldest':'Name'}
+                Sort by: {order === 'newest' ? 'Newest' : order === 'oldest' ? 'Oldest' : 'Name'}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={()=>setOrder('newest')}>Newest first</DropdownMenuItem>
-              <DropdownMenuItem onClick={()=>setOrder('oldest')}>Oldest first</DropdownMenuItem>
-              <DropdownMenuItem onClick={()=>setOrder('name')}>Name (A–Z)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setOrder('newest')}>Newest first</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setOrder('oldest')}>Oldest first</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setOrder('name')}>Name (A–Z)</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        {['inProgress','review'].map((key,i)=>(
+        {['inProgress', 'review'].map((key, i) => (
           <TabsContent key={key} value={key}>
             <ScrollArea className="h-[calc(100vh-250px)] border rounded-md p-2">
               {loading[key] ? (
                 <div className="flex items-center justify-center h-full">
-                  <Loader2 size={16} className="animate-spin mr-2"/> Loading…
+                  <Loader2 size={16} className="animate-spin mr-2" /> Loading…
                 </div>
               ) : error[key] ? (
                 <div className="text-center p-4 text-red-500">
@@ -482,13 +488,13 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
                   <p className="text-xs">{error[key].message}</p>
                 </div>
               ) : sortList(tabFiles[key]).length ? (
-                sortList(tabFiles[key]).map(f=>(
+                sortList(tabFiles[key]).map(f => (
                   <div key={f._id}
-                       onClick={()=>handleFileClick(f)}
-                       className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1">
-                    {key==='inProgress'
-                      ? <Clock      size={16} className="text-amber-500"/>
-                      : <CircleDot  size={16} className="text-blue-500"/>}
+                    onClick={() => handleFileClick(f)}
+                    className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1">
+                    {key === 'inProgress'
+                      ? <Clock size={16} className="text-amber-500" />
+                      : <CircleDot size={16} className="text-blue-500" />}
                     <div className="truncate flex-1">{f.fileName}</div>
                     {f.updatedAt && (
                       <span className="text-xs text-muted-foreground">
@@ -511,44 +517,145 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
 // ──────────────────────────────────────────────────────────────────────
 // ARCHIVE LIST (Completed) – also from batches API
 // ──────────────────────────────────────────────────────────────────────
+
+// Completely rewritten ArchiveList component - replace in FileNavigator.jsx
+
 function ArchiveList({ openFile, refreshTrigger, closeDrawer }) {
-  const { data: files = [], isFetching, error } = useQuery(
-    ['filesByStatus','Completed', refreshTrigger],
-    () => api.getFilesByStatus('Completed').then(r=>r.files||[]),
-    { 
-      staleTime: 30_000,
-      retry: 2,
-      retryDelay: 1000
+  const [currentArchiveFolder, setCurrentArchiveFolder] = useState(null);
+  const [order, setOrder] = useState('newest');
+
+  // Build archive folder structure from archived batches
+  const { data: archivedBatches = [], isFetching, error } = useQuery({
+    queryKey: ['archivedBatches', refreshTrigger],
+    queryFn: () => api.getAllArchivedFiles().then(r => r.files || []),
+    staleTime: 30_000,
+    retry: 2,
+    retryDelay: 1000
+  });
+
+  // Build folder tree structure from archived batches - completely in useMemo
+  const { folders, rootFiles } = useMemo(() => {
+    if (!archivedBatches.length) {
+      return { folders: [], rootFiles: [] };
     }
-  );
-  const [order,setOrder] = useState('newest');
 
-  const sortList = arr => {
+    // Group batches by folder path to create folder structure
+    const folderMap = new Map();
+    const rootFiles = [];
+
+    archivedBatches.forEach(batch => {
+      const path = batch.folderPath || 'Root';
+      
+      if (path === 'Root') {
+        rootFiles.push(batch);
+      } else {
+        // Split the path and build nested structure
+        const pathParts = path.split(' / ');
+        let currentPath = '';
+        
+        pathParts.forEach((part, index) => {
+          const isLast = index === pathParts.length - 1;
+          currentPath = currentPath ? `${currentPath} / ${part}` : part;
+          
+          if (!folderMap.has(currentPath)) {
+            folderMap.set(currentPath, {
+              _id: `archive-${currentPath.replace(/[\s\/]/g, '-')}`,
+              name: part,
+              fullPath: currentPath,
+              parentPath: index > 0 ? pathParts.slice(0, index).join(' / ') : null,
+              children: [],
+              files: [],
+              isArchiveFolder: true
+            });
+          }
+          
+          if (isLast) {
+            folderMap.get(currentPath).files.push(batch);
+          }
+        });
+      }
+    });
+
+    // Build hierarchical structure
+    const folders = Array.from(folderMap.values());
+    const rootFolders = [];
+
+    folders.forEach(folder => {
+      if (!folder.parentPath) {
+        rootFolders.push(folder);
+      } else {
+        const parent = folderMap.get(folder.parentPath);
+        if (parent) {
+          parent.children.push(folder);
+        }
+      }
+    });
+
+    return { folders: rootFolders, rootFiles };
+  }, [archivedBatches]);
+
+  const sortList = useCallback((arr) => {
+    if (!Array.isArray(arr)) return [];
     const a = [...arr];
-    if (order==='name') return a.sort((x,y)=>x.fileName.localeCompare(y.fileName));
-    const ts = f=>new Date(f.updatedAt||f.createdAt).getTime();
-    return a.sort((x,y)=> order==='newest' ? ts(y)-ts(x) : ts(x)-ts(y) );
-  };
+    if (order === 'name') return a.sort((x, y) => x.fileName.localeCompare(y.fileName));
+    const ts = f => new Date(f.archivedAt || f.updatedAt || f.createdAt).getTime();
+    return a.sort((x, y) => order === 'newest' ? ts(y) - ts(x) : ts(x) - ts(y));
+  }, [order]);
 
-  const handleFileClick = (file) => {
-    // For batch files, we need to load them differently than original files
+  const handleFileClick = useCallback((file) => {
     openFile(file);
     closeDrawer?.();
-  };
+  }, [openFile, closeDrawer]);
+
+  const getCurrentFiles = useMemo(() => {
+    if (!currentArchiveFolder) {
+      return rootFiles;
+    }
+    return currentArchiveFolder.files || [];
+  }, [currentArchiveFolder, rootFiles]);
+
+  const getCurrentFolders = useMemo(() => {
+    if (!currentArchiveFolder) {
+      return folders;
+    }
+    return currentArchiveFolder.children || [];
+  }, [currentArchiveFolder, folders]);
 
   return (
     <div className="space-y-4">
-      <div>
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center justify-between">
+        <Breadcrumb className="text-sm">
+          <BreadcrumbItem>
+            <BreadcrumbLink
+              onClick={() => setCurrentArchiveFolder(null)}
+              className="flex items-center gap-1 cursor-pointer"
+            >
+              <Archive size={14} /> Archive
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          {currentArchiveFolder && (
+            <>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <span className="font-medium">{currentArchiveFolder.name}</span>
+              </BreadcrumbItem>
+            </>
+          )}
+        </Breadcrumb>
+
+        {/* Sort dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="flex w-full justify-between">
-              Sort by: {order==='newest'?'Newest':order==='oldest'?'Oldest':'Name'}
+            <Button variant="outline" size="sm">
+              <SortAsc size={14} className="mr-1" />
+              {order === 'newest' ? 'Newest' : order === 'oldest' ? 'Oldest' : 'Name'}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={()=>setOrder('newest')}>Newest first</DropdownMenuItem>
-            <DropdownMenuItem onClick={()=>setOrder('oldest')}>Oldest first</DropdownMenuItem>
-            <DropdownMenuItem onClick={()=>setOrder('name')}>Name (A-Z)</DropdownMenuItem>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setOrder('newest')}>Newest first</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setOrder('oldest')}>Oldest first</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setOrder('name')}>Name (A-Z)</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -556,29 +663,72 @@ function ArchiveList({ openFile, refreshTrigger, closeDrawer }) {
       <ScrollArea className="h-[calc(100vh-250px)] border rounded-md p-2">
         {isFetching ? (
           <div className="flex items-center justify-center h-full">
-            <Loader2 size={16} className="animate-spin mr-2"/> Loading…
+            <Loader2 size={16} className="animate-spin mr-2" /> Loading archive…
           </div>
         ) : error ? (
           <div className="text-center p-4 text-red-500">
             <p>Error loading archive</p>
             <p className="text-xs">{error.message}</p>
           </div>
-        ) : sortList(files).length ? (
-          sortList(files).map(f=>(
-            <div key={f._id}
-                 onClick={()=>handleFileClick(f)}
-                 className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1">
-              <CheckCircle2 size={16} className="text-green-500"/>
-              <div className="truncate flex-1">{f.fileName}</div>
-              {f.updatedAt && (
-                <span className="text-xs text-muted-foreground">
-                  {new Date(f.updatedAt).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-          ))
         ) : (
-          <div className="text-center p-4 text-muted-foreground">Archive is empty</div>
+          <>
+            {/* Folders */}
+            {getCurrentFolders.map(folder => (
+              <div
+                key={folder._id}
+                onClick={() => setCurrentArchiveFolder(folder)}
+                className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1"
+              >
+                <FolderIcon size={16} className="text-blue-500" />
+                <div className="truncate flex-1">{folder.name}</div>
+                <Badge variant="outline" className="text-xs">
+                  {folder.files?.length || 0}
+                </Badge>
+              </div>
+            ))}
+
+            {/* Files */}
+            {getCurrentFiles.length > 0 && (
+              <div className={getCurrentFolders.length > 0 ? "mt-2 pt-2 border-t" : ""}>
+                {getCurrentFolders.length > 0 && (
+                  <h4 className="font-medium text-sm mb-1 pl-2 text-muted-foreground">Files</h4>
+                )}
+                {sortList(getCurrentFiles).map(f => (
+                  <div
+                    key={f._id}
+                    onClick={() => handleFileClick(f)}
+                    className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1"
+                  >
+                    <CheckCircle2 size={16} className="text-green-500" />
+                    <div className="truncate flex-1">{f.fileName}</div>
+                    {f.archivedAt && (
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(f.archivedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {getCurrentFolders.length === 0 && getCurrentFiles.length === 0 && (
+              <div className="text-center p-4 text-muted-foreground">
+                {currentArchiveFolder ? (
+                  <>
+                    <FileX size={24} className="mx-auto mb-2 opacity-50" />
+                    <p>No archived files in this folder</p>
+                  </>
+                ) : (
+                  <>
+                    <Archive size={24} className="mx-auto mb-2 opacity-50" />
+                    <p>No archived files yet</p>
+                    <p className="text-xs">Complete some files to start building your archive</p>
+                  </>
+                )}
+              </div>
+            )}
+          </>
         )}
       </ScrollArea>
     </div>

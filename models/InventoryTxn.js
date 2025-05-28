@@ -8,7 +8,7 @@ const lineSchema = new Schema({
   qty  :{ type:Number, required:true }
 }, { _id:false });
 
-export const InventoryTxn = model('InventoryTxn', new Schema({
+const inventoryTxnSchema = new Schema({
   /* WHAT happened */
   txnType :{ type:String, enum:['receipt','issue','adjustment','build'], required:true },
   refDoc  :{ type:Schema.Types.ObjectId },         // PO, FileVersion, WorkOrder …
@@ -33,4 +33,7 @@ export const InventoryTxn = model('InventoryTxn', new Schema({
 }, {
   timestamps:true,
   index: [{ txnType:1, postedAt:-1 }]
-}));
+});
+
+// Check if model already exists to prevent OverwriteModelError
+export const InventoryTxn = mongoose.models.InventoryTxn || model('InventoryTxn', inventoryTxnSchema);

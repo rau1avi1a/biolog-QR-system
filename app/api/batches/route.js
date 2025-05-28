@@ -1,119 +1,126 @@
-// app/api/batches/route.js
-
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createBatch, listBatches } from '@/services/batch.service';
-import { getFileById } from '@/services/file.service';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(req) {
+export async function POST(request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const status = searchParams.get('status');
-    const fileId = searchParams.get('fileId');
-    const byStatus = searchParams.get('by-status'); // New parameter for status-based queries
+    const payload = await request.json();
+    console.log('POST /api/batches - payload:', JSON.stringify(payload, null, 2));
 
-    // Handle different query types
-    if (byStatus === 'true' || status) {
-      // Return batches by status, formatted as files for the UI
-      if (!status) {
-        return NextResponse.json({ error: 'Status parameter required for by-status queries' }, { status: 400 });
-      }
-
-      const batches = await listBatches({ status });
-      
-      // Transform batches to look like files for the UI
-      // Note: fileName is now included in the batch objects from listBatches
-      const files = batches.map(batch => ({
-        _id: batch._id,
-        fileName: batch.fileName || `Batch Run ${batch.runNumber}`, // Use batch.fileName or fallback
-        status: batch.status,
-        updatedAt: batch.updatedAt,
-        createdAt: batch.createdAt,
-        originalFileId: batch.fileId, // Keep reference to original
-        runNumber: batch.runNumber,   // Add run number for identification
-        // Add any other fields your UI expects
-        description: batch.snapshot?.description || batch.description,
-        productRef: batch.snapshot?.productRef,
-        solutionRef: batch.snapshot?.solutionRef,
-        recipeQty: batch.snapshot?.recipeQty,
-        recipeUnit: batch.snapshot?.recipeUnit,
-        components: batch.snapshot?.components,
-      }));
-
-      return NextResponse.json({ files });
-    } else {
-      // Regular batch listing
-      const batches = await listBatches({ status, fileId });
-      return NextResponse.json({ batches });
+    // Basic validation
+    const fileId = payload.originalFileId || payload.fileId;
+    if (!fileId) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Missing fileId' 
+        },
+        { status: 400 }
+      );
     }
-  } catch (err) {
-    console.error('GET /api/batches', err);
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+
+    // Handle different types of batch creation
+    if (payload.originalFileId && payload.editorData) {
+      // This is a save from the editor with confirmation data
+      const { originalFileId, editorData, action, confirmationData } = payload;
+      
+      const batchPayload = {
+        originalFileId,
+        editorData,
+        action,
+        confirmationData,
+        status: getStatusFromAction(action),
+        // Set flags based on action
+        chemicalsTransacted: shouldTransactChemicals(action),
+        solutionCreated: shouldCreateSolution(action),
+        workOrderCreated: shouldCreateWorkOrder(action)
+      };
+
+      console.log('Creating batch with payload:', batchPayload);
+      const batch = await createBatch(batchPayload);
+      
+      return NextResponse.json({
+        success: true,
+        data: batch
+      }, { status: 201 });
+    } else {
+      // Regular batch creation
+      const batch = await createBatch(payload);
+      return NextResponse.json({
+        success: true,
+        data: batch
+      }, { status: 201 });
+    }
+  } catch (error) {
+    console.error('POST /api/batches error:', error);
+    
+    if (error.message === 'File not found') {
+      return NextResponse.json(
+        { success: false, error: 'File not found' },
+        { status: 404 }
+      );
+    }
+    
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Failed to create batch',
+        message: error.message 
+      },
+      { status: 500 }
+    );
   }
 }
 
-export async function POST(req) {
+export async function GET(request) {
   try {
-    const data = await req.json();
-    
-    // Check if this is a save-from-editor request
-    if (data.originalFileId && data.editorData) {
-      // Handle save from editor with property inheritance
-      const { originalFileId, editorData, action = 'save', status } = data;
-      
-      if (!originalFileId || !editorData) {
-        return NextResponse.json({ 
-          error: 'originalFileId and editorData are required' 
-        }, { status: 400 });
-      }
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status');
+    const fileId = searchParams.get('fileId');
 
-      // Determine status based on action
-      let batchStatus = status;
-      if (!batchStatus) {
-        batchStatus = action === 'submit_review' ? 'Review' :
-                     action === 'submit_final' ? 'Completed' :
-                     action === 'reject' ? 'In Progress' : 'In Progress';
-      }
+    console.log('GET /api/batches - params:', { status, fileId });
 
-      // Get the original file to inherit its properties
-      const originalFile = await getFileById(originalFileId, { includePdf: false });
-      
-      if (!originalFile) {
-        return NextResponse.json({ 
-          error: 'Original file not found' 
-        }, { status: 404 });
-      }
+    const filter = {};
+    if (status) filter.status = status;
+    if (fileId) filter.fileId = fileId;
 
-      // Create batch with inherited properties from original file
-      const batchData = {
-        fileId: originalFileId,
-        status: batchStatus,
-        fileName: originalFile.fileName || `Copy of ${originalFile.fileName || 'Unknown'}`, // Ensure fileName is set
-        
-        // Inherit all the properties from the original file
-        description: originalFile.description,
-        productRef: originalFile.productRef,
-        solutionRef: originalFile.solutionRef,
-        recipeQty: originalFile.recipeQty,
-        recipeUnit: originalFile.recipeUnit,
-        components: originalFile.components,
-        
-        // Add editor-specific data
-        overlayPng: editorData.overlayPng,
-        // Note: Your batch model only supports single overlayPng, not multiple annotations
-        // If you need multiple overlays, you'll need to modify the Batch schema
-      };
+    const batches = await listBatches({ filter });
 
-      const batch = await createBatch(batchData);
-      return NextResponse.json({ batch });
-    } else {
-      // Regular batch creation
-      const batch = await createBatch(data);
-      return NextResponse.json({ batch });
-    }
-  } catch (err) {
-    console.error('POST /api/batches', err);
-    return NextResponse.json({ error: err.message }, { status: 400 });
+    return NextResponse.json({
+      success: true,
+      data: batches
+    });
+  } catch (error) {
+    console.error('GET /api/batches error:', error);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: error.message || 'Failed to fetch batches' 
+      },
+      { status: 500 }
+    );
   }
+}
+
+// Helper functions to determine what should happen based on action
+function getStatusFromAction(action) {
+  switch (action) {
+    case 'save': return 'In Progress';
+    case 'create_work_order': return 'In Progress';
+    case 'submit_review': return 'Review';
+    case 'complete': return 'Completed';
+    case 'reject': return 'In Progress';
+    default: return 'In Progress';
+  }
+}
+
+function shouldTransactChemicals(action) {
+  return action === 'submit_review'; // Only transact chemicals when submitting for review
+}
+
+function shouldCreateSolution(action) {
+  return action === 'submit_review'; // Only create solution when submitting for review
+}
+
+function shouldCreateWorkOrder(action) {
+  return action === 'create_work_order'; // Only create work order when specifically requested
 }

@@ -25,17 +25,20 @@ const makeDisc = (name, fields) =>
   Item.discriminators?.[name] ||
   Item.discriminator(name, new Schema(fields, { timestamps:true }));
 
+/* ───────── shared lot schema for items that need lot tracking ───────── */
+const lotSchema = {
+  _id       :{ type:Schema.Types.ObjectId, auto:true },
+  lotNumber :String,
+  quantity  :Number
+};
+
 /* ───────── discriminators ───────── */
 
 /* 1️⃣ Chemical */
 export const Chemical = makeDisc('chemical',{
   casNumber:String,
   location :String,
-  Lots:[{
-    _id       :{ type:Schema.Types.ObjectId, auto:true },
-    lotNumber :String,
-    quantity  :Number
-  }]
+  Lots:[lotSchema]
 });
 
 /* shared embedded-BOM row */
@@ -45,12 +48,14 @@ const componentSchema = new Schema({
   uom    :{ type:String, default:'ea' }
 },{ _id:false });
 
-/* 2️⃣ Solution */
+/* 2️⃣ Solution - now with Lots array for lot tracking */
 export const Solution = makeDisc('solution',{
-  bom:[componentSchema]          // ← embedded recipe
+  bom:[componentSchema],          // ← embedded recipe
+  Lots:[lotSchema]                // ← lot tracking for solutions
 });
 
-/* 3️⃣ Product */
+/* 3️⃣ Product - also with Lots array for lot tracking */
 export const Product  = makeDisc('product',{
-  bom:[componentSchema]
+  bom:[componentSchema],
+  Lots:[lotSchema]                // ← lot tracking for products
 });

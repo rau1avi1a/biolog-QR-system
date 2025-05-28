@@ -48,36 +48,70 @@ export default function usePdfEditorLogic({
     const cvs = canvasRef.current;
     if (!ctn || !cvs) return;
 
-    /* Get the exact size that the PDF is being rendered at */
-    const { width, height } = ctn.getBoundingClientRect();
+    // Get container size
+    const containerRect = ctn.getBoundingClientRect();
+    const { width: containerWidth, height: containerHeight } = containerRect;
     
-    console.log('Container dimensions:', { width, height });
+    console.log('Container dimensions:', { containerWidth, containerHeight });
     
-    // Use integer pixel dimensions to avoid sub-pixel rendering issues
-    const pixelWidth = Math.round(width);
-    const pixelHeight = Math.round(height);
-    
-    // Set canvas to match the exact container size
-    cvs.width  = pixelWidth;
-    cvs.height = pixelHeight;
-    cvs.style.width  = `${pixelWidth}px`;
-    cvs.style.height = `${pixelHeight}px`;
+    // Find the actual PDF canvas to get the real PDF rendering dimensions
+    const pdfCanvas = ctn.querySelector('.react-pdf__Page__canvas');
+    if (pdfCanvas) {
+      const pdfRect = pdfCanvas.getBoundingClientRect();
+      
+      console.log('PDF canvas actual dimensions:', { 
+        width: pdfRect.width, 
+        height: pdfRect.height,
+        left: pdfRect.left - containerRect.left,
+        top: pdfRect.top - containerRect.top
+      });
+      
+      // Set our overlay canvas to exactly match the PDF canvas
+      const pdfWidth = Math.round(pdfRect.width);
+      const pdfHeight = Math.round(pdfRect.height);
+      const pdfLeft = Math.round(pdfRect.left - containerRect.left);
+      const pdfTop = Math.round(pdfRect.top - containerRect.top);
+      
+      cvs.width = pdfWidth;
+      cvs.height = pdfHeight;
+      cvs.style.width = `${pdfWidth}px`;
+      cvs.style.height = `${pdfHeight}px`;
+      cvs.style.position = 'absolute';
+      cvs.style.left = `${pdfLeft}px`;
+      cvs.style.top = `${pdfTop}px`;
+      
+      console.log('Canvas positioned to match PDF:', { 
+        width: pdfWidth, 
+        height: pdfHeight, 
+        left: pdfLeft, 
+        top: pdfTop 
+      });
+    } else {
+      // Fallback: use full container
+      console.log('PDF canvas not found, using full container');
+      cvs.width = Math.round(containerWidth);
+      cvs.height = Math.round(containerHeight);
+      cvs.style.width = `${containerWidth}px`;
+      cvs.style.height = `${containerHeight}px`;
+      cvs.style.position = 'absolute';
+      cvs.style.left = '0px';
+      cvs.style.top = '0px';
+    }
 
     const ctx = cvs.getContext('2d');
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // Don't scale the context - draw at 1:1 pixel ratio
-    ctx.lineCap   = 'round';
-    ctx.lineJoin  = 'round';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.strokeStyle = 'black';
-    ctx.lineWidth   = 2;
-    ctxRef.current  = ctx;
+    ctx.lineWidth = 2;
+    ctxRef.current = ctx;
 
-    /* paint existing overlay */
+    // Paint existing overlay
     const o = overlaysRef.current[pageNo];
     if (o) {
       const img = new Image();
-      img.onload = () => ctx.drawImage(img, 0, 0, pixelWidth, pixelHeight);
-      img.src    = o;
+      img.onload = () => ctx.drawImage(img, 0, 0, cvs.width, cvs.height);
+      img.src = o;
     }
     setPageReady(true);
   }, [pageNo]);
@@ -199,156 +233,157 @@ export default function usePdfEditorLogic({
     }
   }, [histIdx, pageNo]);
 
-/* ─────────────────────── SAVE ────────────────────────────────── */
-  const save = useCallback(
-    async (action = 'save') => {
-      const overlays = Object.fromEntries(
-        Object.entries(overlaysRef.current).filter(([, png]) => png)
-      );
-      
-      console.log('Saving with overlays:', overlays);
-      console.log('Action:', action);
-      
-      // For rejection, we don't require new overlays - just change status
-      if (action === 'reject' && Object.keys(overlays).length === 0) {
-        setIsSaving(true);
-        try {
-          const updateData = { status: 'In Progress' };
-          const { batch } = await api.updateBatch(doc._id, updateData);
-          
-          setCurrentDoc({
-            ...doc,
-            ...batch,
-            isBatch: true
-          });
-          
-          refreshFiles?.();
-        } catch (err) {
-          console.error('Rejection error:', err);
-          alert('Error during rejection: ' + (err.message || 'Unknown error'));
-        } finally {
-          setIsSaving(false);
-        }
-        return;
-      }
-      
-      // For other actions, require overlays
-      if (Object.keys(overlays).length === 0) {
-        alert('No changes to save'); return;
-      }
+/* ─────────────────────── SAVE WITH CONFIRMATION SUPPORT ─────────── */
+// Updated save function in usePDFEditor.js - Debug version
 
-      // Get canvas and PDF container dimensions for proper scaling
-      const canvas = canvasRef.current;
-      const container = pageContainerRef.current;
-      
-      // Get the actual PDF page dimensions from react-pdf
-      const pdfPageElement = container?.querySelector('.react-pdf__Page__canvas');
-      const pdfDimensions = pdfPageElement ? {
-        width: pdfPageElement.width,
-        height: pdfPageElement.height,
-        displayWidth: pdfPageElement.offsetWidth,
-        displayHeight: pdfPageElement.offsetHeight
-      } : null;
-      
-      const canvasDimensions = canvas ? {
-        width: canvas.width,
-        height: canvas.height,
-        displayWidth: canvas.style.width ? parseFloat(canvas.style.width) : canvas.width,
-        displayHeight: canvas.style.height ? parseFloat(canvas.style.height) : canvas.height,
-        pdfDimensions: pdfDimensions
-      } : null;
-
-      console.log('Canvas dimensions:', canvasDimensions);
-      console.log('PDF element dimensions:', pdfDimensions);
-
+const save = useCallback(
+  async (action = 'save', confirmationData = null) => {
+    const overlays = Object.fromEntries(
+      Object.entries(overlaysRef.current).filter(([, png]) => png)
+    );
+    
+    // Handle rejection without overlays
+    if (action === 'reject') {
       setIsSaving(true);
       try {
-        const isOriginal = !doc.isBatch && !doc.originalFileId;
+        const updateData = { 
+          status: 'In Progress',
+          wasRejected: true,
+          rejectedAt: new Date(),
+          rejectionReason: confirmationData?.reason || 'No reason provided'
+        };
         
-        if (isOriginal) {
-          // Original file - create new batch
-          console.log('Creating new batch from original file');
-          const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
-          const { batch } = await api.saveBatchFromEditor(doc._id, {
-            overlayPng: firstOverlay,
-            annotations: overlays,
-            canvasDimensions: canvasDimensions // Pass canvas dimensions for proper scaling
-          }, action);
-
-          console.log('Created batch:', batch);
-
-          // Load the newly created batch and switch to it
-          const { batch: loadedBatch } = await api.getBatch(batch._id);
-          console.log('Loaded batch:', loadedBatch);
-          
-          setCurrentDoc({
-            ...loadedBatch,
-            pdf: loadedBatch.pdf || doc.pdf, // Use baked PDF if available, fallback to original
-            isBatch: true,
-            originalFileId: loadedBatch.fileId
-          });
-          
-          // Clear overlays since they're now baked into the PDF
-          overlaysRef.current  = {};
-          historiesRef.current = {};
-          setOverlay(null);
-          setHistory([]);
-          setHistIdx(-1);
-        } else {
-          // Existing batch - update it
-          console.log('Updating existing batch');
-          const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
-          const updateData = {
-            overlayPng: firstOverlay,
-            annotations: overlays,
-            canvasDimensions: canvasDimensions // Pass canvas dimensions for proper scaling
-          };
-
-          // Update status based on action
-          if (action === 'submit_review') {
-            updateData.status = 'Review';
-          } else if (action === 'submit_final') {
-            updateData.status = 'Completed';
-          } else if (action === 'reject') {
-            updateData.status = 'In Progress';
-            // For rejection, we want to keep the overlay changes
-            // The reviewer's markups should be preserved
-          }
-          // For 'save', keep current status
-
-          const { batch } = await api.updateBatch(doc._id, updateData);
-          console.log('Updated batch:', batch);
-          
-          // Reload the batch to get the updated PDF
-          const { batch: reloadedBatch } = await api.getBatch(doc._id);
-          
-          // Update current doc with new data but keep the view
-          setCurrentDoc({
-            ...doc,
-            ...reloadedBatch,
-            pdf: reloadedBatch.pdf || doc.pdf, // Use updated PDF if available
-            isBatch: true
-          });
-          
-          // Clear overlays since they're now baked into the PDF
-          overlaysRef.current  = {};
-          historiesRef.current = {};
-          setOverlay(null);
-          setHistory([]);
-          setHistIdx(-1);
-        }
-
-        // Don't reset drawings here anymore - they're cleared above after baking
+        const { batch } = await api.updateBatch(doc._id, updateData);
+        
+        setCurrentDoc({
+          ...doc,
+          ...batch,
+          isBatch: true
+        });
+        
         refreshFiles?.();
       } catch (err) {
-        console.error('Save error:', err);
-        alert('Save error: ' + (err.message || 'Unknown error'));
+        console.error('Rejection error:', err);
+        alert('Error during rejection: ' + (err.message || 'Unknown error'));
       } finally {
         setIsSaving(false);
       }
-    },
-    [doc, refreshFiles, setCurrentDoc]
-  );
+      return;
+    }
+
+    // Get canvas dimensions for proper scaling
+    const canvas = canvasRef.current;
+    const container = pageContainerRef.current;
+    const containerRect = container?.getBoundingClientRect();
+    
+    const canvasDimensions = canvas ? {
+      width: canvas.width,
+      height: canvas.height,
+      displayWidth: containerRect?.width || canvas.offsetWidth,
+      displayHeight: containerRect?.height || canvas.offsetHeight,
+      containerRect: containerRect
+    } : null;
+
+    setIsSaving(true);
+    try {
+      const isOriginal = !doc.isBatch && !doc.originalFileId;
+      
+      if (isOriginal) {
+        // Original file - create new batch using the editor API
+        const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
+        
+        const editorData = {
+          overlayPng: firstOverlay,
+          annotations: overlays,
+          canvasDimensions: canvasDimensions
+        };
+
+        const { batch } = await api.saveBatchFromEditor(
+          doc._id,
+          editorData,
+          action,
+          confirmationData
+        );
+        
+        // Switch to the new batch
+        setCurrentDoc({
+          ...batch,
+          pdf: batch.signedPdf ? 
+            `data:application/pdf;base64,${batch.signedPdf.data}` : 
+            doc.pdf,
+          isBatch: true,
+          originalFileId: batch.fileId || doc._id
+        });
+        
+      } else {
+        // Existing batch - use updateBatch for all actions
+        const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
+        const updateData = {
+          overlayPng: firstOverlay,
+          annotations: overlays,
+          canvasDimensions: canvasDimensions
+        };
+
+        if (action === 'submit_review' && confirmationData) {
+          updateData.status = 'Review';
+          updateData.submittedForReviewAt = new Date();
+          
+          // Handle chemical transactions
+          if (confirmationData.components?.length > 0) {
+            updateData.chemicalsTransacted = true;
+            updateData.transactionDate = new Date();
+            updateData.confirmedComponents = confirmationData.components;
+          }
+          
+          // Handle solution creation
+          if (confirmationData.solutionLotNumber) {
+            updateData.solutionCreated = true;
+            updateData.solutionLotNumber = confirmationData.solutionLotNumber;
+            updateData.solutionCreatedDate = new Date();
+            
+            // Include solution quantity if provided
+            if (confirmationData.solutionQuantity) {
+              updateData.solutionQuantity = confirmationData.solutionQuantity;
+            }
+            if (confirmationData.solutionUnit) {
+              updateData.solutionUnit = confirmationData.solutionUnit;
+            }
+          }
+          
+        } else if (action === 'complete') {
+          updateData.status = 'Completed';
+          updateData.completedAt = new Date();
+        } else if (action === 'create_work_order') {
+          updateData.status = 'In Progress';
+          updateData.workOrderCreated = true;
+          updateData.workOrderId = `WO-${Date.now()}`;
+          updateData.workOrderCreatedAt = new Date();
+        }
+
+        const { batch } = await api.updateBatch(doc._id, updateData);
+        
+        setCurrentDoc({
+          ...doc,
+          ...batch,
+          pdf: batch.signedPdf ? 
+            `data:application/pdf;base64,${batch.signedPdf.data}` : 
+            doc.pdf,
+          isBatch: true
+        });
+      }
+
+      refreshFiles?.();
+      
+    } catch (err) {
+      console.error('Save error:', err);
+      alert('Save error: ' + (err.message || 'Unknown error'));
+      throw err;
+    } finally {
+      setIsSaving(false);
+    }
+  },
+  [doc, refreshFiles, setCurrentDoc]
+);
 
 /* expose undo / save to toolbar refs (if parent passed them) */
   useEffect(() => {
@@ -419,7 +454,7 @@ export default function usePdfEditorLogic({
     move,
     up,
     undo,
-    save,
+    save, // Now supports confirmationData parameter
     gotoPage,
     print,
     initCanvas,
