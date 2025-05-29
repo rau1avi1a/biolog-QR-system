@@ -24,6 +24,47 @@ export const api = {
                        if(fId) fd.append('folderId',fId);
                        return fetch('/api/files',{method:'POST',body:fd});
                      },
+
+  /* ── NEW: Batch upload with folder structure - ChatGPT's clean approach ─── */
+  uploadBatch: async (fileDataArray, baseFolderId = null) => {
+    console.log('API uploadBatch called with:', fileDataArray.length, 'files');
+    
+    const formData = new FormData();
+    
+    // Add base folder ID if provided
+    if (baseFolderId) {
+      formData.append('folderId', baseFolderId);
+      console.log('Using base folder ID:', baseFolderId);
+    }
+    
+    // Add each file with its relative path - keep it simple
+    fileDataArray.forEach((fileData, index) => {
+      const { file, relativePath } = fileData;
+      
+      console.log(`Adding file ${index}: ${file.name}, relativePath: ${relativePath}`);
+      
+      // Append the file directly 
+      formData.append('files', file);
+      
+      // Also append the relativePath for this file
+      formData.append(`relativePath_${index}`, relativePath);
+    });
+
+    const response = await fetch('/api/files/batch-upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Batch upload failed: ${response.status} ${response.statusText}. ${errorData.error || ''}`);
+    }
+
+    const result = await response.json();
+    console.log('Upload response:', result);
+    return result;
+  },
+
   updateFileMeta   : (id,p)=> fetch(`/api/files/${id}`,{
                        method:'PATCH', headers:{'Content-Type':'application/json'},
                        body:JSON.stringify(p)
@@ -81,6 +122,8 @@ export const api = {
       
       // FIXED: Return in the format your frontend expects
       return {
+        success: data.success || true,
+        data: data.success ? data.data : data,
         batch: data.success ? data.data : data
       };
       
@@ -103,6 +146,8 @@ export const api = {
       
       // FIXED: Return in the format your frontend expects
       return {
+        success: data.success || true,
+        data: data.success ? data.data : data,
         batch: data.success ? data.data : data
       };
     } catch (error) {
@@ -128,6 +173,8 @@ export const api = {
       
       // FIXED: Return in the format your frontend expects
       return {
+        success: data.success || true,
+        data: data.success ? data.data : data,
         batch: data.success ? data.data : data
       };
     } catch (error) {
@@ -170,6 +217,8 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
     const data = await response.json();
 
     return {
+      success: data.success || true,
+      data: data.success ? data.data : data,
       batch: data.success ? data.data : data
     };
 

@@ -1,23 +1,22 @@
-// app/files/hooks/useFilesPage.js
+// app/files/hooks/useFilesPage.js - Fixed import path
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { api } from '../lib/api';
+import { api } from '../lib/api'; // Fixed: was './lib/api'
 
 /**
- *  One hook → every piece of state the Files page needs:
- *    ▸ PDF-editor state (currentDoc, draw mode, undo/save refs)
- *    ▸ Folder / file tree, search, uploads, refresh flags
- *
- *  UI components become dumb renderers: they only read or call what
- *  this hook returns.
+ * Enhanced hook for the Files page with improved folder upload functionality
+ * One hook → every piece of state the Files page needs:
+ *   ▸ PDF-editor state (currentDoc, draw mode, undo/save refs)
+ *   ▸ Folder / file tree, search, uploads, refresh flags
+ *   ▸ Enhanced folder structure handling
  */
 export default function useFilesPage() {
   /* ──────────────────────────────────────────────── */
   /*  A.  Editor-level state                         */
   /* ──────────────────────────────────────────────── */
   const [currentDoc, setCurrentDoc] = useState(null);
-  const [isDraw,     setIsDraw]     = useState(true);
+  const [isDraw, setIsDraw] = useState(true);
   
   /* expose editor refs so toolbar buttons can call them */
   const undoRef = useRef(null);
@@ -26,16 +25,17 @@ export default function useFilesPage() {
   /* ──────────────────────────────────────────────── */
   /*  B.  Navigator-level state                      */
   /* ──────────────────────────────────────────────── */
-  const [view,setView] = useState('folders'); // → folders | status | archive
-  const [root,  setRoot]  = useState([]);          // top-level folders
-  const [files, setFiles] = useState([]);          // files in currentFolder
+  const [view, setView] = useState('folders'); // → folders | status | archive
+  const [root, setRoot] = useState([]);          // top-level folders
+  const [files, setFiles] = useState([]);       // files in currentFolder
 
-  const [search,        setSearch]        = useState(null); // array | null
-  const [uploading,     setUploading]     = useState(false);
+  const [search, setSearch] = useState(null);        // array | null
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // for folder uploads
   const [folderRefresh, setFolderRefresh] = useState(0);    // bump → reload
   const [currentFolder, setCurrentFolder] = useState(null); // selected node
 
-  /*  global refresh flag (any data change) - MOVED UP TO FIX HOISTING */
+  /*  global refresh flag (any data change) */
   const [refresh, setRefresh] = useState(0);
   const triggerRefresh = useCallback(() => setRefresh((p) => p + 1), []);
 
@@ -117,11 +117,6 @@ export default function useFilesPage() {
     // Validate currentDoc exists
     if (!currentDoc) {
       throw new Error('No document loaded');
-    }
-
-    // Validate required data
-    if (!editorData?.overlayPng) {
-      // Allow saving without overlay for some actions
     }
 
     try {
@@ -278,55 +273,162 @@ export default function useFilesPage() {
 
   /* ── 3. folder CRUD helpers */
   const createFolder = async (name) => {
-    await api.newFolder(name, currentFolder?._id);
-    setFolderRefresh((p) => p + 1);
-  };
-  const updateFolder = async (id, n) => {
-    await api.updateFolder(id, n);
-    setFolderRefresh((p) => p + 1);
-  };
-  const deleteFolder = async (id) => {
-    await api.deleteFolder(id);
-    if (currentFolder?._id === id) setCurrentFolder(null);
-    setFolderRefresh((p) => p + 1);
+    try {
+      await api.newFolder(name, currentFolder?._id);
+      setFolderRefresh((p) => p + 1);
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      throw error;
+    }
   };
 
-  /* ── 4. uploads */
+  const updateFolder = async (id, name) => {
+    try {
+      await api.updateFolder(id, name);
+      setFolderRefresh((p) => p + 1);
+    } catch (error) {
+      console.error('Failed to update folder:', error);
+      throw error;
+    }
+  };
+
+  const deleteFolder = async (id) => {
+    try {
+      await api.deleteFolder(id);
+      if (currentFolder?._id === id) setCurrentFolder(null);
+      setFolderRefresh((p) => p + 1);
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      throw error;
+    }
+  };
+
+  /* ── 4. Enhanced file uploads with progress tracking */
   const handleFiles = async (list) => {
     if (!list.length) return;
+    
     setUploading(true);
-    for (const f of list) await api.upload(f, currentFolder?._id);
-    setUploading(false);
-    triggerRefresh();
+    setUploadProgress({ current: 0, total: list.length });
+    
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        await api.upload(file, currentFolder?._id);
+        setUploadProgress({ current: i + 1, total: list.length });
+      }
+    } catch (error) {
+      console.error('Upload failed:', error);
+      throw error;
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+      triggerRefresh();
+    }
   };
+
+  /* ── 5. Enhanced folder upload with structure preservation - ChatGPT's clean approach */
+  const handleFolderUpload = useCallback(async (files) => {
+    console.log('🗂️ HOOK: handleFolderUpload called with', files.length, 'files');
+    
+    if (!files.length) return;
+    
+    // Debug: Log the first few files to see their structure
+    files.slice(0, 3).forEach((file, i) => {
+      console.log(`🗂️ HOOK: File ${i}:`, {
+        name: file.name,
+        webkitRelativePath: file.webkitRelativePath,
+        type: file.type
+      });
+    });
+
+    setUploading(true);
+    setUploadProgress({ current: 0, total: files.length });
+
+    try {
+      // Build the array { file, relativePath } - simple and clean
+      const fileDataArray = files.map((file) => ({
+        file,
+        // Use webkitRelativePath (supported when input has webkitdirectory)
+        relativePath: file.webkitRelativePath || file.name
+      }));
+
+      console.log('🗂️ HOOK: First 3 processed files:', fileDataArray.slice(0, 3));
+      console.log('🗂️ HOOK: About to call api.uploadBatch...');
+
+      // Call the batch endpoint
+      const result = await api.uploadBatch(fileDataArray, currentFolder?._id);
+      console.log('🗂️ HOOK: Batch upload result:', result);
+
+    } catch (error) {
+      console.error('🗂️ HOOK: Batch upload failed:', error);
+      throw error;
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+      triggerRefresh();
+    }
+  }, [currentFolder, triggerRefresh]);
+
+  /* ── 6. Utility functions for better UX */
+  const resetSearch = useCallback(() => {
+    setSearch(null);
+  }, []);
+
+  const switchToFolder = useCallback((folder) => {
+    setView('folders');
+    setCurrentFolder(folder);
+    setSearch(null);
+  }, []);
+
+  const refreshData = useCallback(() => {
+    setFolderRefresh(p => p + 1);
+    triggerRefresh();
+  }, [triggerRefresh]);
 
   /* ──────────────────────────────────────────────── */
   /*  Return everything the page / panes need        */
   /* ──────────────────────────────────────────────── */
   return {
     /* editor stuff */
-    currentDoc, setCurrentDoc,
-    isDraw,     setIsDraw,
-    undoRef,    saveRef,
-    openFile,   saveFile,
+    currentDoc, 
+    setCurrentDoc,
+    isDraw,     
+    setIsDraw,
+    undoRef,    
+    saveRef,
+    openFile,   
+    saveFile,
 
     /* tree + list stuff */
-    view, setView,
-    root, files,
-    currentFolder, setCurrentFolder,
+    view, 
+    setView,
+    root, 
+    files,
+    currentFolder, 
+    setCurrentFolder,
 
     /* search + status view */
-    search, setSearch,
+    search, 
+    setSearch,
     uploading,
+    uploadProgress, // New: progress tracking
 
     /* folder actions */
-    createFolder, updateFolder, deleteFolder,
+    createFolder, 
+    updateFolder, 
+    deleteFolder,
 
-    /* upload handler */
+    /* upload handlers */
     handleFiles,
+    onFolderUpload: handleFolderUpload, // Rename to match FileNavigator prop expectation
 
     /* refresh flags */
     refreshTrigger: refresh,   // for StatusTabs & FileNavigator
     triggerRefresh,            // call after any mutation
+
+    /* utility functions */
+    resetSearch,
+    switchToFolder,
+    refreshData,
   };
 }
