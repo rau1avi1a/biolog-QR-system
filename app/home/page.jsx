@@ -32,14 +32,20 @@ export default async function HomePage() {
       minQty: Number(d.minQty) || 0,
       qrCode: d.qrCode || '',
       lotNumber: d.lotNumber || '',
+      // Chemical-specific fields
+      casNumber: d.casNumber || '',
+      
+      // Include Lots array for QR scanning
+      Lots: d.Lots ? d.Lots.map(lot => ({
+        _id: lot._id.toString(),
+        lotNumber: lot.lotNumber || '',
+        quantity: Number(lot.quantity) || 0
+      })) : [],
       
       // Date fields - convert to ISO strings
       createdAt: d.createdAt ? d.createdAt.toISOString() : null,
       updatedAt: d.updatedAt ? d.updatedAt.toISOString() : null,
       expirationDate: d.expirationDate ? d.expirationDate.toISOString() : null,
-      
-      // Any other fields from your schema - add them here as needed
-      // Make sure to convert all complex objects to plain values
       
       // Add searchable text for instant search
       searchText: `${d.displayName || ''} ${d.sku || ''} ${d.description || ''} ${d.vendor || ''} ${d.location || ''}`.toLowerCase()

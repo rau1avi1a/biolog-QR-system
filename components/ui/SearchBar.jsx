@@ -27,7 +27,8 @@ const SearchBar = ({
   filters = {},
   onFiltersChange,
   onQRScan,
-  showQRButton = true 
+  showQRButton = true,
+  showFilters = true 
 }) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeFilters, setActiveFilters] = useState(filters);
@@ -157,105 +158,107 @@ const SearchBar = ({
           )}
         </div>
 
-        {/* Advanced Filters */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="relative">
-              <Filter className="h-4 w-4 mr-2" />
-              Filters
-              {getActiveFilterCount() > 0 && (
-                <Badge variant="secondary" className="ml-2 h-5 w-5 p-0 text-xs">
-                  {getActiveFilterCount()}
-                </Badge>
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80" align="end">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h4 className="font-semibold text-sm">Advanced Filters</h4>
+        {/* Advanced Filters - Only show if showFilters is true */}
+        {showFilters && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="relative">
+                <Filter className="h-4 w-4 mr-2" />
+                Filters
                 {getActiveFilterCount() > 0 && (
-                  <Button variant="ghost" size="sm" onClick={clearAllFilters}>
-                    Clear All
-                  </Button>
+                  <Badge variant="secondary" className="ml-2 h-5 w-5 p-0 text-xs">
+                    {getActiveFilterCount()}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80" align="end">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-sm">Advanced Filters</h4>
+                  {getActiveFilterCount() > 0 && (
+                    <Button variant="ghost" size="sm" onClick={clearAllFilters}>
+                      Clear All
+                    </Button>
+                  )}
+                </div>
+
+                {/* Item Type Filter */}
+                <div>
+                  <h5 className="text-sm font-medium mb-2">Item Type</h5>
+                  <div className="flex flex-wrap gap-2">
+                    {filterOptions.itemType.map(({ value, label, icon: Icon }) => (
+                      <Badge
+                        key={value}
+                        variant={activeFilters.itemType?.includes(value) ? "default" : "outline"}
+                        className="cursor-pointer"
+                        onClick={() => applyFilter('itemType', value)}
+                      >
+                        <Icon className="h-3 w-3 mr-1" />
+                        {label}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Stock Status Filter */}
+                <div>
+                  <h5 className="text-sm font-medium mb-2">Stock Status</h5>
+                  <div className="flex flex-wrap gap-2">
+                    {filterOptions.stockStatus.map(({ value, label, color }) => (
+                      <Badge
+                        key={value}
+                        variant={activeFilters.stockStatus?.includes(value) ? color : "outline"}
+                        className="cursor-pointer"
+                        onClick={() => applyFilter('stockStatus', value)}
+                      >
+                        {label}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Location Filter */}
+                {filterOptions.location.length > 0 && (
+                  <div>
+                    <h5 className="text-sm font-medium mb-2">Location</h5>
+                    <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                      {filterOptions.location.map(({ value, label }) => (
+                        <Badge
+                          key={value}
+                          variant={activeFilters.location?.includes(value) ? "default" : "outline"}
+                          className="cursor-pointer text-xs"
+                          onClick={() => applyFilter('location', value)}
+                        >
+                          {label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Vendor Filter */}
+                {filterOptions.vendor.length > 0 && (
+                  <div>
+                    <h5 className="text-sm font-medium mb-2">Vendor</h5>
+                    <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                      {filterOptions.vendor.map(({ value, label }) => (
+                        <Badge
+                          key={value}
+                          variant={activeFilters.vendor?.includes(value) ? "default" : "outline"}
+                          className="cursor-pointer text-xs"
+                          onClick={() => applyFilter('vendor', value)}
+                        >
+                          {label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
-
-              {/* Item Type Filter */}
-              <div>
-                <h5 className="text-sm font-medium mb-2">Item Type</h5>
-                <div className="flex flex-wrap gap-2">
-                  {filterOptions.itemType.map(({ value, label, icon: Icon }) => (
-                    <Badge
-                      key={value}
-                      variant={activeFilters.itemType?.includes(value) ? "default" : "outline"}
-                      className="cursor-pointer"
-                      onClick={() => applyFilter('itemType', value)}
-                    >
-                      <Icon className="h-3 w-3 mr-1" />
-                      {label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              {/* Stock Status Filter */}
-              <div>
-                <h5 className="text-sm font-medium mb-2">Stock Status</h5>
-                <div className="flex flex-wrap gap-2">
-                  {filterOptions.stockStatus.map(({ value, label, color }) => (
-                    <Badge
-                      key={value}
-                      variant={activeFilters.stockStatus?.includes(value) ? color : "outline"}
-                      className="cursor-pointer"
-                      onClick={() => applyFilter('stockStatus', value)}
-                    >
-                      {label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              {/* Location Filter */}
-              {filterOptions.location.length > 0 && (
-                <div>
-                  <h5 className="text-sm font-medium mb-2">Location</h5>
-                  <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-                    {filterOptions.location.map(({ value, label }) => (
-                      <Badge
-                        key={value}
-                        variant={activeFilters.location?.includes(value) ? "default" : "outline"}
-                        className="cursor-pointer text-xs"
-                        onClick={() => applyFilter('location', value)}
-                      >
-                        {label}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Vendor Filter */}
-              {filterOptions.vendor.length > 0 && (
-                <div>
-                  <h5 className="text-sm font-medium mb-2">Vendor</h5>
-                  <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-                    {filterOptions.vendor.map(({ value, label }) => (
-                      <Badge
-                        key={value}
-                        variant={activeFilters.vendor?.includes(value) ? "default" : "outline"}
-                        className="cursor-pointer text-xs"
-                        onClick={() => applyFilter('vendor', value)}
-                      >
-                        {label}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </PopoverContent>
-        </Popover>
+            </PopoverContent>
+          </Popover>
+        )}
 
         {/* QR Scan Button */}
         {showQRButton && onQRScan && (
@@ -266,8 +269,8 @@ const SearchBar = ({
         )}
       </div>
 
-      {/* Active Filters Display */}
-      {getActiveFilterCount() > 0 && (
+      {/* Active Filters Display - Only show if showFilters is true */}
+      {showFilters && getActiveFilterCount() > 0 && (
         <div className="flex flex-wrap gap-2">
           {Object.entries(activeFilters).map(([category, values]) =>
             values.map(value => (
@@ -290,7 +293,7 @@ const SearchBar = ({
         <p className="text-sm text-muted-foreground">
           {suggestions.length} item{suggestions.length !== 1 ? 's' : ''} found
           {searchQuery && ` matching "${searchQuery}"`}
-          {getActiveFilterCount() > 0 && ` with ${getActiveFilterCount()} filter${getActiveFilterCount() !== 1 ? 's' : ''}`}
+          {showFilters && getActiveFilterCount() > 0 && ` with ${getActiveFilterCount()} filter${getActiveFilterCount() !== 1 ? 's' : ''}`}
         </p>
       )}
     </div>
