@@ -1,4 +1,4 @@
-// services/file.service.js
+// services/file.service.js - Fixed folder structure handling
 
 import mongoose       from 'mongoose';
 import connectMongoDB from '@/lib/index';
@@ -18,6 +18,69 @@ const isId = (v) => mongoose.Types.ObjectId.isValid(v);
 function asId(id) {
   if (!isId(id)) throw new Error('Invalid ObjectId');
   return new mongoose.Types.ObjectId(id);
+}
+
+/*───────────────────────────────────────────────────────────────────*/
+/* Enhanced folder creation that reuses existing folders             */
+/*───────────────────────────────────────────────────────────────────*/
+async function ensureFolderStructure(relativePath, baseFolderId = null) {
+  if (!relativePath || typeof relativePath !== 'string') {
+    return baseFolderId;
+  }
+
+  // Split the path and remove empty parts and the filename
+  const pathParts = relativePath.split('/').filter(part => part.trim() !== '');
+  
+  // If no folders in the path, return the base folder
+  if (pathParts.length <= 1) {
+    return baseFolderId;
+  }
+
+  // Remove the filename (last part) to get only folder parts
+  const folderParts = pathParts.slice(0, -1);
+  
+  let currentParentId = baseFolderId;
+  
+  // Create or find each folder in the hierarchy
+  for (const folderName of folderParts) {
+    try {
+      // First, try to find existing folder with this name and parent
+      let existingFolder = await Folder.findOne({ 
+        name: folderName, 
+        parentId: currentParentId 
+      }).lean();
+      
+      if (existingFolder) {
+        // Use existing folder
+        currentParentId = existingFolder._id;
+      } else {
+        // Create new folder since it doesn't exist
+        const newFolder = await Folder.create({
+          name: folderName,
+          parentId: currentParentId
+        });
+        currentParentId = newFolder._id;
+      }
+    } catch (error) {
+      // If there's a duplicate key error, try to find the existing folder again
+      if (error.code === 11000) {
+        const existingFolder = await Folder.findOne({ 
+          name: folderName, 
+          parentId: currentParentId 
+        }).lean();
+        
+        if (existingFolder) {
+          currentParentId = existingFolder._id;
+        } else {
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    }
+  }
+  
+  return currentParentId;
 }
 
 /*───────────────────────────────────────────────────────────────────*/
@@ -67,44 +130,100 @@ export async function listFiles({
 }
 
 /*───────────────────────────────────────────────────────────────────*/
-/* C: Upload & create a new File                                   */
+/* C: Upload & create a new File with proper folder structure       */
 /*───────────────────────────────────────────────────────────────────*/
 export async function createFileFromUpload({
   buffer,
   fileName,
   description = '',
-  folderId    = null,
+  folderId = null,
   relativePath = '',
-  isOriginal = true  // New parameter to mark as original file
+  isOriginal = true
 }) {
   await connectMongoDB();
 
-  // auto-create any nested folders from `relativePath`
+  // Ensure proper folder structure from relativePath
   let finalFolderId = folderId;
-  if (relativePath) {
-    let parentId = folderId ?? null;
-    for (const dir of relativePath.split('/').slice(0, -1)) {
-      /* eslint-disable no-await-in-loop */
-      const existing = await Folder.findOne({ name: dir, parentId });
-      parentId = existing
-        ? existing._id
-        : (await Folder.create({ name: dir, parentId }))._id;
+  
+  if (relativePath && relativePath.trim() !== '') {
+    try {
+      finalFolderId = await ensureFolderStructure(relativePath, folderId);
+    } catch (error) {
+      console.error('Error creating folder structure:', error);
+      // Fall back to the original folder if there's an error
+      finalFolderId = folderId;
     }
-    finalFolderId = parentId;
   }
 
+  // Create the file
   const doc = await File.create({
     fileName,
     description,
     folderId: finalFolderId,
     pdf: { data: buffer, contentType: 'application/pdf' },
-    // Note: In your model, all Files are originals by default
-    // Batch copies are handled by the Batch model
   });
 
   const obj = doc.toObject();
   delete obj.pdf;
   return obj;
+}
+
+/*───────────────────────────────────────────────────────────────────*/
+/* Batch upload helper for multiple files with structure            */
+/*───────────────────────────────────────────────────────────────────*/
+export async function createMultipleFilesFromUpload(files, baseFolderId = null) {
+  await connectMongoDB();
+  
+  const results = [];
+  const folderCache = new Map(); // Cache created folders to avoid duplicates
+  
+  for (const fileData of files) {
+    try {
+      const { buffer, fileName, relativePath = '', description = '' } = fileData;
+      
+      let finalFolderId = baseFolderId;
+      
+      if (relativePath && relativePath.trim() !== '') {
+        // Check cache first
+        const cacheKey = `${baseFolderId || 'root'}:${relativePath}`;
+        
+        if (folderCache.has(cacheKey)) {
+          finalFolderId = folderCache.get(cacheKey);
+        } else {
+          // Create folder structure and cache the result
+          try {
+            finalFolderId = await ensureFolderStructure(relativePath, baseFolderId);
+            folderCache.set(cacheKey, finalFolderId);
+          } catch (error) {
+            console.error(`Error creating folder structure for ${relativePath}:`, error);
+            finalFolderId = baseFolderId;
+          }
+        }
+      }
+
+      // Create the file
+      const doc = await File.create({
+        fileName,
+        description,
+        folderId: finalFolderId,
+        pdf: { data: buffer, contentType: 'application/pdf' },
+      });
+
+      const obj = doc.toObject();
+      delete obj.pdf;
+      results.push(obj);
+      
+    } catch (error) {
+      console.error(`Error creating file ${fileData.fileName}:`, error);
+      // Continue with other files even if one fails
+      results.push({ 
+        error: error.message, 
+        fileName: fileData.fileName 
+      });
+    }
+  }
+  
+  return results;
 }
 
 /*───────────────────────────────────────────────────────────────────*/

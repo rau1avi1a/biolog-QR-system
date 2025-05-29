@@ -27,7 +27,25 @@ export default function FilesPage() {
             <SheetTitle className="text-lg font-semibold">Document Explorer</SheetTitle>
           </SheetHeader>
           <div className="flex flex-col h-[calc(100%-73px)]">
-            <FileNavigator {...f} closeDrawer={() => setDrawer(false)} />
+            <FileNavigator
+              view={f.view}
+              setView={f.setView}
+              root={f.root}
+              files={f.files}
+              currentFolder={f.currentFolder}
+              setCurrentFolder={f.setCurrentFolder}
+              search={f.search}
+              setSearch={f.setSearch}
+              uploading={f.uploading}
+              createFolder={f.createFolder}
+              updateFolder={f.updateFolder}
+              deleteFolder={f.deleteFolder}
+              handleFiles={f.handleFiles}
+              onFolderUpload={f.onFolderUpload}
+              openFile={f.openFile}
+              refreshTrigger={f.refreshTrigger}
+              closeDrawer={() => setDrawer(false)}
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -40,7 +58,25 @@ export default function FilesPage() {
               <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Document Explorer</h1>
               {/* <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Manage your documents</p> */}
             </div>
-            <FileNavigator {...f} closeDrawer={() => {}} />
+            <FileNavigator
+              view={f.view}
+              setView={f.setView}
+              root={f.root}
+              files={f.files}
+              currentFolder={f.currentFolder}
+              setCurrentFolder={f.setCurrentFolder}
+              search={f.search}
+              setSearch={f.setSearch}
+              uploading={f.uploading}
+              createFolder={f.createFolder}
+              updateFolder={f.updateFolder}
+              deleteFolder={f.deleteFolder}
+              handleFiles={f.handleFiles}
+              onFolderUpload={f.onFolderUpload}
+              openFile={f.openFile}
+              refreshTrigger={f.refreshTrigger}
+              closeDrawer={() => {}}
+            />
           </div>
         </aside>
 
