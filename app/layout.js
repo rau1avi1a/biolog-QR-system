@@ -1,3 +1,4 @@
+// app/layout.js
 import { Geist, Geist_Mono } from 'next/font/google';
 import Image from 'next/image';
 import './globals.css';
@@ -16,6 +17,11 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        {/* QR Code Libraries */}
+        <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js" async />
+        <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js" async />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {/* full-screen background */}
         <Image
