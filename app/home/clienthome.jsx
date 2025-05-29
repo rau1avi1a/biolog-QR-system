@@ -205,26 +205,72 @@ export default function ClientHome({ groups, allItems, stats }) {
     }
   };
 
-  // QR Scanner functions with safe state updates
+  // Updated QR Scanner functions with proper handling
   const handleQRScan = async (qrData) => {
     try {
-      // Try to find item by QR data (assuming QR contains SKU or item ID)
-      const foundItem = allItems.find(item => 
-        item.sku === qrData || 
-        item._id === qrData ||
-        item.qrCode === qrData
-      );
-      return foundItem;
+      // Extract the ID from the URL format: mywebsite/[id]
+      let searchId = qrData.trim();
+      
+      if (searchId.includes('/')) {
+        const urlParts = searchId.split('/');
+        searchId = urlParts[urlParts.length - 1]; // Get the last part (ID)
+      }
+      
+      // Find item by multiple criteria
+      const foundItem = allItems.find(item => {
+        const matches = {
+          byId: item._id === searchId,
+          bySku: item.sku === searchId,
+          byLotNumber: item.lotNumber === searchId,
+          bySkuLower: item.sku && item.sku.toLowerCase() === searchId.toLowerCase(),
+          byLotLower: item.lotNumber && item.lotNumber.toLowerCase() === searchId.toLowerCase(),
+          // Search in Lots array
+          byLotId: item.Lots && item.Lots.some(lot => lot._id === searchId),
+          byLotNumberInArray: item.Lots && item.Lots.some(lot => lot.lotNumber === searchId)
+        };
+        
+        return Object.values(matches).some(m => m);
+      });
+      
+      if (foundItem) {
+        // Find the specific lot that matched
+        let matchedLot = null;
+        if (foundItem.Lots) {
+          matchedLot = foundItem.Lots.find(lot => 
+            lot._id === searchId || lot.lotNumber === searchId
+          );
+        }
+        
+        // Determine how it was matched
+        const matchedBy = foundItem._id === searchId ? 'id' :
+                         foundItem.sku === searchId ? 'sku' :
+                         foundItem.lotNumber === searchId ? 'lotNumber' :
+                         matchedLot ? 'lot' : 'fuzzy';
+        
+        return {
+          ...foundItem,
+          qrData: qrData,
+          matchedBy: matchedBy,
+          matchedLot: matchedLot // Include the specific lot info
+        };
+      }
+      
+      // If not found, return object with notFound flag
+      return { notFound: true, qrData: qrData, searchId: searchId };
+      
     } catch (error) {
+      console.error('QR Scan error:', error);
       return null;
     }
   };
 
-  const handleItemFound = (item) => {
-    if (isMountedRef.current) {
-      // Set search to the found item's name and switch to appropriate tab
-      setSearchQuery(item.displayName);
-      setActiveTab(item.itemType);
+  const handleItemFound = (result) => {
+    if (!isMountedRef.current) return;
+    
+    if (result && !result.notFound) {
+      // Modal will handle showing details and navigation
+    } else if (result && result.notFound) {
+      // Item not found - modal will show error
     }
   };
 
@@ -261,17 +307,6 @@ export default function ClientHome({ groups, allItems, stats }) {
             </p>
           </div>
 
-          {/* Search Bar */}
-          <SearchBar
-            searchQuery={searchQuery}
-            onSearchChange={safeSetState(setSearchQuery)}
-            suggestions={filteredItems}
-            filters={searchFilters}
-            onFiltersChange={safeSetState(setSearchFilters)}
-            onQRScan={() => safeSetState(setQrScannerOpen)(true)}
-            showQRButton={true}
-          />
-
           <Tabs value={activeTab} onValueChange={safeSetState(setActiveTab)} className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <TabsList className="grid w-full max-w-md grid-cols-5">
@@ -297,11 +332,25 @@ export default function ClientHome({ groups, allItems, stats }) {
                   size="sm"
                   onClick={() => safeSetState(setShowLowStockOnly)(!showLowStockOnly)}
                 >
-                  <Filter className="h-4 w-4 mr-2" />
+                  <AlertTriangle className="h-4 w-4 mr-2" />
                   Low Stock
                 </Button>
               </div>
             </div>
+
+            {/* Search Bar - Only show for non-overview tabs */}
+            {activeTab !== 'overview' && (
+              <SearchBar
+                searchQuery={searchQuery}
+                onSearchChange={safeSetState(setSearchQuery)}
+                suggestions={filteredItems}
+                filters={searchFilters}
+                onFiltersChange={safeSetState(setSearchFilters)}
+                onQRScan={() => safeSetState(setQrScannerOpen)(true)}
+                showQRButton={false} // Remove QR button from desktop search bar
+                showFilters={false} // Remove filter functionality
+              />
+            )}
 
             {/* Overview Tab */}
             <TabsContent value="overview" className="space-y-6">
@@ -418,7 +467,7 @@ export default function ClientHome({ groups, allItems, stats }) {
         </div>
       </div>
 
-      {/* QR Scanner Modal */}
+      {/* QR Scanner Modal with enhanced functionality */}
       <QRScannerModal
         open={qrScannerOpen}
         onOpenChange={safeSetState(setQrScannerOpen)}
