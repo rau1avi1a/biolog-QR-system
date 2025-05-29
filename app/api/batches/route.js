@@ -4,7 +4,6 @@ import { createBatch, listBatches } from '@/services/batch.service';
 export async function POST(request) {
   try {
     const payload = await request.json();
-    console.log('POST /api/batches - payload:', JSON.stringify(payload, null, 2));
 
     // Basic validation
     const fileId = payload.originalFileId || payload.fileId;
@@ -35,7 +34,6 @@ export async function POST(request) {
         workOrderCreated: shouldCreateWorkOrder(action)
       };
 
-      console.log('Creating batch with payload:', batchPayload);
       const batch = await createBatch(batchPayload);
       
       return NextResponse.json({
@@ -50,9 +48,7 @@ export async function POST(request) {
         data: batch
       }, { status: 201 });
     }
-  } catch (error) {
-    console.error('POST /api/batches error:', error);
-    
+  } catch (error) {    
     if (error.message === 'File not found') {
       return NextResponse.json(
         { success: false, error: 'File not found' },
@@ -77,8 +73,6 @@ export async function GET(request) {
     const status = searchParams.get('status');
     const fileId = searchParams.get('fileId');
 
-    console.log('GET /api/batches - params:', { status, fileId });
-
     const filter = {};
     if (status) filter.status = status;
     if (fileId) filter.fileId = fileId;
@@ -90,7 +84,6 @@ export async function GET(request) {
       data: batches
     });
   } catch (error) {
-    console.error('GET /api/batches error:', error);
     return NextResponse.json(
       { 
         success: false, 

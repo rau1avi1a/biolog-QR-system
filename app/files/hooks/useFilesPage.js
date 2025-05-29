@@ -42,20 +42,8 @@ export default function useFilesPage() {
   /* helper to open/load a file */
   const openFile = useCallback(async (file) => {
     try {
-      console.log('OpenFile called with:', {
-        _id: file._id,
-        fileName: file.fileName,
-        isArchived: file.isArchived,
-        batchId: file.batchId,
-        originalFileId: file.originalFileId,
-        fileId: file.fileId,
-        status: file.status,
-        runNumber: file.runNumber
-      });
-
       // Check if this is an archived file/batch
       if (file.isArchived || file.batchId) {
-        console.log('Loading archived file');
         const { file: archivedFile } = await api.loadArchivedFile(file._id);
         if (archivedFile) {
           setCurrentDoc({ 
@@ -65,48 +53,33 @@ export default function useFilesPage() {
             isArchived: true,
             originalFileId: archivedFile.originalFileId || archivedFile.fileId
           });
-        } else {
-          console.error('Archived file not found or empty response');
         }
       } else if (file.fileId || file.status || file.runNumber) {
         // This is a batch file (has fileId pointing to original file, or has batch-specific properties)
-        console.log('Loading batch file via getBatch API');
         const response = await api.getBatch(file._id);
-        console.log('getBatch response:', response);
         
         if (response && response.batch) {
           const batch = response.batch;
-          console.log('Batch loaded:', {
-            _id: batch._id,
-            status: batch.status,
-            hasSignedPdf: !!batch.signedPdf,
-            hasOverlayPng: !!batch.overlayPng,
-            fileId: batch.fileId
-          });
           
           // For batches, prioritize the baked/signed PDF if it exists
           let pdfData = null;
           
           if (batch.signedPdf && batch.signedPdf.data) {
             // Use the baked PDF that has overlays burned in
-            console.log('Using baked PDF with overlays');
             pdfData = `data:${batch.signedPdf.contentType || 'application/pdf'};base64,${batch.signedPdf.data.toString('base64')}`;
           } else if (batch.pdf) {
             // Use batch's own PDF
-            console.log('Using batch PDF');
             pdfData = batch.pdf;
           } else if (batch.fileId) {
             // Fallback: load from original file
             const originalFileId = typeof batch.fileId === 'object' ? batch.fileId._id : batch.fileId;
-            console.log('Loading PDF from original file:', originalFileId);
             try {
               const { file: originalFile } = await api.load(originalFileId);
               if (originalFile && originalFile.pdf) {
                 pdfData = originalFile.pdf;
-                console.log('Loaded PDF from original file');
               }
             } catch (err) {
-              console.error('Failed to load original file PDF:', err);
+              // Silently handle error
             }
           }
           
@@ -119,12 +92,10 @@ export default function useFilesPage() {
             overlays: batch.signedPdf ? null : (batch.overlays || null)
           });
         } else {
-          console.error('Batch not found or empty response:', response);
           throw new Error('Batch not found or empty response');
         }
       } else {
         // This is an original file, load normally
-        console.log('Loading original file');
         const { file: loaded } = await api.load(file._id);
         if (loaded) {
           setCurrentDoc({ 
@@ -133,12 +104,10 @@ export default function useFilesPage() {
             isBatch: false
           });
         } else {
-          console.error('File not found or empty response');
           throw new Error('File not found or empty response');
         }
       }
     } catch (error) {
-      console.error('Failed to load file:', error);
       throw error; // Re-throw so the UI can handle it
     }
   }, []);
@@ -147,41 +116,20 @@ export default function useFilesPage() {
   const saveFile = useCallback(async (editorData, confirmationData = null) => {
     // Validate currentDoc exists
     if (!currentDoc) {
-      console.error('No currentDoc available for saving');
       throw new Error('No document loaded');
     }
 
-    // Debug currentDoc structure
-    console.log('SaveFile - currentDoc structure:', {
-      _id: currentDoc._id,
-      fileName: currentDoc.fileName,
-      fileId: currentDoc.fileId,
-      originalFileId: currentDoc.originalFileId,
-      isBatch: currentDoc.isBatch,
-      isArchived: currentDoc.isArchived,
-      status: currentDoc.status
-    });
-
     // Validate required data
     if (!editorData?.overlayPng) {
-      console.warn('No overlay data provided');
+      // Allow saving without overlay for some actions
     }
 
     try {
       const isOriginal = !currentDoc.isBatch;
       const action = confirmationData?.action || 'save';
 
-      console.log('SaveFile called:', { 
-        isOriginal, 
-        action, 
-        hasConfirmationData: !!confirmationData,
-        docId: currentDoc._id
-      });
-
       if (isOriginal) {
         // Creating new batch from original file
-        console.log('Creating new batch from original file:', currentDoc._id);
-        
         const batchPayload = {
           fileId: currentDoc._id, // Original file ID
           overlayPng: editorData.overlayPng,
@@ -201,11 +149,8 @@ export default function useFilesPage() {
           }
         }
 
-        console.log('Batch payload:', batchPayload);
-
         // Create new batch
         const response = await api.newBatch(currentDoc._id, batchPayload);
-        console.log('newBatch response:', response);
 
         if (!response.success || !response.data) {
           throw new Error('Failed to create batch: ' + (response.error || 'Unknown error'));
@@ -215,7 +160,6 @@ export default function useFilesPage() {
 
         // Load the created batch to get full data
         const loadResponse = await api.getBatch(newBatch._id);
-        console.log('getBatch response:', loadResponse);
 
         if (!loadResponse.success || !loadResponse.data) {
           throw new Error('Failed to load created batch');
@@ -233,8 +177,6 @@ export default function useFilesPage() {
         
       } else {
         // Updating existing batch
-        console.log('Updating existing batch:', currentDoc._id);
-        
         const updatePayload = {
           overlayPng: editorData.overlayPng,
           annotations: editorData.annotations,
@@ -288,11 +230,8 @@ export default function useFilesPage() {
           updatePayload.confirmedComponents = confirmationData.components;
         }
 
-        console.log('Update payload:', updatePayload);
-
         // Update the batch
         const updateResponse = await api.updateBatch(currentDoc._id, updatePayload);
-        console.log('updateBatch response:', updateResponse);
 
         if (!updateResponse.success || !updateResponse.data) {
           throw new Error('Failed to update batch: ' + (updateResponse.error || 'Unknown error'));
@@ -300,7 +239,6 @@ export default function useFilesPage() {
 
         // Reload to get updated data
         const reloadResponse = await api.getBatch(currentDoc._id);
-        console.log('reload getBatch response:', reloadResponse);
 
         if (!reloadResponse.success || !reloadResponse.data) {
           throw new Error('Failed to reload batch');
@@ -318,15 +256,8 @@ export default function useFilesPage() {
       }
       
       triggerRefresh(); // Refresh the UI
-      console.log('SaveFile completed successfully');
       
     } catch (error) {
-      console.error('Failed to save file:', error);
-      console.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
       throw error;
     }
   }, [currentDoc, triggerRefresh]);

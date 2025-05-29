@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request, { params }) {
   try {
-    const id = params.id;
+    // Next.js 15 requires awaiting params
+    const { id } = await params;
+    
     if (!id) {
       return NextResponse.json(
         { success: false, error: "Item ID is required" },
@@ -40,7 +42,6 @@ export async function GET(request, { params }) {
     return NextResponse.json({ success: true, lots });
 
   } catch (err) {
-    console.error("GET /api/items/[id]/lots error:", err);
     // always return 200 with empty lots so front-end never sees a non-OK
     return NextResponse.json({ success: true, lots: [] });
   }

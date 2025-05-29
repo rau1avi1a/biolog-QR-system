@@ -1,4 +1,3 @@
-// app/api/items/route.js
 import { NextResponse } from 'next/server';
 import dbConnect        from '@/lib/index';
 import { Item }         from '@/models/Item';
@@ -14,14 +13,30 @@ export async function GET(request) {
   try {
     await dbConnect();
 
-    const { searchParams } = new URL(request.url);
+    // Fix: More robust URL handling
+    let searchParams;
+    try {
+      // Try to parse as absolute URL first
+      const url = new URL(request.url);
+      searchParams = url.searchParams;
+    } catch (urlError) {
+      // If that fails, try with a base URL
+      try {
+        const url = new URL(request.url, 'http://localhost:3000');
+        searchParams = url.searchParams;
+      } catch (baseUrlError) {
+        // Fallback: create empty URLSearchParams
+        searchParams = new URLSearchParams();
+      }
+    }
+    
     const type       = searchParams.get('type');       // chemical|solution|product
     const searchRaw  = searchParams.get('search') || '';
 
     const q = {};
     if (type) q.itemType = type;
     if (searchRaw) {
-      // escape any regex metas so (+), etc. don’t break the query
+      // escape any regex metas so (+), etc. don't break the query
       const escaped = escapeRegExp(searchRaw);
       q.displayName = { $regex: escaped, $options: 'i' };
     }
@@ -33,8 +48,8 @@ export async function GET(request) {
 
     return NextResponse.json({ items });
   } catch (err) {
-    console.error('GET /api/items error:', err);
-    // always return JSON so front-end res.json() won’t fail
+    // Removed console.error as requested
+    // always return JSON so front-end res.json() won't fail
     return NextResponse.json(
       { items: [], error: err.message },
       { status: 500 }
@@ -49,7 +64,7 @@ export async function POST(request) {
     const item = await createItem(body);
     return NextResponse.json({ item }, { status: 201 });
   } catch (err) {
-    console.error('POST /api/items error:', err);
+    // Removed console.error as requested
     return NextResponse.json(
       { error: err.message },
       { status: 400 }

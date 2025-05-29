@@ -153,7 +153,10 @@ function SaveConfirmationDialog({
           plannedAmount: comp.amount || 0,
           actualAmount: comp.amount || 0,
           lotNumber: '',
-          lotId: null
+          lotId: null,
+          // Ensure we have component info for display
+          displayName: comp.itemId?.displayName || comp.displayName || 'Unknown Component',
+          sku: comp.itemId?.sku || comp.sku || 'No SKU'
         }))
       );
     } else if (currentDoc?.components) {
@@ -163,7 +166,10 @@ function SaveConfirmationDialog({
           plannedAmount: comp.amount || 0,
           actualAmount: comp.amount || 0,
           lotNumber: '',
-          lotId: null
+          lotId: null,
+          // Ensure we have component info for display
+          displayName: comp.itemId?.displayName || comp.displayName || 'Unknown Component',
+          sku: comp.itemId?.sku || comp.sku || 'No SKU'
         }))
       );
     }
@@ -195,14 +201,11 @@ function SaveConfirmationDialog({
         }
         
         if (!itemId) {
-          console.warn('No itemId found for component:', comp);
           return;
         }
         
         try {
-          console.log('Fetching lots for itemId:', itemId);
           const { lots } = await api.getAvailableLots(itemId);
-          console.log('Received lots for', itemId, ':', lots);
           
           // Store lots using both possible key formats to ensure access works
           lotsMap[itemId] = lots;
@@ -211,13 +214,11 @@ function SaveConfirmationDialog({
             lotsMap[comp.itemId.toString()] = lots;
           }
         } catch (e) {
-          console.error('Error fetching lots for', itemId, e);
           lotsMap[itemId] = [];
         }
       })
     );
     
-    console.log('Final lotsMap:', lotsMap);
     setAvailableLots(lotsMap);
     setIsLoadingLots(false);
   };
@@ -261,7 +262,6 @@ function SaveConfirmationDialog({
       action
     };
     
-    console.log('SaveConfirmationDialog: Confirming with data:', confirmationData);
     onConfirm(confirmationData);
     onClose();
   };
@@ -424,16 +424,14 @@ function SaveConfirmationDialog({
                       const itemKey = getItemKey(component);
                       const componentLots = availableLots[itemKey] || [];
                       
-                      console.log('Component lots for', itemKey, ':', componentLots);
-                      
                       return (
                         <div key={index} className="border rounded-lg p-4 space-y-4 bg-white">
                           <div className="flex items-center justify-between">
                             <h4 className="font-medium">
-                              {component.itemId?.displayName || `Component ${index + 1}`}
+                              {component.displayName || component.itemId?.displayName || `Component ${index + 1}`}
                             </h4>
                             <Badge variant="secondary" className="font-mono">
-                              {component.itemId?.sku || 'No SKU'}
+                              {component.sku || component.itemId?.sku || 'No SKU'}
                             </Badge>
                           </div>
                           

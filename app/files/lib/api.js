@@ -42,38 +42,29 @@ export const api = {
 
   /* ── batches with FIXED response handling ────────────────────────── */
   listBatches: async (status, fileId) => {
-    console.log('API: listBatches called with:', { status, fileId });
     try {
       const url = `/api/batches?` +
         (status  ? `status=${encodeURIComponent(status)}` : '') +
         (fileId  ? `&fileId=${fileId}` : '');
-      console.log('API: Making request to:', url);
       
       const response = await fetch(url);
-      console.log('API: Response status:', response.status);
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('API: Response error:', errorText);
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('API: listBatches response:', data);
       return data;
     } catch (error) {
-      console.error('API: listBatches error:', error);
       throw error;
     }
   },
     
   // FIXED: Match your API response format { success: true, data: {...} }
   newBatch: async (fileId, extra = {}) => {
-    console.log('API: newBatch called with:', { fileId, extra });
-    
     try {
       const payload = { fileId, ...extra };
-      console.log('API: newBatch payload:', JSON.stringify(payload, null, 2));
       
       const response = await fetch('/api/batches', {
         method: 'POST',
@@ -81,17 +72,12 @@ export const api = {
         body: JSON.stringify(payload)
       });
       
-      console.log('API: newBatch response status:', response.status);
-      console.log('API: newBatch response ok:', response.ok);
-      
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('API: newBatch response error:', errorText);
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('API: newBatch response data:', data);
       
       // FIXED: Return in the format your frontend expects
       return {
@@ -99,44 +85,33 @@ export const api = {
       };
       
     } catch (error) {
-      console.error('API: newBatch error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
       throw error;
     }
   },
       
   // FIXED: Match your API response format
   getBatch: async (id) => {
-    console.log('API: getBatch called with id:', id);
     try {
       const response = await fetch(`/api/batches/${id}`);
-      console.log('API: getBatch response status:', response.status);
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('API: getBatch response error:', errorText);
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('API: getBatch response:', data);
       
       // FIXED: Return in the format your frontend expects
       return {
         batch: data.success ? data.data : data
       };
     } catch (error) {
-      console.error('API: getBatch error:', error);
       throw error;
     }
   },
 
   // FIXED: Match your API response format
   updateBatch: async (id, payload) => {
-    console.log('API: updateBatch called with:', { id, payload });
     try {
       const response = await fetch(`/api/batches/${id}`, {
         method: 'PATCH',
@@ -144,23 +119,18 @@ export const api = {
         body: JSON.stringify(payload)
       });
       
-      console.log('API: updateBatch response status:', response.status);
-      
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('API: updateBatch response error:', errorText);
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log('API: updateBatch response:', data);
       
       // FIXED: Return in the format your frontend expects
       return {
         batch: data.success ? data.data : data
       };
     } catch (error) {
-      console.error('API: updateBatch error:', error);
       throw error;
     }
   },
@@ -172,13 +142,6 @@ export const api = {
 /* ── Updated Save with confirmation data ─── */
 /* ── NEW: Save with different actions and confirmation data ─── */
 saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirmationData = null) => {
-  console.log('API: saveBatchFromEditor called with:', { 
-    originalFileId, 
-    editorData: editorData ? 'present' : 'missing', 
-    action,
-    confirmationData 
-  });
-
   try {
     const payload = { 
       originalFileId, 
@@ -193,31 +156,24 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
               action === 'complete' ? 'Completed' : 'In Progress'
     };
 
-    console.log('API: saveBatchFromEditor payload:', JSON.stringify(payload, null, 2));
-
     const response = await fetch('/api/batches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    console.log('API: saveBatchFromEditor response status:', response.status);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('API: saveBatchFromEditor response error:', errorText);
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
-    console.log('API: saveBatchFromEditor response data:', data);
 
     return {
       batch: data.success ? data.data : data
     };
 
   } catch (error) {
-    console.error('API: saveBatchFromEditor error:', error);
     throw error;
   }
 },

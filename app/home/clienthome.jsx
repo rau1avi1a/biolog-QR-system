@@ -216,7 +216,6 @@ export default function ClientHome({ groups, allItems, stats }) {
       );
       return foundItem;
     } catch (error) {
-      console.error('Error in QR scan:', error);
       return null;
     }
   };

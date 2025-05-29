@@ -14,10 +14,35 @@ export default function usePdfEditorLogic({
   externalUndo,
   externalSave,
 }) {
-/* ── draw-mode flag (local or lifted) ───────────────────────────── */
+/* ── draw-mode flag (local or lifted) with workflow restrictions ────────── */
   const [localDraw, setLocalDraw] = useState(true);
-  const isDraw    = externalDraw     ?? localDraw;
-  const setIsDraw = externalSetDraw ?? setLocalDraw;
+  
+  // Determine if drawing should be allowed based on document state
+  const canDraw = () => {
+    if (!doc) return false;
+    
+    // Original files (File model) - no drawing until work order is created
+    if (!doc.isBatch) return false;
+    
+    // Completed batches - no drawing allowed
+    if (doc.status === 'Completed') return false;
+    
+    // Archived batches - no drawing allowed
+    if (doc.isArchived) return false;
+    
+    // Draft, In Progress, and Review batches - drawing allowed
+    return true;
+  };
+  
+  const isDraw = canDraw() && (externalDraw ?? localDraw);
+  const setIsDraw = (value) => {
+    if (!canDraw()) return; // Prevent setting draw mode if not allowed
+    if (externalSetDraw) {
+      externalSetDraw(value);
+    } else {
+      setLocalDraw(value);
+    }
+  };
 
 /* ── PDF + page state ───────────────────────────────────────────── */
   const [blobUri, setBlobUri]     = useState(doc?.pdf);
@@ -52,19 +77,10 @@ export default function usePdfEditorLogic({
     const containerRect = ctn.getBoundingClientRect();
     const { width: containerWidth, height: containerHeight } = containerRect;
     
-    console.log('Container dimensions:', { containerWidth, containerHeight });
-    
     // Find the actual PDF canvas to get the real PDF rendering dimensions
     const pdfCanvas = ctn.querySelector('.react-pdf__Page__canvas');
     if (pdfCanvas) {
       const pdfRect = pdfCanvas.getBoundingClientRect();
-      
-      console.log('PDF canvas actual dimensions:', { 
-        width: pdfRect.width, 
-        height: pdfRect.height,
-        left: pdfRect.left - containerRect.left,
-        top: pdfRect.top - containerRect.top
-      });
       
       // Set our overlay canvas to exactly match the PDF canvas
       const pdfWidth = Math.round(pdfRect.width);
@@ -80,15 +96,8 @@ export default function usePdfEditorLogic({
       cvs.style.left = `${pdfLeft}px`;
       cvs.style.top = `${pdfTop}px`;
       
-      console.log('Canvas positioned to match PDF:', { 
-        width: pdfWidth, 
-        height: pdfHeight, 
-        left: pdfLeft, 
-        top: pdfTop 
-      });
     } else {
       // Fallback: use full container
-      console.log('PDF canvas not found, using full container');
       cvs.width = Math.round(containerWidth);
       cvs.height = Math.round(containerHeight);
       cvs.style.width = `${containerWidth}px`;
@@ -165,7 +174,7 @@ export default function usePdfEditorLogic({
   };
 
   const down = (e) => {
-    if (!isDraw || !pageReady) return;
+    if (!isDraw || !pageReady || !canDraw()) return;
     e.preventDefault();
     setIsDown(true);
     const { x, y } = getPos(e);
@@ -176,7 +185,7 @@ export default function usePdfEditorLogic({
   /* 60 fps throttle */
   const lastMove = useRef(0);
   const move = (e) => {
-    if (!isDraw || !isDown || !pageReady) return;
+    if (!isDraw || !isDown || !pageReady || !canDraw()) return;
     const now = performance.now();
     if (now - lastMove.current < 16) return;
     lastMove.current = now;
@@ -188,7 +197,7 @@ export default function usePdfEditorLogic({
   };
 
   const up = () => {
-    if (!isDraw || !pageReady) return;
+    if (!isDraw || !pageReady || !canDraw()) return;
     ctxRef.current.closePath();
     setIsDown(false);
 
@@ -208,6 +217,8 @@ export default function usePdfEditorLogic({
 
 /* ───────────────────── undo (per-page) ────────────────────────── */
   const undo = useCallback(() => {
+    if (!canDraw()) return; // Prevent undo if drawing not allowed
+    
     const hist = historiesRef.current[pageNo] ?? [];
     if (!hist.length) return;
     const newIdx = histIdx - 1;
@@ -231,13 +242,18 @@ export default function usePdfEditorLogic({
       delete overlaysRef.current[pageNo];
       setOverlay(null);
     }
-  }, [histIdx, pageNo]);
+  }, [histIdx, pageNo, canDraw]);
 
 /* ─────────────────────── SAVE WITH CONFIRMATION SUPPORT ─────────── */
-// Updated save function in usePDFEditor.js - Debug version
-
 const save = useCallback(
   async (action = 'save', confirmationData = null) => {
+    // Check if saving is allowed
+    if (!doc) return;
+    if (doc.isArchived || doc.status === 'Completed') {
+      alert('Cannot save changes to completed or archived files.');
+      return;
+    }
+    
     const overlays = Object.fromEntries(
       Object.entries(overlaysRef.current).filter(([, png]) => png)
     );
@@ -263,7 +279,6 @@ const save = useCallback(
         
         refreshFiles?.();
       } catch (err) {
-        console.error('Rejection error:', err);
         alert('Error during rejection: ' + (err.message || 'Unknown error'));
       } finally {
         setIsSaving(false);
@@ -375,14 +390,13 @@ const save = useCallback(
       refreshFiles?.();
       
     } catch (err) {
-      console.error('Save error:', err);
       alert('Save error: ' + (err.message || 'Unknown error'));
       throw err;
     } finally {
       setIsSaving(false);
     }
   },
-  [doc, refreshFiles, setCurrentDoc]
+  [doc, refreshFiles, setCurrentDoc, canDraw]
 );
 
 /* expose undo / save to toolbar refs (if parent passed them) */
@@ -447,6 +461,7 @@ const save = useCallback(
     histIdx,
     isSaving,
     pageReady,
+    canDraw, // Export the canDraw function for UI logic
 
     /* callbacks for the UI */
     setIsDraw,

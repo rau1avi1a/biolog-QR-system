@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle
 } from '@/components/ui/sheet';
@@ -12,9 +12,24 @@ import { Loader2, Plus, Trash2 } from 'lucide-react';
 /* quick fetch of all items for BOM picking */
 const useAllItems = () => {
   const [items, setItems] = useState([]);
-  useState(() => {
-    fetch('/api/items').then(r => r.json()).then(d => setItems(d.items || []));
+  
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const response = await fetch('/api/items');
+        if (response.ok) {
+          const data = await response.json();
+          setItems(data.items || []);
+        }
+      } catch (error) {
+        // Silently handle error - items will remain empty array
+        setItems([]);
+      }
+    };
+    
+    fetchItems();
   }, []);
+  
   return items;
 };
 
@@ -33,20 +48,28 @@ export default function CreateItemDrawer({ open, onOpenChange, type }) {
 
   const save = async () => {
     setBusy(true);
-    await fetch('/api/items', {
-      method : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body   : JSON.stringify({
-        itemType    : type,
-        sku,
-        displayName : name,
-        qtyOnHand   : qty ? Number(qty) : 0,
-        bom         : isChem ? [] : bom.filter(r => r.componentId && r.quantity),
-      }),
-    });
-    setBusy(false);
-    onOpenChange(false);
-    window.location.reload();
+    try {
+      const response = await fetch('/api/items', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          itemType    : type,
+          sku,
+          displayName : name,
+          qtyOnHand   : qty ? Number(qty) : 0,
+          bom         : isChem ? [] : bom.filter(r => r.componentId && r.quantity),
+        }),
+      });
+      
+      if (response.ok) {
+        onOpenChange(false);
+        window.location.reload();
+      }
+    } catch (error) {
+      // Handle error silently for now
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

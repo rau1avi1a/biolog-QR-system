@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import {
   Menu, Pencil, Undo, Save, CheckCircle, Printer, Settings,
   ChevronLeft, ChevronRight, ArrowRightCircle, XCircle, Package,
-  AlertTriangle, FileText
+  AlertTriangle, FileText, Lock
 } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
@@ -39,7 +39,8 @@ export default function PDFEditor(props) {
   const {
     canvasRef, pageContainerRef,
     blobUri, pages, pageNo, isDraw, overlay, histIdx, isSaving,
-    setIsDraw, down, move, up, undo, save, gotoPage, print, initCanvas, setPages
+    setIsDraw, down, move, up, undo, save, gotoPage, print, initCanvas, setPages,
+    canDraw // Get the canDraw function from the hook
   } = usePdfEditorLogic(props);
 
   if (!blobUri) return <div className="p-4">No PDF data.</div>;
@@ -53,6 +54,7 @@ export default function PDFEditor(props) {
   const isInProgress = status === 'In Progress';
   const isInReview = status === 'Review';
   const isCompleted = status === 'Completed';
+  const isArchived = doc.isArchived;
 
   /* Handle save button clicks with NetSuite workflow */
   const handleSave = (action = 'save') => {
@@ -98,7 +100,6 @@ export default function PDFEditor(props) {
       setShowSaveDialog(false);
       refreshFiles?.();
     } catch (error) {
-      console.error('Save failed:', error);
       // You might want to show an error toast here
     }
   };
@@ -162,7 +163,7 @@ export default function PDFEditor(props) {
       ];
     }
     
-    // Completed - no actions
+    // Completed or archived - no actions
     return null;
   };
 
@@ -209,6 +210,14 @@ export default function PDFEditor(props) {
               'bg-green-100 text-green-800'
             }`}>{status}</Badge>
 
+            {/* Workflow restrictions indicator for original files */}
+            {isOriginal && (
+              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 flex items-center gap-1">
+                <Lock size={10} />
+                Read Only
+              </Badge>
+            )}
+
             {/* NetSuite workflow indicators */}
             <div className="flex items-center gap-1">
               {doc.workOrderCreated && (
@@ -240,13 +249,21 @@ export default function PDFEditor(props) {
           {/* file-properties drawer */}
           <Tool icon={Settings} label="File properties" onClick={()=>setMetaOpen(true)}/>
 
-          <Tool icon={Pencil} label={isDraw?'Draw off':'Draw on'}
-                onClick={()=>setIsDraw(d=>!d)}
-                style={isDraw?{color:'var(--primary)'}:{}}/>
+          {/* Drawing toggle - only show if drawing is allowed */}
+          {canDraw() ? (
+            <Tool icon={Pencil} label={isDraw?'Draw off':'Draw on'}
+                  onClick={()=>setIsDraw(d=>!d)}
+                  style={isDraw?{color:'var(--primary)'}:{}}/>
+          ) : (
+            <Tool icon={Lock} label="Drawing disabled for this file type/status"
+                  disabled={true}
+                  className="opacity-50"/>
+          )}
 
+          {/* Undo - only enabled if drawing is allowed */}
           <Tool icon={Undo} label="Undo" onClick={undo}
-                disabled={histIdx<0}
-                className={histIdx<0?'opacity-50':''}/>
+                disabled={histIdx<0 || !canDraw()}
+                className={histIdx<0 || !canDraw() ? 'opacity-50':''}/>
 
           {/* Dynamic buttons based on workflow state */}
           {buttonConfig && (
@@ -293,11 +310,11 @@ export default function PDFEditor(props) {
             </>
           )}
 
-          {isCompleted && (
-            // Completed batch - read only
+          {(isCompleted || isArchived) && (
+            // Completed/archived batch - read only
             <Badge variant="outline" className="text-green-600 flex items-center gap-1">
               <CheckCircle size={14} />
-              Completed & Archived
+              {isArchived ? 'Archived' : 'Completed'}
             </Badge>
           )}
 
@@ -325,8 +342,10 @@ export default function PDFEditor(props) {
 
           <canvas
             ref={canvasRef}
-            className={`absolute inset-0 ${isDraw?'cursor-crosshair':'pointer-events-none'}`}
-            style={{ touchAction:isDraw?'none':'auto' }}
+            className={`absolute inset-0 ${
+              isDraw && canDraw() ? 'cursor-crosshair' : 'pointer-events-none'
+            }`}
+            style={{ touchAction: isDraw && canDraw() ? 'none' : 'auto' }}
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={up}
@@ -341,7 +360,7 @@ export default function PDFEditor(props) {
         open={metaOpen}
         onOpenChange={setMetaOpen}
         onSaved={refreshFiles}
-        readOnly={isInReview || isCompleted} // Read-only in review and completed states
+        readOnly={doc.isBatch || isCompleted || isArchived} // Read-only for all batches, completed, and archived files
       />
 
       {/* Save Confirmation Dialog */}

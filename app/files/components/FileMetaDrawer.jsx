@@ -104,12 +104,8 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
   useEffect(() => {
     if (!file) return;
     
-    console.log('File data in drawer:', file);
-    
     // Handle both original files and batches
     const data = file.snapshot || file; // Use snapshot data for batches, direct data for originals
-    
-    console.log('Data being used:', data);
     
     // Removed description since it's not in the models
     setProduct(data.productRef    || null);
@@ -119,11 +115,8 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     
     // Handle components with better error checking
     if (data.components?.length) {
-      console.log('Components:', data.components);
       setRows(
         data.components.map((c, index) => {
-          console.log(`Component ${index}:`, c);
-          
           // Handle different data structures
           let item = null;
           if (c.itemId) {
@@ -192,7 +185,10 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
           </SheetTitle>
           {readOnly && (
             <p className="text-sm text-muted-foreground">
-              Properties are inherited from the original file and cannot be edited in batch copies.
+              {file.isBatch 
+                ? 'Properties are inherited from the original file and cannot be edited in batch copies.'
+                : 'Properties cannot be edited in this file state.'
+              }
             </p>
           )}
         </SheetHeader>

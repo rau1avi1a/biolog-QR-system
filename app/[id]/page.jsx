@@ -19,16 +19,11 @@ export default async function UniversalDetailPage({ params }) {
   // Next.js 15 requires awaiting params
   const { id } = await params;
   
-  console.log('🔄 PAGE: Processing request for ID:', id);
-  
   const { type, data } = await getItemOrLot(id);
   
   if (!data) {
-    console.log('❌ PAGE: No data found, returning 404');
     notFound();
   }
-
-  console.log('✅ PAGE: Found', type, 'data, rendering client component');
 
   if (type === 'item') {
     // It's an item - use the item detail client

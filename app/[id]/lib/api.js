@@ -1,4 +1,4 @@
-// lib/api.js
+// app/[id]/lib/api.js
 import { Item } from '@/models/Item';
 import dbConnect from '@/lib/index';
 import { txnService } from '@/services/txn.service';
@@ -14,16 +14,13 @@ export async function getItemOrLot(id) {
   
   // Validate MongoDB ObjectId format
   if (!id.match(/^[0-9a-fA-F]{24}$/)) {
-    console.log('❌ API: Invalid ObjectId format:', id);
     return { type: null, data: null };
   }
   
   // Try to find it as an Item first
-  console.log('🔍 API: Searching for Item with ID:', id);
   const item = await Item.findById(id).lean();
   
   if (item) {
-    console.log('✅ API: Found as Item:', item.displayName);
     return {
       type: 'item',
       data: formatItemData(item)
@@ -31,8 +28,6 @@ export async function getItemOrLot(id) {
   }
 
   // If not found as an Item, search for it as a Lot within Items
-  console.log('🔍 API: Not found as Item, searching for Lot:', id);
-  
   try {
     // Use mongoose.Types.ObjectId for the query
     const itemWithLot = await Item.findOne({ 
@@ -43,7 +38,6 @@ export async function getItemOrLot(id) {
       const lot = itemWithLot.Lots.find(l => l._id.toString() === id);
       
       if (lot) {
-        console.log('✅ API: Found as Lot:', lot.lotNumber, 'in item:', itemWithLot.displayName);
         return {
           type: 'lot',
           data: formatLotData(lot, itemWithLot)
@@ -51,10 +45,9 @@ export async function getItemOrLot(id) {
       }
     }
   } catch (error) {
-    console.error('❌ API: Error searching for lot:', error);
+    // Silently handle error
   }
 
-  console.log('❌ API: Not found as Item or Lot:', id);
   return { type: null, data: null };
 }
 
@@ -126,22 +119,16 @@ function formatLotData(lot, parentItem) {
  * @returns {Promise<Array>} - Array of formatted transactions
  */
 export async function getItemTransactionHistory(itemId) {
-  try {
-    console.log('🔍 API: Fetching transaction history for item:', itemId);
-    
+  try {    
     if (!txnService?.listByItem) {
-      console.log('❌ API: txnService.listByItem not available');
       return [];
     }
     
     const transactions = await txnService.listByItem(itemId);
     
     if (!transactions || !Array.isArray(transactions)) {
-      console.log('❌ API: No transactions returned or invalid format');
       return [];
     }
-    
-    console.log('✅ API: Found', transactions.length, 'transactions for item');
     
     return transactions.map(txn => ({
       _id: txn._id.toString(),
@@ -160,7 +147,6 @@ export async function getItemTransactionHistory(itemId) {
         }))
     }));
   } catch (error) {
-    console.error('❌ API: Error fetching transaction history:', error);
     return [];
   }
 }
@@ -172,18 +158,14 @@ export async function getItemTransactionHistory(itemId) {
  * @returns {Promise<Array>} - Array of formatted transactions affecting this lot
  */
 export async function getLotTransactionHistory(itemId, lotNumber) {
-  try {
-    console.log('🔍 API: Fetching lot transaction history for:', { itemId, lotNumber });
-    
+  try {    
     if (!txnService?.listByItem) {
-      console.log('❌ API: txnService.listByItem not available');
       return [];
     }
     
     const transactions = await txnService.listByItem(itemId);
     
     if (!transactions || !Array.isArray(transactions)) {
-      console.log('❌ API: No transactions returned or invalid format');
       return [];
     }
     
@@ -208,10 +190,8 @@ export async function getLotTransactionHistory(itemId, lotNumber) {
       }))
       .filter(txn => txn.relevantLines.length > 0);
     
-    console.log('✅ API: Found', lotTransactions.length, 'transactions for lot');
     return lotTransactions;
   } catch (error) {
-    console.error('❌ API: Error fetching lot transaction history:', error);
     return [];
   }
 }
