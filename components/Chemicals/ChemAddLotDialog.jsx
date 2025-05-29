@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { mapItemToChemical } from "../../utils/mapItemToChemical"
 
 export default function ChemAddLotDialog({
   open,
@@ -32,55 +33,41 @@ export default function ChemAddLotDialog({
     }
   }, [open])
 
-  async function handleSave() {
-    if (!chemicalId) return
-    try {
-      // First validate the inputs
-      if (!formValues.LotNumber.trim()) {
-        alert("Please enter a Lot Number");
-        return;
-      }
-      
-      if (!formValues.Quantity || isNaN(parseFloat(formValues.Quantity)) || parseFloat(formValues.Quantity) <= 0) {
-        alert("Please enter a valid Quantity");
-        return;
-      }
-      
-      // Clean the chemical ID by removing any potential prefix
-      const cleanChemicalId = chemicalId.replace(/^chem/, '');
-      
-      console.log('Adding new lot:', {
-        endpoint: `/api/chemicals/${cleanChemicalId}/lots`,
-        data: {
-          LotNumber: formValues.LotNumber,
-          Quantity: parseFloat(formValues.Quantity) || 0
-        }
-      });
-      
-      const res = await fetch(`/api/chemicals/${cleanChemicalId}/lots`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          LotNumber: formValues.LotNumber,
-          Quantity: parseFloat(formValues.Quantity) || 0
-          // ExpirationDate: formValues.ExpirationDate || null
-        })
-      })
-      
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to add lot");
-      }
-      
-      const updatedDoc = await res.json();
-      onLotAdded(updatedDoc);
-      onClose();
-    } catch (err) {
-      console.error("Error adding lot:", err);
-      alert(err.message || "Failed to add lot. Please try again.");
-    }
+async function handleSave() {
+  if (!chemicalId) return;
+  const lotNumber = formValues.LotNumber.trim();
+  const qty       = parseFloat(formValues.Quantity);
+  if (!lotNumber || isNaN(qty) || qty <= 0) {
+    alert("Enter a valid lot number & quantity");
+    return;
   }
-  
+
+  // POST to your unified transaction route
+  const res = await fetch(
+    `/api/items/${chemicalId}/lots/${encodeURIComponent(
+      lotNumber
+    )}/transactions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        qty,                                      // positive = add
+        memo: `Created lot ${lotNumber} with ${qty}`, 
+      }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to add lot");
+  }
+
+  // Pull back the updated item, remap, and update your table
+  const { item }   = await res.json();
+  const updatedChem = mapItemToChemical(item);
+  onLotAdded(updatedChem);  // pass the whole item back, or just the new lot
+  onClose();
+}
+
   function handleChange(e) {
     setFormValues({ ...formValues, [e.target.name]: e.target.value })
   }

@@ -1,42 +1,44 @@
 // app/layout.js
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-import Image from "next/image";
-import { ToastProvider } from "@/components/ui/toast";
+import { Geist, Geist_Mono } from 'next/font/google';
+import Image from 'next/image';
+import './globals.css';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+import Providers from './providers';         // React-Query context
+import { ToastProvider } from '@/components/ui/toast';
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
+const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata = {
-  title: "biolog",
-  description: "Biolog MFG",
+  title: 'biolog',
+  description: 'Biolog MFG',
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        {/* QR Code Libraries */}
+        <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js" async />
+        <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js" async />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {/* Global background image */}
+        {/* full-screen background */}
         <Image
           src="/glass.png"
           alt="background"
           width={1600}
           height={1600}
-          className="fixed top-0 left-0 w-full h-full object-cover z-[-1] pointer-events-none"
+          className="fixed inset-0 w-full h-full object-cover z-[-1] pointer-events-none"
           priority
         />
 
-        {/* Wrap all pages in a toast provider; no NavBar here */}
-        <ToastProvider>
-          {children}
-        </ToastProvider>
+        {/* now wrapped in both React-Query and Toast contexts */}
+        <Providers>
+          <ToastProvider>
+            {children}
+          </ToastProvider>
+        </Providers>
       </body>
     </html>
   );

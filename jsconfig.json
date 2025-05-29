@@ -5,7 +5,8 @@
     "paths": {
       "@/components/*": ["components/*"],
       "@/lib/*": ["lib/*"],
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@/services/*": ["services/*"],
     },
     "target": "es5",
     "module": "esnext",
@@ -20,6 +21,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["**/*.js", "**/*.jsx", "app/api/files/[id]/versions/route.ts", "app/api/folders/route.ts"],
+  "include": ["**/*.js", "**/*.jsx", "app/api/files/[id]/versions/route.ts", "app/api/folders/route.ts", "hooks/useItemTransactions.ts"],
   "exclude": ["node_modules", ".env"]
 }

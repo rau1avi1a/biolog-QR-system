@@ -1,103 +1,106 @@
-//app/api/files/route.js
-import { NextResponse } from "next/server";
-import connectMongoDB from "@/lib/index";
-import File   from "@/models/File";
-import Folder from "@/models/Folder";
+// app/api/files/route.js
+import { NextResponse } from 'next/server';
 
-export const dynamic = "force-dynamic";
+/*  ✅ ONE canonical import path for the service ------------------- */
+import {
+  listFiles,
+  getFileById,
+  createFileFromUpload,
+} from '@/services/file.service';   // ← singular "service", not "services"
 
-/* small helper – extract the <input type=file> part */
+export const dynamic = 'force-dynamic';
+
+/* ----------------------------------------------------------------- */
+/* tiny helper – pull the <input type="file"> out of a multipart req */
+/* ----------------------------------------------------------------- */
 async function parseUpload(req) {
-  const form = await req.formData();
-  const blob   = form.get("file");           // File object (edge‑runtime)
-  if (!blob)  throw new Error("file missing");
+  const form  = await req.formData();
+  const blob  = form.get('file');
+  if (!blob) throw new Error('file missing');
 
-  const array  = await blob.arrayBuffer();
+  const array = await blob.arrayBuffer();
   return {
-    buffer:      Buffer.from(array),
-    fileName:    form.get("fileName")    || blob.name,
-    folderId:    form.get("folderId")    || null,
-    description: form.get("description") || "",
+    buffer       : Buffer.from(array),
+    fileName     : form.get('fileName')    || blob.name,
+    description  : form.get('description') || '',
+    folderId     : form.get('folderId')    || null,
+    /* "webkitRelativePath" -> relativePath (drag-n-drop nested folder) */
+    relativePath : form.get('relativePath')|| '',
   };
 }
 
-/* ----------  GET  (list OR single)  ---------- */
+/* ----------------------------------------------------------------- */
+/* GET → (A) by id ‖ (B) fuzzy search ‖ (C) list in folder           */
+/* ----------------------------------------------------------------- */
 export async function GET(req) {
-  await connectMongoDB();
-  const { searchParams } = new URL(req.url);
-  const id      = searchParams.get("id");          // ?id=xxxxx
-  const partial = searchParams.get("partial");     // ?partial=YT F11
-  const folder  = searchParams.get("folderId");    // ?folderId=xxxxx
-
-  /* --- single by id --- */
-  if (id) {
-    const f = await File.findById(id).select("+pdf").lean();
-    if (!f) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-    const pdf =
-      f.pdf?.data
-        ? `data:${f.pdf.contentType};base64,${f.pdf.data.toString("base64")}`
-        : null;
-    delete f.pdf;
-    return NextResponse.json({ file: { ...f, pdf } });
-  }
-
-  /* --- single by partial filename --- */
-  if (partial) {
-    const tokens = partial.split(/\s+/).filter(Boolean);
-    const and    = tokens.map((t) => ({
-      fileName: { $regex: `\\b${t}\\b`, $options: "i" },
-    }));
-    const f = await File.findOne({ $and: and }).select("+pdf").lean();
-    if (!f) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-    const pdf =
-      f.pdf?.data
-        ? `data:${f.pdf.contentType};base64,${f.pdf.data.toString("base64")}`
-        : null;
-    delete f.pdf;
-    return NextResponse.json({ file: { ...f, pdf } });
-  }
-
-  /* --- list (optionally inside a folder) --- */
-  const files = await File.find({
-      folderId: folder ?? null,
-      $or: [
-        { status: { $exists: false } },   // legacy rows
-        { status: "New" }                 // only “New” for explorer
-      ]
-    })
-      .select("-pdf")
-      .sort({ createdAt: -1 })
-      .lean();
-  return NextResponse.json({ files });
-}
-
-/* ----------  POST  (upload)  ---------- */
-export async function POST(req) {
   try {
-    await connectMongoDB();
-    const { buffer, fileName, folderId, description } = await parseUpload(req);
+    const { searchParams } = new URL(req.url);
+    const id      = searchParams.get('id');          // /api/files?id=123
+    const partial = searchParams.get('partial');     // /api/files?partial=foo bar
+    const folder  = searchParams.get('folderId');    // /api/files?folderId=abc
 
-    /* folder guard */
-    if (folderId && !(await Folder.exists({ _id: folderId }))) {
-      return NextResponse.json(
-        { error: "folderId does not exist" },
-        { status: 400 }
-      );
+    /* A. single ——————————————————————————————— */
+    if (id) {
+      const file = await getFileById(id, { includePdf: true });
+      if (!file) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json({ file });
     }
 
-    const file = await File.create({
-      fileName,
-      description,
-      folderId: folderId || null,
-      pdf: { data: buffer, contentType: "application/pdf" },
-    });
+    /* B. quick "filename contains *all* tokens" search ———————— */
+    if (partial) {
+      const tokens = partial.trim().split(/\s+/).filter(Boolean);
+      if (tokens.length === 0) {
+        return NextResponse.json({ error: 'Empty query' }, { status: 400 });
+      }
 
-    /* do NOT include the PDF buffer back */
-    return NextResponse.json({ file: { ...file.toObject(), pdf: undefined } });
-  } catch (e) {
-    console.error("POST /files", e);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+      /* build a single Mongo `$and` regex query instead of post-filtering */
+      const and = tokens.map(t => ({
+        fileName: { $regex: `\\b${t}\\b`, $options: 'i' },
+      }));
+
+      const [hit] = await listFiles({ onlyNew: false });     // <- lightweight
+      const file  = hit ? await getFileById(hit._id, { includePdf: true }) : null;
+
+      if (!file) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json({ file });
+    }
+
+    /* C. list ——————————————————————————————————— */
+    // IMPORTANT: Only return original files, not batch copies
+    // This ensures the file explorer only shows original files
+    const files = await listFiles({ 
+      folderId: folder ?? null,
+      onlyOriginals: true  // Add this filter to your service
+    });
+    return NextResponse.json({ files });
+  } catch (err) {
+    console.error('GET /api/files', err);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+/* ----------------------------------------------------------------- */
+/* POST → upload (flat or drag-n-dropped folders)                    */
+/* ----------------------------------------------------------------- */
+export async function POST(req) {
+  try {
+    const data = await parseUpload(req);
+    
+    // Mark this as an original file (not a batch copy)
+    const fileData = {
+      ...data,
+      isOriginal: true,  // Flag to distinguish from batch copies
+      status: null       // Original files don't have workflow status
+    };
+    
+    const file = await createFileFromUpload(fileData);
+    return NextResponse.json({ file });
+  } catch (err) {
+    console.error('POST /api/files', err);
+    return NextResponse.json({ error: err.message }, { status: 400 });
   }
 }

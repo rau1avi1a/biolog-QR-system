@@ -1,20 +1,97 @@
-// components/NavBar.js
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from "next/link";
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden'; // Add this import
 import { SignInDialog } from '@/components/auth/SignInDialog';
-import { useRouter, usePathname } from 'next/navigation'; // Removed SignUpDialog
-import { useEffect } from 'react'; // If needed
+import { useRouter, usePathname } from 'next/navigation';
+import {
+  Home,
+  RotateCcw,
+  FileText,
+  User,
+  LogOut,
+  Menu,
+  Bell,
+  Settings,
+  TestTube,
+  ChevronDown,
+  Sun,
+  Moon,
+  Monitor
+} from 'lucide-react';
 
-export default function NavBar({ user }) {
+export default function NavBar({ user, notifications = [] }) {
   const [isSignInOpen, setIsSignInOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [theme, setTheme] = useState('system');
+  const [mounted, setMounted] = useState(false);
   const router = useRouter();
-  const pathname = usePathname(); // Get the current pathname
+  const pathname = usePathname();
 
   // Define paths where NavBar should be hidden
   const hideNavBarPaths = ['/auth/login'];
+
+  // Theme handling
+  useEffect(() => {
+    setMounted(true);
+    const savedTheme = localStorage.getItem('theme') || 'system';
+    setTheme(savedTheme);
+  }, []);
+
+  const applyTheme = (newTheme) => {
+    setTheme(newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    const root = window.document.documentElement;
+    root.classList.remove('light', 'dark');
+    
+    if (newTheme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      root.classList.add(systemTheme);
+    } else {
+      root.classList.add(newTheme);
+    }
+  };
+
+  // Navigation items
+  const navigationItems = [
+    {
+      href: '/home',
+      label: 'Home',
+      icon: Home,
+      description: 'Inventory dashboard'
+    },
+    {
+      href: '/cyclecount',
+      label: 'Cycle Count',
+      icon: RotateCcw,
+      description: 'Inventory counting'
+    },
+    {
+      href: '/files',
+      label: 'Files',
+      icon: FileText,
+      description: 'Document management'
+    }
+  ];
 
   // If the current path is in hideNavBarPaths, do not render NavBar
   if (hideNavBarPaths.includes(pathname)) {
@@ -28,61 +105,267 @@ export default function NavBar({ user }) {
       });
 
       if (!res.ok) throw new Error('Failed to logout');
-
-      // Redirect to login page after logout
       router.push('/');
     } catch (error) {
       console.error('Logout failed:', error);
-      // Optionally, display an error message to the user
     }
   };
 
+  const isActivePath = (path) => pathname === path;
+
+  const unreadNotifications = notifications.filter(n => !n.read).length;
+
   return (
-    <nav className="relative z-50 flex justify-between items-center bg-slate-800 px-8 py-3">
-      <div className="flex space-x-6">
-        <Link
-          href="/home"
-          className="text-white hover:text-gray-300 transition-colors">
-          Home
-        </Link>
-        <Link
-        href="/cyclecount"
-        className="text-white hover:text-gray-300 transition-colors"
-        >
-          Cycle Count
-        </Link>
-        <Link
-        href="/files"
-        className="text-white hover:text-gray-300 transition-colors"
-        >
-          Files
-        </Link>
+    <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container mx-auto px-4">
+        <div className="flex h-16 items-center justify-between">
+          {/* Logo/Brand */}
+          <div className="flex items-center space-x-4">
+            <Link href="/home" className="flex items-center space-x-2 group">
+              <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                <TestTube className="h-5 w-5 text-primary" />
+              </div>
+              <div className="hidden sm:block">
+                <h1 className="text-lg font-semibold">Biolog QR</h1>
+                <p className="text-xs text-muted-foreground -mt-1">Laboratory System</p>
+              </div>
+            </Link>
+          </div>
 
-      </div>
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center space-x-1">
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = isActivePath(item.href);
+              
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                    isActive
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
 
-      <div className="flex items-center space-x-4">
-        {user ? (
-          <>
-            <span className="text-white hover:text-gray-300 transition-colors">Welcome, {user.name}</span>
-            <Button
-              variant="ghost hover:ghost"
-              className="text-white hover:text-gray-300 transition-colors"
-              onClick={handleLogout}
-            >
-              Logout
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              variant="ghost hover:ghost"
-              className="text-white hover:text-gray-300 transition-colors"
-              onClick={() => setIsSignInOpen(true)}
-            >
-              Sign In
-            </Button>
-          </>
-        )}
+          {/* Right side - User actions */}
+          <div className="flex items-center space-x-3">
+            {user ? (
+              <>
+                {/* Notifications */}
+                {notifications.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="relative">
+                        <Bell className="h-4 w-4" />
+                        {unreadNotifications > 0 && (
+                          <Badge
+                            variant="destructive"
+                            className="absolute -top-1 -right-1 h-5 w-5 p-0 text-xs flex items-center justify-center"
+                          >
+                            {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                          </Badge>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-80">
+                      <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {notifications.slice(0, 5).map((notification, index) => (
+                        <DropdownMenuItem key={index} className="flex flex-col items-start p-3">
+                          <p className="text-sm font-medium">{notification.title}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{notification.message}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{notification.time}</p>
+                        </DropdownMenuItem>
+                      ))}
+                      {notifications.length === 0 && (
+                        <DropdownMenuItem className="text-center text-muted-foreground">
+                          No notifications
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
+                {/* Theme Selector */}
+                {mounted && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        {theme === 'light' && <Sun className="h-4 w-4" />}
+                        {theme === 'dark' && <Moon className="h-4 w-4" />}
+                        {theme === 'system' && <Monitor className="h-4 w-4" />}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Theme</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => applyTheme('light')}>
+                        <Sun className="h-4 w-4 mr-2" />
+                        Light
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => applyTheme('dark')}>
+                        <Moon className="h-4 w-4 mr-2" />
+                        Dark
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => applyTheme('system')}>
+                        <Monitor className="h-4 w-4 mr-2" />
+                        System
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
+                {/* User Menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="flex items-center space-x-2 px-3">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                        <User className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="hidden sm:block text-left">
+                        <p className="text-sm font-medium leading-none">{user.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{user.email}</p>
+                      </div>
+                      <ChevronDown className="h-3 w-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>
+                      <div>
+                        <p className="font-medium">{user.name}</p>
+                        <p className="text-xs text-muted-foreground">{user.email}</p>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem>
+                      <User className="h-4 w-4 mr-2" />
+                      Profile
+                    </DropdownMenuItem>
+                    <DropdownMenuItem>
+                      <Settings className="h-4 w-4 mr-2" />
+                      Settings
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Sign Out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ) : (
+              <Button onClick={() => setIsSignInOpen(true)}>
+                Sign In
+              </Button>
+            )}
+
+            {/* Mobile Menu - FIXED SECTION */}
+            <div className="md:hidden">
+              <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-80">
+                  {/* ADD THIS HEADER WITH HIDDEN TITLE */}
+                  <SheetHeader>
+                    <SheetTitle>
+                      <VisuallyHidden>Navigation Menu</VisuallyHidden>
+                    </SheetTitle>
+                  </SheetHeader>
+                  
+                  <div className="flex flex-col space-y-4 mt-8">
+                    {/* Mobile Brand */}
+                    <div className="flex items-center space-x-2 px-2">
+                      <div className="p-2 rounded-lg bg-primary/10">
+                        <TestTube className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-semibold">Biolog QR</h2>
+                        <p className="text-xs text-muted-foreground">Laboratory System</p>
+                      </div>
+                    </div>
+
+                    {/* Mobile Navigation */}
+                    <div className="space-y-2">
+                      {navigationItems.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = isActivePath(item.href);
+                        
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={`flex items-center space-x-3 px-3 py-3 rounded-lg transition-colors ${
+                              isActive
+                                ? 'bg-primary text-primary-foreground'
+                                : 'hover:bg-muted'
+                            }`}
+                          >
+                            <Icon className="h-5 w-5" />
+                            <div>
+                              <p className="font-medium">{item.label}</p>
+                              <p className="text-xs text-muted-foreground">{item.description}</p>
+                            </div>
+                          </Link>
+                        );
+                      })}
+                    </div>
+
+                    {/* Mobile User Section */}
+                    {user && (
+                      <div className="pt-4 border-t">
+                        <div className="px-3 py-2">
+                          <p className="font-medium">{user.name}</p>
+                          <p className="text-sm text-muted-foreground">{user.email}</p>
+                        </div>
+                        <div className="space-y-1 mt-2">
+                          <Button
+                            variant="ghost"
+                            className="w-full justify-start"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                          >
+                            <User className="h-4 w-4 mr-2" />
+                            Profile
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="w-full justify-start"
+                            onClick={() => setIsMobileMenuOpen(false)}
+                          >
+                            <Settings className="h-4 w-4 mr-2" />
+                            Settings
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="w-full justify-start text-destructive"
+                            onClick={() => {
+                              handleLogout();
+                              setIsMobileMenuOpen(false);
+                            }}
+                          >
+                            <LogOut className="h-4 w-4 mr-2" />
+                            Sign Out
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+          </div>
+        </div>
       </div>
 
       <SignInDialog

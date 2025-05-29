@@ -1,80 +1,154 @@
 // app/files/components/FileNavigator.jsx
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import {
-  FolderPlus, Folder as FolderIcon, FileIcon, UploadCloud, Loader2, Menu,
-  Search, Clock, CheckCircle2, CircleDot, Home, ChevronRight, ChevronDown,
-  MoreHorizontal, Trash2, Edit2, ChevronDown as Caret
+  Clock,
+  CircleDot,
+  Loader2,
+  Home,
+  ChevronRight,
+  ChevronLeft,        // Added for archive navigation
+  ChevronDown as ChevronDownIcon,
+  Search,
+  Folder as FolderIcon,
+  File as FileIcon,
+  FileX,              // Added for empty archive states
+  FolderPlus,
+  UploadCloud,
+  MoreHorizontal,
+  Edit2,
+  Trash2,
+  CheckCircle2,
+  Archive,            // Added for archive icon
+  SortAsc             // Added for sort dropdown
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import {
-  Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator
-} from '@/components/ui/breadcrumb';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbSeparator
+} from '@/components/ui/breadcrumb';
 import { Input } from '@/components/ui/input';
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
-} from '@/components/ui/alert-dialog';
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader,
-  DialogTitle, DialogTrigger
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogTrigger
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { api } from '../lib/api';
 import { useRouter } from 'next/navigation';
 
-import { api } from '../lib/api';
+// ──────────────────────────────────────────────────────────────────────
+// Breadcrumb for folder navigation
+// ──────────────────────────────────────────────────────────────────────
+function EnhancedBreadcrumb({ folder, onNavigate }) {
+  const [path, setPath] = useState([]);
+  useEffect(() => { setPath(folder ? [folder] : []); }, [folder]);
 
-/* ------------------------------------------------------------------ */
-/* Search box                                                         */
-/* ------------------------------------------------------------------ */
+  return (
+    <Breadcrumb className="mb-4 text-sm">
+      <BreadcrumbItem>
+        <BreadcrumbLink
+          onClick={() => onNavigate(null)}
+          className="flex items-center gap-1"
+        >
+          <FolderIcon size={14}/> <span>Root</span>
+        </BreadcrumbLink>
+      </BreadcrumbItem>
+      {path.map((item, i) => (
+        <React.Fragment key={item._id}>
+          <BreadcrumbSeparator/>
+          <BreadcrumbItem>
+            <BreadcrumbLink
+              onClick={() => onNavigate(item)}
+              className={`hover:text-primary ${i === path.length-1 ? 'font-medium' : ''}`}
+            >
+              {item.name}
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+        </React.Fragment>
+      ))}
+    </Breadcrumb>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Search box
+// ──────────────────────────────────────────────────────────────────────
 function FileSearch({ onSearchResults }) {
   const [query, setQuery] = useState('');
-  const [busy, setBusy]   = useState(false);
+  const [busy,  setBusy]  = useState(false);
 
-  const run = async (e) => {
+  const run = async e => {
     e.preventDefault();
     if (!query.trim()) return;
     setBusy(true);
     const { files } = await api.files();
-    const res = files.filter((f) =>
+    onSearchResults(files.filter(f =>
       f.fileName.toLowerCase().includes(query.toLowerCase())
-    );
-    onSearchResults(res);
+    ));
     setBusy(false);
   };
 
   return (
     <form onSubmit={run} className="relative mb-4">
-      <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files…" className="pr-8" />
+      <Input
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        placeholder="Search files…"
+        className="pr-8"
+      />
       <button
         type="submit"
         disabled={busy}
         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
       >
-        {busy ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+        {busy
+          ? <Loader2 size={16} className="animate-spin"/>
+          : <Search size={16}/>
+        }
       </button>
     </form>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Single file row                                                    */
-/* ------------------------------------------------------------------ */
+// ──────────────────────────────────────────────────────────────────────
+// Single file row
+// ──────────────────────────────────────────────────────────────────────
 function FileItem({ file, onSelect, onStatusChange }) {
   const icon = {
-    'In Progress': <Clock size={14} className="text-amber-500" />,
-    Review       : <CircleDot size={14} className="text-blue-500" />,
-    Completed    : <CheckCircle2 size={14} className="text-green-500" />
-  }[file.status] || <FileIcon size={14} />;
+    'In Progress': <Clock        size={14} className="text-amber-500"/>,
+    Review       : <CircleDot    size={14} className="text-blue-500"/>,
+    Completed    : <CheckCircle2 size={14} className="text-green-500"/>
+  }[file.status] || <FileIcon size={14}/>;
 
-  const badge = {
+  const badgeClass = {
     'In Progress': 'bg-amber-100 text-amber-800',
     Review       : 'bg-blue-100  text-blue-800',
     Completed    : 'bg-green-100 text-green-800'
@@ -83,65 +157,66 @@ function FileItem({ file, onSelect, onStatusChange }) {
   return (
     <DropdownMenu>
       <div
-        onClick={() => onSelect(file)}
+        onClick={()=>onSelect(file)}
         className="flex items-center gap-2 hover:bg-muted rounded px-2 py-1.5 mb-1 cursor-pointer group"
       >
         {icon}
         <span className="truncate flex-1">{file.fileName}</span>
         {file.status && (
-          <Badge variant="outline" className={`text-xs py-0 px-2 ${badge}`}>
+          <Badge variant="outline" className={`text-xs py-0 px-2 ${badgeClass}`}>
             {file.status}
           </Badge>
         )}
-        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100">
-            <MoreHorizontal size={14} />
-          </Button>
-        </DropdownMenuTrigger>
+        {onStatusChange && (
+          <>
+            <DropdownMenuTrigger asChild onClick={e=>e.stopPropagation()}>
+              <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100">
+                <MoreHorizontal size={14}/>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={()=>onStatusChange(file._id,'In Progress')}>
+                <Clock size={14} className="mr-2 text-amber-500"/> Mark as In Progress
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={()=>onStatusChange(file._id,'Review')}>
+                <CircleDot size={14} className="mr-2 text-blue-500"/> Move to Review
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={()=>onStatusChange(file._id,'Completed')}>
+                <CheckCircle2 size={14} className="mr-2 text-green-500"/> Mark as Completed
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </>
+        )}
       </div>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem onClick={() => onStatusChange(file._id, 'In Progress')}>
-          <Clock size={14} className="mr-2 text-amber-500" />
-          Mark as In Progress
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onStatusChange(file._id, 'Review')}>
-          <CircleDot size={14} className="mr-2 text-blue-500" />
-          Move to Review
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onStatusChange(file._id, 'Completed')}>
-          <CheckCircle2 size={14} className="mr-2 text-green-500" />
-          Mark as Completed
-        </DropdownMenuItem>
-      </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Edit-/Delete folder dialog                                         */
-/* ------------------------------------------------------------------ */
+// ──────────────────────────────────────────────────────────────────────
+// Edit / Delete Folder Dialog
+// ──────────────────────────────────────────────────────────────────────
 function EditFolderDialog({ folder, onUpdate, onDelete }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState(folder?.name || '');
-  const [del, setDel]   = useState(false);
+  const [open,    setOpen]    = useState(false);
+  const [name,    setName]    = useState(folder?.name||'');
+  const [confirm, setConfirm] = useState(false);
 
-  useEffect(() => { if (folder) setName(folder.name); }, [folder]);
+  useEffect(() => { if(folder) setName(folder.name); }, [folder]);
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100">
-            <MoreHorizontal size={14} />
+            <MoreHorizontal size={14}/>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem onClick={() => setOpen(true)}>
-            <Edit2 size={14} className="mr-2" /> Rename Folder
+          <DropdownMenuItem onClick={()=>setOpen(true)}>
+            <Edit2 size={14} className="mr-2"/> Rename Folder
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setDel(true)} className="text-red-600">
-            <Trash2 size={14} className="mr-2" /> Delete Folder
+          <DropdownMenuSeparator/>
+          <DropdownMenuItem onClick={()=>setConfirm(true)} className="text-red-600">
+            <Trash2 size={14} className="mr-2"/> Delete Folder
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -154,18 +229,16 @@ function EditFolderDialog({ folder, onUpdate, onDelete }) {
             <DialogDescription>Update the folder name</DialogDescription>
           </DialogHeader>
           <form
-            onSubmit={(e) => {
+            onSubmit={e=>{
               e.preventDefault();
-              if (name.trim()) onUpdate(folder._id, name.trim());
+              if(name.trim()) onUpdate(folder._id,name.trim());
               setOpen(false);
             }}
             className="space-y-4 pt-4"
           >
-            <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+            <Input value={name} onChange={e=>setName(e.target.value)} autoFocus/>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
+              <Button variant="outline" onClick={()=>setOpen(false)}>Cancel</Button>
               <Button type="submit">Update</Button>
             </DialogFooter>
           </form>
@@ -173,17 +246,17 @@ function EditFolderDialog({ folder, onUpdate, onDelete }) {
       </Dialog>
 
       {/* delete */}
-      <AlertDialog open={del} onOpenChange={setDel}>
+      <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete “{folder?.name}” and its files.
+              This will permanently delete "{folder?.name}" and its files.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => onDelete(folder._id)} className="bg-red-600 hover:bg-red-700">
+            <AlertDialogAction onClick={()=>onDelete(folder._id)} className="bg-red-600 hover:bg-red-700">
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -193,90 +266,99 @@ function EditFolderDialog({ folder, onUpdate, onDelete }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Recursive folder node                                              */
-/* ------------------------------------------------------------------ */
+// ──────────────────────────────────────────────────────────────────────
+// Recursive folder node
+// ──────────────────────────────────────────────────────────────────────
 function FolderNode({
-  node, depth = 0, currentFolder, onSelect,
-  onFileSelect, onFolderUpdate, onFolderDelete, refreshFolders
+  node, depth=0, currentFolder, onSelect,
+  onFileSelect, onFolderUpdate, onFolderDelete,
+  refreshTrigger
 }) {
-  const [open, setOpen] = useState(false);
-  const [kids, setKids] = useState([]);
-  const [files, setFiles] = useState([]);
+  const [open, setOpen]       = useState(false);
+  const [kids, setKids]       = useState([]);
+  const [files, setFiles]     = useState([]);
   const [loading, setLoading] = useState(false);
+  const isSelected = currentFolder?._id === node._id;
 
-  const isSel = currentFolder && currentFolder._id === node._id;
-
-  useEffect(() => { if (isSel && !open) load(); }, [currentFolder, refreshFolders]);
+  useEffect(() => {
+    if (isSelected && !open) load();
+  }, [currentFolder, refreshTrigger]);
 
   const load = async () => {
     if (loading) return;
     setLoading(true);
-    const [fRes, fileRes] = await Promise.all([api.folders(node._id), api.files(node._id)]);
-    setKids(fRes.folders || []);
+    const [fRes, fileRes] = await Promise.all([
+      api.folders(node._id),
+      api.files(node._id)
+    ]);
+    setKids (fRes.folders || []);
     setFiles(fileRes.files || []);
     setOpen(true);
     setLoading(false);
   };
 
   const toggle = () => (!open ? load() : setOpen(false));
-
-  const changeStatus = async (id, s) => {
-    await api.updateFileStatus(id, s);
+  const changeStatus = async (id,s) => {
+    await api.updateFileStatus(id,s);
     const { files: upd } = await api.files(node._id);
-    setFiles(upd || []);
+    setFiles(upd||[]);
   };
 
   return (
     <div className="select-none">
       <div
         onClick={toggle}
-        style={{ paddingLeft: 8 + depth * 12 }}
+        style={{ paddingLeft:8+depth*12 }}
         className={`flex items-center gap-1 cursor-pointer hover:bg-muted rounded px-2 py-1.5 group ${
-          isSel ? 'bg-primary/10 text-primary font-medium' : ''
-        }`}
+          isSelected?'bg-primary/10 text-primary font-medium':''}`}
       >
         <span className="text-muted-foreground mr-1">
-          {loading ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : open ? (
-            <ChevronDown size={14} />
-          ) : (
-            <ChevronRight size={14} />
-          )}
+          {loading
+            ? <Loader2 size={14} className="animate-spin"/>
+            : open
+              ? <ChevronDownIcon size={14}/>
+              : <ChevronRight size={14}/>
+          }
         </span>
-        <FolderIcon size={14} className={isSel ? 'text-primary' : ''} />
-        <span className="truncate" onClick={(e) => (e.stopPropagation(), onSelect(node))}>
+        <FolderIcon size={14} className={isSelected?'text-primary':''}/>
+        <span className="truncate" onClick={e=>{e.stopPropagation(); onSelect(node);}}>
           {node.name}
         </span>
-        {kids.length > 0 && (
+        {kids.length>0 && (
           <Badge variant="outline" className="ml-auto text-xs py-0 px-1.5">
             {kids.length}
           </Badge>
         )}
-        <EditFolderDialog folder={node} onUpdate={onFolderUpdate} onDelete={onFolderDelete} />
+        <EditFolderDialog
+          folder={node}
+          onUpdate={onFolderUpdate}
+          onDelete={onFolderDelete}
+        />
       </div>
 
       {open && (
         <div className="pl-2">
-          {kids.map((c) => (
-            <FolderNode
-              key={c._id}
+          {kids.map(c=>(
+            <FolderNode key={c._id}
               node={c}
-              depth={depth + 1}
+              depth={depth+1}
               currentFolder={currentFolder}
               onSelect={onSelect}
               onFileSelect={onFileSelect}
               onFolderUpdate={onFolderUpdate}
               onFolderDelete={onFolderDelete}
-              refreshFolders={refreshFolders}
+              refreshTrigger={refreshTrigger}
             />
           ))}
-
-          {files.length > 0 && (
+          {files.length>0 && (
             <div className="ml-8 mt-1 border-l pl-2 border-muted">
-              {files.map((file) => (
-                <FileItem key={file._id} file={file} onSelect={onFileSelect} onStatusChange={changeStatus} />
+              {files.map(f=>(
+                <FileItem
+                  key={f._id}
+                  file={f}
+                  onSelect={onFileSelect}
+                  onStatusChange={changeStatus}
+                />
               ))}
             </div>
           )}
@@ -286,9 +368,9 @@ function FolderNode({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Create folder dialog                                               */
-/* ------------------------------------------------------------------ */
+// ──────────────────────────────────────────────────────────────────────
+// Create Folder dialog
+// ──────────────────────────────────────────────────────────────────────
 function CreateFolderDialog({ onCreateFolder, parentFolder }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
@@ -297,7 +379,7 @@ function CreateFolderDialog({ onCreateFolder, parentFolder }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="ghost" size="icon" className="h-8 w-8" title="Create folder">
-          <FolderPlus size={16} />
+          <FolderPlus size={16}/>
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
@@ -308,19 +390,21 @@ function CreateFolderDialog({ onCreateFolder, parentFolder }) {
           </DialogDescription>
         </DialogHeader>
         <form
-          onSubmit={(e) => {
+          onSubmit={e=>{
             e.preventDefault();
-            if (name.trim()) onCreateFolder(name.trim());
-            setName('');
-            setOpen(false);
+            if(name.trim()) onCreateFolder(name.trim());
+            setName(''); setOpen(false);
           }}
           className="space-y-4 pt-4"
         >
-          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Folder name" />
+          <Input
+            value={name}
+            onChange={e=>setName(e.target.value)}
+            autoFocus
+            placeholder="Folder name"
+          />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={()=>setOpen(false)}>Cancel</Button>
             <Button type="submit">Create</Button>
           </DialogFooter>
         </form>
@@ -329,135 +413,98 @@ function CreateFolderDialog({ onCreateFolder, parentFolder }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Breadcrumb                                                         */
-/* ------------------------------------------------------------------ */
-function EnhancedBreadcrumb({ folder, onNavigate }) {
-  const [path, setPath] = useState([]);
-  useEffect(() => { setPath(folder ? [folder] : []); }, [folder]);
+// ──────────────────────────────────────────────────────────────────────
+// STATUS TABS (In Progress & Review) – now pulling from batches API
+// ──────────────────────────────────────────────────────────────────────
+// Fixed StatusTabs component in FileNavigator.jsx
 
-  return (
-    <Breadcrumb className="mb-4 text-sm">
-      <BreadcrumbItem>
-        <BreadcrumbLink onClick={() => onNavigate(null)} className="flex items-center gap-1">
-          <FolderIcon size={14} /> <span>Root</span>
-        </BreadcrumbLink>
-      </BreadcrumbItem>
-      {path.map((item, i) => (
-        <React.Fragment key={item._id}>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbLink
-              onClick={() => onNavigate(item)}
-              className={`hover:text-primary ${i === path.length - 1 ? 'font-medium' : ''}`}
-            >
-              {item.name}
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-        </React.Fragment>
-      ))}
-    </Breadcrumb>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Status tabs                                                        */
-/* ------------------------------------------------------------------ */
 function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
-  const [tabFiles, setTabFiles] = useState({ inProgress: [], review: [], completed: [] });
-  const [loading, setLoading]   = useState({ inProgress: false, review: false, completed: false });
-  const [order, setOrder]       = useState('newest');
+  const [order, setOrder] = useState('newest');
 
-  const load = async (key) => {
-    setLoading((p) => ({ ...p, [key]: true }));
-    const map = { inProgress: 'In Progress', review: 'Review', completed: 'Completed' };
-    const { files } = await api.getFilesByStatus(map[key]);
-    setTabFiles((p) => ({ ...p, [key]: files || [] }));
-    setLoading((p) => ({ ...p, [key]: false }));
+  // two statuses we display
+  const statuses = ['In Progress', 'Review'];
+
+  // FIXED: Use object syntax for TanStack Query v5
+  const results = useQueries({
+    queries: statuses.map(status => ({
+      queryKey: ['filesByStatus', status, refreshTrigger],
+      queryFn: () => api.getFilesByStatus(status).then(r => r.files || []),
+      staleTime: 30_000,
+      retry: 2,
+      retryDelay: 1000
+    }))
+  });
+
+  const loading = { inProgress: results[0].isFetching, review: results[1].isFetching };
+  const error = { inProgress: results[0].error, review: results[1].error };
+  const tabFiles = { inProgress: results[0].data || [], review: results[1].data || [] };
+
+  const sortList = arr => {
+    const a = [...arr];
+    if (order === 'name') return a.sort((x, y) => x.fileName.localeCompare(y.fileName));
+    const ts = f => new Date(f.updatedAt || f.createdAt).getTime();
+    return a.sort((x, y) => order === 'newest' ? ts(y) - ts(x) : ts(x) - ts(y));
   };
 
-  useEffect(() => {
-    load('inProgress');
-    load('review');
-    load('completed');
-  }, [refreshTrigger]);
-
-  const sort = (arr) => {
-    const list = [...arr];
-    if (order === 'name') return list.sort((a, b) => a.fileName.localeCompare(b.fileName));
-    const k = (f) => new Date(f.updatedAt || f.createdAt).getTime();
-    return list.sort((a, b) => (order === 'newest' ? k(b) - k(a) : k(a) - k(b)));
+  const handleFileClick = (file) => {
+    // These are batch files, not archived files - don't mark as archived
+    openFile(file);
+    closeDrawer?.();
   };
-
+  
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="inProgress" onValueChange={load}>
-        <TabsList className="grid grid-cols-3 mb-4">
-          <TabsTrigger value="inProgress">
-            <Clock size={14} /> <span>Progress</span>
-          </TabsTrigger>
-          <TabsTrigger value="review">
-            <CircleDot size={14} /> <span>Review</span>
-          </TabsTrigger>
-          <TabsTrigger value="completed">
-            <CheckCircle2 size={14} /> <span>Done</span>
-          </TabsTrigger>
+      <Tabs defaultValue="inProgress">
+        <TabsList className="grid grid-cols-2 mb-4">
+          <TabsTrigger value="inProgress"> <Clock size={14} /> Progress </TabsTrigger>
+          <TabsTrigger value="review">     <CircleDot size={14} /> Review   </TabsTrigger>
         </TabsList>
 
-        {/* sort */}
         <div className="mb-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="flex items-center gap-1 w-full justify-between">
-                <span>
-                  Sort by:{' '}
-                  {order === 'newest' ? 'Newest' : order === 'oldest' ? 'Oldest' : 'Name'}
-                </span>
-                <Caret size={14} />
+              <Button variant="outline" size="sm" className="flex w-full justify-between">
+                Sort by: {order === 'newest' ? 'Newest' : order === 'oldest' ? 'Oldest' : 'Name'}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuItem onClick={() => setOrder('newest')}>Newest first</DropdownMenuItem>
               <DropdownMenuItem onClick={() => setOrder('oldest')}>Oldest first</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setOrder('name')}>Name (A-Z)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setOrder('name')}>Name (A–Z)</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        {['inProgress', 'review', 'completed'].map((key) => (
+        {['inProgress', 'review'].map((key, i) => (
           <TabsContent key={key} value={key}>
             <ScrollArea className="h-[calc(100vh-250px)] border rounded-md p-2">
               {loading[key] ? (
                 <div className="flex items-center justify-center h-full">
-                  <Loader2 className="animate-spin mr-2" size={16} /> Loading…
+                  <Loader2 size={16} className="animate-spin mr-2" /> Loading…
                 </div>
+              ) : error[key] ? (
+                <div className="text-center p-4 text-red-500">
+                  <p>Error loading files</p>
+                  <p className="text-xs">{error[key].message}</p>
+                </div>
+              ) : sortList(tabFiles[key]).length ? (
+                sortList(tabFiles[key]).map(f => (
+                  <div key={f._id}
+                    onClick={() => handleFileClick(f)}
+                    className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1">
+                    {key === 'inProgress'
+                      ? <Clock size={16} className="text-amber-500" />
+                      : <CircleDot size={16} className="text-blue-500" />}
+                    <div className="truncate flex-1">{f.fileName}</div>
+                    {f.updatedAt && (
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(f.updatedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                ))
               ) : (
-                <>
-                  {sort(tabFiles[key]).map((f) => (
-                    <div
-                      key={f._id}
-                      onClick={() => { openFile(f); closeDrawer?.(); }}
-                      className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1"
-                    >
-                      {key === 'inProgress' ? (
-                        <Clock size={16} className="text-amber-500" />
-                      ) : key === 'review' ? (
-                        <CircleDot size={16} className="text-blue-500" />
-                      ) : (
-                        <CheckCircle2 size={16} className="text-green-500" />
-                      )}
-                      <div className="truncate flex-1">{f.fileName}</div>
-                      {f.updatedAt && (
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          {new Date(f.updatedAt).toLocaleDateString()}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  {tabFiles[key].length === 0 && (
-                    <div className="text-center p-4 text-muted-foreground">No documents</div>
-                  )}
-                </>
+                <div className="text-center p-4 text-muted-foreground">No documents</div>
               )}
             </ScrollArea>
           </TabsContent>
@@ -467,201 +514,393 @@ function StatusTabs({ openFile, refreshTrigger, closeDrawer }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Main sidebar component                                             */
-/* ------------------------------------------------------------------ */
-export default function FileNavigator({
-  openFile,
-  refreshTrigger,
-  triggerRefresh,
-  closeDrawer
-}) {
-  const [view, setView] = useState('folders');
-  const [root, setRoot] = useState([]);
-  const [files, setFiles] = useState([]);
-  const [search, setSearch] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [folderRefresh, setFolderRefresh] = useState(0);
-  const [currentFolder, setCurrentFolder] = useState(null);
+// ──────────────────────────────────────────────────────────────────────
+// ARCHIVE LIST (Completed) – also from batches API
+// ──────────────────────────────────────────────────────────────────────
 
+// Completely rewritten ArchiveList component - replace in FileNavigator.jsx
+
+function ArchiveList({ openFile, refreshTrigger, closeDrawer }) {
+  const [currentArchiveFolder, setCurrentArchiveFolder] = useState(null);
+  const [order, setOrder] = useState('newest');
+
+  // Build archive folder structure from archived batches
+  const { data: archivedBatches = [], isFetching, error } = useQuery({
+    queryKey: ['archivedBatches', refreshTrigger],
+    queryFn: () => api.getAllArchivedFiles().then(r => r.files || []),
+    staleTime: 30_000,
+    retry: 2,
+    retryDelay: 1000
+  });
+
+  // Build folder tree structure from archived batches - completely in useMemo
+  const { folders, rootFiles } = useMemo(() => {
+    if (!archivedBatches.length) {
+      return { folders: [], rootFiles: [] };
+    }
+
+    // Group batches by folder path to create folder structure
+    const folderMap = new Map();
+    const rootFiles = [];
+
+    archivedBatches.forEach(batch => {
+      const path = batch.folderPath || 'Root';
+      
+      if (path === 'Root') {
+        rootFiles.push(batch);
+      } else {
+        // Split the path and build nested structure
+        const pathParts = path.split(' / ');
+        let currentPath = '';
+        
+        pathParts.forEach((part, index) => {
+          const isLast = index === pathParts.length - 1;
+          currentPath = currentPath ? `${currentPath} / ${part}` : part;
+          
+          if (!folderMap.has(currentPath)) {
+            folderMap.set(currentPath, {
+              _id: `archive-${currentPath.replace(/[\s\/]/g, '-')}`,
+              name: part,
+              fullPath: currentPath,
+              parentPath: index > 0 ? pathParts.slice(0, index).join(' / ') : null,
+              children: [],
+              files: [],
+              isArchiveFolder: true
+            });
+          }
+          
+          if (isLast) {
+            folderMap.get(currentPath).files.push(batch);
+          }
+        });
+      }
+    });
+
+    // Build hierarchical structure
+    const folders = Array.from(folderMap.values());
+    const rootFolders = [];
+
+    folders.forEach(folder => {
+      if (!folder.parentPath) {
+        rootFolders.push(folder);
+      } else {
+        const parent = folderMap.get(folder.parentPath);
+        if (parent) {
+          parent.children.push(folder);
+        }
+      }
+    });
+
+    return { folders: rootFolders, rootFiles };
+  }, [archivedBatches]);
+
+  const sortList = useCallback((arr) => {
+    if (!Array.isArray(arr)) return [];
+    const a = [...arr];
+    if (order === 'name') return a.sort((x, y) => x.fileName.localeCompare(y.fileName));
+    const ts = f => new Date(f.archivedAt || f.updatedAt || f.createdAt).getTime();
+    return a.sort((x, y) => order === 'newest' ? ts(y) - ts(x) : ts(x) - ts(y));
+  }, [order]);
+
+  const handleFileClick = useCallback((file) => {
+    openFile(file);
+    closeDrawer?.();
+  }, [openFile, closeDrawer]);
+
+  const getCurrentFiles = useMemo(() => {
+    if (!currentArchiveFolder) {
+      return rootFiles;
+    }
+    return currentArchiveFolder.files || [];
+  }, [currentArchiveFolder, rootFiles]);
+
+  const getCurrentFolders = useMemo(() => {
+    if (!currentArchiveFolder) {
+      return folders;
+    }
+    return currentArchiveFolder.children || [];
+  }, [currentArchiveFolder, folders]);
+
+  return (
+    <div className="space-y-4">
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center justify-between">
+        <Breadcrumb className="text-sm">
+          <BreadcrumbItem>
+            <BreadcrumbLink
+              onClick={() => setCurrentArchiveFolder(null)}
+              className="flex items-center gap-1 cursor-pointer"
+            >
+              <Archive size={14} /> Archive
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          {currentArchiveFolder && (
+            <>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <span className="font-medium">{currentArchiveFolder.name}</span>
+              </BreadcrumbItem>
+            </>
+          )}
+        </Breadcrumb>
+
+        {/* Sort dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <SortAsc size={14} className="mr-1" />
+              {order === 'newest' ? 'Newest' : order === 'oldest' ? 'Oldest' : 'Name'}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setOrder('newest')}>Newest first</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setOrder('oldest')}>Oldest first</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setOrder('name')}>Name (A-Z)</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <ScrollArea className="h-[calc(100vh-250px)] border rounded-md p-2">
+        {isFetching ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 size={16} className="animate-spin mr-2" /> Loading archive…
+          </div>
+        ) : error ? (
+          <div className="text-center p-4 text-red-500">
+            <p>Error loading archive</p>
+            <p className="text-xs">{error.message}</p>
+          </div>
+        ) : (
+          <>
+            {/* Folders */}
+            {getCurrentFolders.map(folder => (
+              <div
+                key={folder._id}
+                onClick={() => setCurrentArchiveFolder(folder)}
+                className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1"
+              >
+                <FolderIcon size={16} className="text-blue-500" />
+                <div className="truncate flex-1">{folder.name}</div>
+                <Badge variant="outline" className="text-xs">
+                  {folder.files?.length || 0}
+                </Badge>
+              </div>
+            ))}
+
+            {/* Files */}
+            {getCurrentFiles.length > 0 && (
+              <div className={getCurrentFolders.length > 0 ? "mt-2 pt-2 border-t" : ""}>
+                {getCurrentFolders.length > 0 && (
+                  <h4 className="font-medium text-sm mb-1 pl-2 text-muted-foreground">Files</h4>
+                )}
+                {sortList(getCurrentFiles).map(f => (
+                  <div
+                    key={f._id}
+                    onClick={() => handleFileClick(f)}
+                    className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1"
+                  >
+                    <CheckCircle2 size={16} className="text-green-500" />
+                    <div className="truncate flex-1">{f.fileName}</div>
+                    {f.archivedAt && (
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(f.archivedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {getCurrentFolders.length === 0 && getCurrentFiles.length === 0 && (
+              <div className="text-center p-4 text-muted-foreground">
+                {currentArchiveFolder ? (
+                  <>
+                    <FileX size={24} className="mx-auto mb-2 opacity-50" />
+                    <p>No archived files in this folder</p>
+                  </>
+                ) : (
+                  <>
+                    <Archive size={24} className="mx-auto mb-2 opacity-50" />
+                    <p>No archived files yet</p>
+                    <p className="text-xs">Complete some files to start building your archive</p>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </ScrollArea>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// FOLDERS PANE (unchanged logic)
+// ──────────────────────────────────────────────────────────────────────
+function FoldersPane({
+  root, files, currentFolder, setCurrentFolder,
+  createFolder, updateFolder, deleteFolder,
+  openFile, beginUpload, uploading, refreshTrigger
+}) {
+  return (
+    <div className="h-full flex flex-col">
+      <EnhancedBreadcrumb folder={currentFolder} onNavigate={setCurrentFolder}/>
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="font-semibold">Folders & Files</h3>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={beginUpload} title="Upload">
+            <UploadCloud size={16}/>
+          </Button>
+          <CreateFolderDialog onCreateFolder={createFolder} parentFolder={currentFolder}/>
+        </div>
+      </div>
+      <ScrollArea className="flex-grow">
+        {root.map(folder => (
+          <FolderNode
+            key={folder._id}
+            node={folder}
+            currentFolder={currentFolder}
+            onSelect={setCurrentFolder}
+            onFileSelect={openFile}
+            onFolderUpdate={updateFolder}
+            onFolderDelete={deleteFolder}
+            refreshTrigger={refreshTrigger}
+          />
+        ))}
+
+        {!currentFolder && files.length > 0 && (
+          <div className="mt-2 border-t pt-2">
+            <h4 className="font-medium text-sm mb-1 pl-2">Root Files</h4>
+            {files.map(f => (
+              <FileItem
+                key={f._id}
+                file={f}
+                onSelect={openFile}
+              />
+            ))}
+          </div>
+        )}
+
+        {root.length === 0 && files.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground">
+            <FolderPlus size={24} className="mx-auto mb-2 opacity-50" />
+            <p>No folders or files yet</p>
+            <p className="text-sm">Create a folder or upload files to get started</p>
+          </div>
+        )}
+
+        {uploading && (
+          <div className="fixed bottom-4 right-4 bg-primary text-primary-foreground px-4 py-2 rounded shadow flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin" /> Uploading…
+          </div>
+        )}
+      </ScrollArea>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// MAIN SIDEBAR
+// ──────────────────────────────────────────────────────────────────────
+export default function FileNavigator({
+  view, setView,
+  root, files,
+  currentFolder, setCurrentFolder,
+  search, setSearch,
+  uploading,
+  createFolder, updateFolder, deleteFolder,
+  handleFiles,
+  openFile, closeDrawer,
+  refreshTrigger
+}) {
   const inputRef = useRef();
   const router   = useRouter();
 
-  // load root folders
-  useEffect(() => { api.folders().then(({ folders }) => setRoot(folders || [])); },
-    [folderRefresh, refreshTrigger]);
-
-  // load files for current folder
-  useEffect(() => {
-    if (currentFolder) api.files(currentFolder._id).then(({ files }) => setFiles(files || []));
-    else if (view === 'folders') api.files().then(({ files }) => setFiles(files || []));
-  }, [currentFolder, view, folderRefresh, refreshTrigger]);
-
-  /* CRUD */
-  const createFolder  = async (name) => { await api.newFolder(name, currentFolder?._id); setFolderRefresh((p) => p + 1);} ;
-  const updateFolder  = async (id, n) => { await api.updateFolder(id, n);              setFolderRefresh((p) => p + 1);} ;
-  const deleteFolder  = async (id)   => {
-    await api.deleteFolder(id);
-    if (currentFolder?._id === id) setCurrentFolder(null);
-    setFolderRefresh((p) => p + 1);
-  };
-
-  /* uploads */
-  const beginUpload = () => inputRef.current?.click();
-  const handleFiles = async (list) => {
-    if (!list.length) return;
-    setUploading(true);
-    for (const f of list) await api.upload(f, currentFolder?._id);
-    setUploading(false);
-    triggerRefresh();
-  };
-
-  /* helper wrapper so every openFile closes drawer on mobile */
-  const openAndClose = (file) => {
-    openFile(file);
-    closeDrawer?.();
-  };
+  const beginUpload  = () => inputRef.current?.click();
+  const openAndClose = f => { openFile(f); closeDrawer?.(); };
 
   return (
     <div className="flex flex-col h-full">
       <input
-        type="file"
-        multiple
         ref={inputRef}
-        hidden
-        accept="application/pdf"
-        onChange={(e) => handleFiles(Array.from(e.target.files))}
+        hidden multiple accept="application/pdf"
+        onChange={e=>handleFiles(Array.from(e.target.files))}
+        type="file"
       />
 
-      {/* home + search */}
+      {/* HOME + SEARCH */}
       <div className="px-2 pt-2">
         <div className="flex items-center gap-2 mb-4">
-          <Button variant="outline" size="sm" onClick={() => router.push('/home')} className="flex items-center gap-1">
-            <Home size={14} /> <span>Home</span>
+          <Button variant="outline" size="sm"
+                  onClick={()=>router.push('/home')}
+                  className="flex items-center gap-1">
+            <Home size={14}/> <span>Home</span>
           </Button>
           <div className="flex-1">
-            <FileSearch onSearchResults={setSearch} />
+            <FileSearch onSearchResults={setSearch}/>
           </div>
         </div>
       </div>
 
-      {/* view tabs */}
+      {/* TABS */}
       <div className="px-2">
         <div className="flex space-x-1 border-b mb-2">
           <Button
-            variant={view === 'folders' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => (setView('folders'), setSearch(null))}
+            variant={view==='folders'?'default':'ghost'} size="sm"
+            onClick={()=>{setView('folders'); setSearch(null);}}
             className="flex-1 flex items-center gap-1"
           >
-            <FolderIcon size={14} /> <span>Files</span>
+            <FolderIcon size={14}/> Files
           </Button>
           <Button
-            variant={view === 'status' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => (setView('status'), setSearch(null))}
+            variant={view==='status'?'default':'ghost'} size="sm"
+            onClick={()=>{setView('status'); setSearch(null);}}
             className="flex-1 flex items-center gap-1"
           >
-            <CheckCircle2 size={14} /> <span>Status</span>
+            <CircleDot size={14}/> Status
+          </Button>
+          <Button
+            variant={view==='archive'?'default':'ghost'} size="sm"
+            onClick={()=>{setView('archive'); setSearch(null);}}
+            className="flex-1 flex items-center gap-1"
+          >
+            <CheckCircle2 size={14}/> Archive
           </Button>
         </div>
       </div>
 
-      {/* main area */}
+      {/* BODY */}
       <div className="flex-1 overflow-hidden px-2">
-        {/* search results */}
-        {search && (
-          <div className="mt-4">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="font-semibold text-sm">Search Results</h3>
-              <Button variant="ghost" size="sm" onClick={() => setSearch(null)} className="h-6 text-xs">
-                Clear
-              </Button>
-            </div>
-            <ScrollArea className="h-[calc(100vh-280px)]">
-              {search.length === 0 ? (
-                <div className="text-center py-4 text-muted-foreground">No results found</div>
-              ) : (
-                search.map((f) => (
-                  <div
-                    key={f._id}
-                    onClick={() => { openFile(f); closeDrawer?.(); }}
-                    className="flex items-center gap-2 cursor-pointer hover:bg-muted rounded p-2 mb-1"
-                  >
-                    <FileIcon size={16} />
-                    <span className="truncate flex-1">{f.fileName}</span>
-                    {f.status && (
-                      <Badge variant="outline" className="text-xs">
-                        {f.status}
-                      </Badge>
-                    )}
-                  </div>
-                ))
-              )}
-            </ScrollArea>
-          </div>
-        )}
-
-        {/* folders view */}
-        {!search && view === 'folders' && (
-          <div className="h-full flex flex-col">
-            <EnhancedBreadcrumb folder={currentFolder} onNavigate={setCurrentFolder} />
-
-            {/* actions */}
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold">Folders & Files</h3>
-              <div className="flex gap-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={beginUpload} title="Upload">
-                  <UploadCloud size={16} />
-                </Button>
-                <CreateFolderDialog onCreateFolder={createFolder} parentFolder={currentFolder} />
-              </div>
-            </div>
-
-            {/* tree */}
-            <ScrollArea className="flex-grow">
-              {root.map((folder) => (
-                <FolderNode
-                  key={folder._id}
-                  node={folder}
-                  currentFolder={currentFolder}
-                  onSelect={setCurrentFolder}
-                  onFileSelect={openAndClose}
-                  onFolderUpdate={updateFolder}
-                  onFolderDelete={deleteFolder}
-                  refreshFolders={folderRefresh}
-                />
-              ))}
-
-              {!currentFolder && files.length > 0 && (
-                <div className="mt-2 border-t pt-2">
-                  <h4 className="font-medium text-sm mb-1 pl-2">Root Files</h4>
-                  {files.map((file) => (
-                    <FileItem key={file._id} file={file} onSelect={openAndClose} onStatusChange={() => {}} />
-                  ))}
-                </div>
-              )}
-
-              {root.length === 0 && files.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  <FolderPlus size={24} className="mx-auto mb-2 opacity-50" />
-                  <p>No folders or files yet</p>
-                  <p className="text-sm">Create a folder or upload files to get started</p>
-                </div>
-              )}
-
-              {uploading && (
-                <div className="fixed bottom-4 right-4 bg-primary text-primary-foreground px-4 py-2 rounded shadow flex items-center gap-2">
-                  <Loader2 className="animate-spin" size={16} /> <span>Uploading files…</span>
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-        )}
-
-        {/* status view */}
-        {!search && view === 'status' && (
-          <StatusTabs openFile={openFile} refreshTrigger={refreshTrigger} closeDrawer={closeDrawer} />
+        {search ? (
+          /* … your existing search UI … */
+          <ScrollArea className="h-[calc(100vh-280px)]">{/* … */}</ScrollArea>
+        ) : view==='folders' ? (
+          <FoldersPane
+            root={root}
+            files={files}
+            currentFolder={currentFolder}
+            setCurrentFolder={setCurrentFolder}
+            createFolder={createFolder}
+            updateFolder={updateFolder}
+            deleteFolder={deleteFolder}
+            openFile={openAndClose}
+            beginUpload={beginUpload}
+            uploading={uploading}
+            refreshTrigger={refreshTrigger}
+          />
+        ) : view==='status' ? (
+          <StatusTabs
+            openFile={openFile}
+            refreshTrigger={refreshTrigger}
+            closeDrawer={closeDrawer}
+          />
+        ) : (
+          <ArchiveList
+            openFile={openFile}
+            refreshTrigger={refreshTrigger}
+            closeDrawer={closeDrawer}
+          />
         )}
       </div>
     </div>

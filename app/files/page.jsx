@@ -1,84 +1,63 @@
 // app/files/page.jsx
 'use client';
 
-import { useState, useRef } from 'react';
+import React from 'react';
 import dynamic from 'next/dynamic';
 import { Menu, FileIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
+import useFilesPage from './hooks/useFilesPage';
+
 const FileNavigator = dynamic(() => import('./components/FileNavigator'), { ssr: false });
 const PDFEditor     = dynamic(() => import('./components/PDFEditor'),     { ssr: false });
 
 export default function FilesPage() {
-  const [currDoc, setCurrDoc] = useState(null);
-  const [isDraw,  setIsDraw ] = useState(true);
-  const [refresh, setRefresh] = useState(0);
+  /* ── single source of truth ───────────────────── */
+  const f   = useFilesPage();               // <- every state & helper
+  const [drawer, setDrawer] = React.useState(false);
 
-  const undoRef = useRef(null);
-  const saveRef = useRef(null);
-  const [drawer, setDrawer] = useState(false);
-
-  const openFile = async (file) => {
-    const { file: loaded } = await fetch(`/api/files?id=${file._id}`).then((r) => r.json());
-    setCurrDoc({ ...loaded, pdf: loaded.pdf });
-  };
-
+  /* ─────────────────────────────────────────────── */
   return (
     <>
-      {/* mobile drawer */}
+      {/* mobile drawer --------------------------------------------- */}
       <Sheet open={drawer} onOpenChange={setDrawer}>
         <SheetContent side="left" className="w-[85vw] sm:max-w-md p-0">
           <SheetHeader className="border-b px-4 py-2">
             <SheetTitle>Document Explorer</SheetTitle>
           </SheetHeader>
           <div className="flex flex-col h-[calc(100%-53px)]">
-            <FileNavigator
-              openFile={openFile}
-              refreshTrigger={refresh}
-              triggerRefresh={() => setRefresh((p) => p + 1)}
-              closeDrawer={() => setDrawer(false)}
-            />
+            <FileNavigator {...f} closeDrawer={() => setDrawer(false)} />
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* desktop */}
+      {/* desktop layout ------------------------------------------- */}
       <div className="hidden md:flex h-screen">
-        <div className="w-80 border-r">
-          <FileNavigator
-            openFile={openFile}
-            refreshTrigger={refresh}
-            triggerRefresh={() => setRefresh((p) => p + 1)}
-            closeDrawer={() => {}}
-          />
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {currDoc ? (
+        <aside className="w-80 border-r">
+          <FileNavigator {...f} closeDrawer={() => {}} />
+        </aside>
+
+        <main className="flex-1 overflow-y-auto">
+          {f.currentDoc ? (
             <PDFEditor
-              doc={currDoc}
-              isDraw={isDraw}
-              setIsDraw={setIsDraw}
-              onUndo={undoRef}
-              onSave={saveRef}
-              refreshFiles={() => setRefresh((p) => p + 1)}
-              setCurrentDoc={setCurrDoc}
+              doc={f.currentDoc}
+              isDraw={f.isDraw}
+              setIsDraw={f.setIsDraw}
+              onUndo={f.undoRef}
+              onSave={f.saveRef}
+              refreshFiles={f.triggerRefresh}
+              setCurrentDoc={f.setCurrentDoc}
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-muted-foreground bg-muted/30">
-              <div className="text-center max-w-md mx-auto p-6">
-                <FileIcon size={48} className="mx-auto mb-4 opacity-40" />
-                <h3 className="text-xl font-medium mb-2">No document selected</h3>
-                <p>Select a file from the sidebar to preview and edit it</p>
-              </div>
-            </div>
+            <EmptyState />
           )}
-        </div>
+        </main>
       </div>
 
-      {/* mobile layout */}
+      {/* mobile layout -------------------------------------------- */}
       <div className="lg:hidden h-screen overflow-hidden flex flex-col">
-        {!currDoc && (
+        {!f.currentDoc && (
           <div className="border-b bg-white flex items-center justify-between px-4 py-2 sticky top-0 z-10">
             <div className="flex items-center gap-3">
               <Button size="icon" variant="ghost" onClick={() => setDrawer(true)} title="Menu">
@@ -93,32 +72,42 @@ export default function FilesPage() {
         )}
 
         <div className="flex-1 overflow-hidden">
-          {currDoc ? (
+          {f.currentDoc ? (
             <PDFEditor
-              doc={currDoc}
+              doc={f.currentDoc}
               mobileModeActive
-              isDraw={isDraw}
-              setIsDraw={setIsDraw}
-              onUndo={undoRef}
-              onSave={saveRef}
+              isDraw={f.isDraw}
+              setIsDraw={f.setIsDraw}
+              onUndo={f.undoRef}
+              onSave={f.saveRef}
               onToggleDrawer={() => setDrawer(true)}
-              refreshFiles={() => setRefresh((p) => p + 1)}
-              setCurrentDoc={setCurrDoc}
+              refreshFiles={f.triggerRefresh}
+              setCurrentDoc={f.setCurrentDoc}
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-center text-muted-foreground">
-              <div className="p-4">
-                <FileIcon size={32} className="mx-auto mb-3 opacity-40" />
-                <h3 className="font-medium mb-1">No document selected</h3>
-                <p className="text-sm mb-3">Open the menu to select a file</p>
-                <Button size="sm" onClick={() => setDrawer(true)} className="mx-auto">
-                  Browse Files
-                </Button>
-              </div>
-            </div>
+            <EmptyState mobile onBrowse={() => setDrawer(true)} />
           )}
         </div>
       </div>
     </>
+  );
+}
+
+/* -------------------------------------------------------------- */
+/* tiny helper component                                          */
+function EmptyState({ mobile = false, onBrowse }) {
+  return (
+    <div className="h-full flex items-center justify-center text-muted-foreground bg-muted/30">
+      <div className="text-center max-w-md mx-auto p-6">
+        <FileIcon size={mobile ? 32 : 48} className="mx-auto mb-4 opacity-40" />
+        <h3 className="text-xl font-medium mb-2">No document selected</h3>
+        <p className="mb-4">{mobile ? 'Open the menu to select a file' : 'Select a file from the sidebar to preview and edit it'}</p>
+        {mobile && (
+          <Button size="sm" onClick={onBrowse} className="mx-auto">
+            Browse Files
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
