@@ -48,8 +48,44 @@ export async function createArchiveCopy(batch) {
     archivedAt: new Date(),
     folderPath: folderPath
   });
+}
 
-  console.log(`Marked batch ${batch._id} as archived with folder path: ${folderPath}`);
+/**
+ * Move an archived file to a different folder path
+ * Since archived files are batches, we update the folderPath field
+ */
+export async function moveArchivedFile(fileId, targetFolderId) {
+  await connectMongoDB();
+  
+  // Get the target folder path
+  let targetFolderPath = 'Root';
+  if (targetFolderId && targetFolderId !== 'root') {
+    const folderChain = await buildFolderChain(targetFolderId);
+    targetFolderPath = folderChain.map(f => f.name).join(' / ');
+  }
+
+  // Update the archived batch's folder path
+  const updatedBatch = await Batch.findOneAndUpdate(
+    { _id: fileId, isArchived: true },
+    { folderPath: targetFolderPath },
+    { new: true }
+  ).populate('fileId', 'fileName').lean();
+
+  if (!updatedBatch) {
+    throw new Error('Archived file not found');
+  }
+
+  // Return in the expected format
+  return {
+    _id: updatedBatch._id,
+    fileName: updatedBatch.fileId ? `${updatedBatch.fileId.fileName.replace('.pdf', '')}-Run-${updatedBatch.runNumber}.pdf` : `Batch Run ${updatedBatch.runNumber}`,
+    folderPath: updatedBatch.folderPath,
+    archivedAt: updatedBatch.archivedAt,
+    originalFileId: updatedBatch.fileId?._id,
+    batchId: updatedBatch._id,
+    runNumber: updatedBatch.runNumber,
+    isArchived: true
+  };
 }
 
 /**
