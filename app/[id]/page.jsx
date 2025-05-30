@@ -1,51 +1,73 @@
-// app/[id]/page.jsx
-import { notFound } from 'next/navigation';
+// app/[id]/page.js
+import { getItemOrLot, getItemTransactionHistory, getLotTransactionHistory, generateDetailMetadata } from './lib/api';
 import ItemDetailClient from './ItemDetailClient';
 import LotDetailClient from './LotDetailClient';
-import { 
-  getItemOrLot, 
-  getItemTransactionHistory, 
-  getLotTransactionHistory,
-  generateDetailMetadata 
-} from './lib/api';
+import { notFound } from 'next/navigation';
 
+// Generate metadata for SEO
 export async function generateMetadata({ params }) {
-  // Next.js 15 requires awaiting params
-  const { id } = await params;
-  return await generateDetailMetadata(id);
+  try {
+    const resolvedParams = await params;
+    return await generateDetailMetadata(resolvedParams.id);
+  } catch (error) {
+    return {
+      title: 'Not Found',
+      description: 'The requested item or lot could not be found.',
+    };
+  }
 }
 
-export default async function UniversalDetailPage({ params }) {
-  // Next.js 15 requires awaiting params
-  const { id } = await params;
-  
-  const { type, data } = await getItemOrLot(id);
-  
-  if (!data) {
-    notFound();
-  }
+// Main page component
+export default async function DetailPage({ params }) {
+  try {
+    const resolvedParams = await params;
+    
+    // Get the item or lot data
+    const { type, data } = await getItemOrLot(resolvedParams.id);
+    
+    if (!data) {
+      notFound();
+    }
 
-  if (type === 'item') {
-    // It's an item - use the item detail client
-    const transactions = await getItemTransactionHistory(id);
+    // Handle Item view
+    if (type === 'item') {
+      // Get transaction history for the item
+      const transactions = await getItemTransactionHistory(resolvedParams.id);
+      
+      // Extract lots from the item data
+      const lots = data.lots || [];
+      
+      return (
+        <ItemDetailClient 
+          item={data}
+          transactions={transactions}
+          lots={lots}
+        />
+      );
+    }
     
-    return (
-      <ItemDetailClient 
-        item={data}
-        transactions={transactions}
-        lots={data.lots}
-      />
-    );
-  } else {
-    // It's a lot - use the lot detail client
-    const transactions = await getLotTransactionHistory(data.item._id, data.lot.lotNumber);
+    // Handle Lot view
+    if (type === 'lot') {
+      // Get transaction history for the specific lot
+      const transactions = await getLotTransactionHistory(
+        data.item._id, 
+        data.lot.lotNumber
+      );
+      
+      return (
+        <LotDetailClient 
+          lot={data.lot}
+          item={data.item}
+          transactions={transactions}
+        />
+      );
+    }
+
+    // Fallback - should not reach here
+    notFound();
     
-    return (
-      <LotDetailClient 
-        lot={data.lot}
-        item={data.item}
-        transactions={transactions}
-      />
-    );
+  } catch (error) {
+    console.error('Error loading detail page:', error);
+    notFound();
   }
 }

@@ -1,6 +1,6 @@
 // app/[id]/lib/api.js
 import { Item } from '@/models/Item';
-import dbConnect from '@/lib/index';
+import connectMongoDB from '@/lib/index';
 import { txnService } from '@/services/txn.service';
 import mongoose from 'mongoose';
 
@@ -10,7 +10,7 @@ import mongoose from 'mongoose';
  * @returns {Promise<{type: 'item'|'lot'|null, data: object|null}>}
  */
 export async function getItemOrLot(id) {
-  await dbConnect();
+  await connectMongoDB();
   
   // Validate MongoDB ObjectId format
   if (!id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -137,16 +137,27 @@ export async function getItemTransactionHistory(itemId) {
       createdBy: txn.createdBy?.name || txn.createdBy?.email || 'System',
       project: txn.project || '',
       department: txn.department || '',
-      createdAt: txn.createdAt ? txn.createdAt.toISOString() : null,
+      postedAt: txn.postedAt ? txn.postedAt.toISOString() : null,
+      effectiveDate: txn.effectiveDate ? txn.effectiveDate.toISOString() : null,
+      status: txn.status || 'posted',
       // Extract relevant lines for this item
       lines: (txn.lines || [])
         .filter(line => line.item.toString() === itemId)
         .map(line => ({
+          item: line.item.toString(),
           lotNumber: line.lot || '',
-          quantity: Number(line.qty) || 0,
+          qty: Number(line.qty) || 0,
+          unitCost: Number(line.unitCost) || 0,
+          totalValue: Number(line.totalValue) || 0,
+          itemQtyBefore: Number(line.itemQtyBefore) || 0,
+          itemQtyAfter: Number(line.itemQtyAfter) || 0,
+          lotQtyBefore: Number(line.lotQtyBefore) || 0,
+          lotQtyAfter: Number(line.lotQtyAfter) || 0,
+          notes: line.notes || ''
         }))
     }));
   } catch (error) {
+    console.error('Error fetching item transaction history:', error);
     return [];
   }
 }
@@ -178,20 +189,32 @@ export async function getLotTransactionHistory(itemId, lotNumber) {
         createdBy: txn.createdBy?.name || txn.createdBy?.email || 'System',
         project: txn.project || '',
         department: txn.department || '',
-        createdAt: txn.createdAt ? txn.createdAt.toISOString() : null,
+        postedAt: txn.postedAt ? txn.postedAt.toISOString() : null,
+        effectiveDate: txn.effectiveDate ? txn.effectiveDate.toISOString() : null,
+        status: txn.status || 'posted',
         // Extract only lines that affect this specific lot
         relevantLines: (txn.lines || [])
           .filter(line => 
             line.item.toString() === itemId && line.lot === lotNumber
           )
           .map(line => ({
+            item: line.item.toString(),
+            lot: line.lot,
             qty: Number(line.qty) || 0,
+            unitCost: Number(line.unitCost) || 0,
+            totalValue: Number(line.totalValue) || 0,
+            itemQtyBefore: Number(line.itemQtyBefore) || 0,
+            itemQtyAfter: Number(line.itemQtyAfter) || 0,
+            lotQtyBefore: Number(line.lotQtyBefore) || 0,
+            lotQtyAfter: Number(line.lotQtyAfter) || 0,
+            notes: line.notes || ''
           }))
       }))
       .filter(txn => txn.relevantLines.length > 0);
     
     return lotTransactions;
   } catch (error) {
+    console.error('Error fetching lot transaction history:', error);
     return [];
   }
 }

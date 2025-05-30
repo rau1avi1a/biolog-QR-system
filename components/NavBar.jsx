@@ -37,8 +37,45 @@ import {
   Sun,
   Moon,
   Monitor,
-  ScanLine
+  ScanLine,
+  Shield,
+  UserCheck,
+  Users
 } from 'lucide-react';
+
+// Helper function to get user status badge info
+const getUserStatusInfo = (user) => {
+  if (!user || !user.role) return null;
+  
+  const roleConfig = {
+    admin: {
+      label: 'Admin',
+      variant: 'destructive',
+      icon: Shield
+    },
+    manager: {
+      label: 'Manager',
+      variant: 'default',
+      icon: UserCheck
+    },
+    user: {
+      label: 'User',
+      variant: 'secondary',
+      icon: Users
+    },
+    moderator: {
+      label: 'Moderator',
+      variant: 'outline',
+      icon: UserCheck
+    }
+  };
+
+  return roleConfig[user.role.toLowerCase()] || {
+    label: user.role,
+    variant: 'outline',
+    icon: User
+  };
+};
 
 export default function NavBar({ user, notifications = [], allItems = [] }) {
   const [isSignInOpen, setIsSignInOpen] = useState(false);
@@ -51,6 +88,9 @@ export default function NavBar({ user, notifications = [], allItems = [] }) {
 
   // Define paths where NavBar should be hidden
   const hideNavBarPaths = ['/auth/login'];
+
+  // Get user status info
+  const userStatus = getUserStatusInfo(user);
 
   // Theme handling
   useEffect(() => {
@@ -266,8 +306,18 @@ export default function NavBar({ user, notifications = [], allItems = [] }) {
                       {user && (
                         <div className="pt-4 border-t">
                           <div className="px-3 py-2">
-                            <p className="font-medium">{user.name}</p>
-                            <p className="text-sm text-muted-foreground">{user.email}</p>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium">{user.name}</p>
+                                <p className="text-sm text-muted-foreground">{user.email}</p>
+                              </div>
+                              {userStatus && (
+                                <Badge variant={userStatus.variant} className="text-xs">
+                                  <userStatus.icon className="h-3 w-3 mr-1" />
+                                  {userStatus.label}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <div className="space-y-1 mt-2">
                             <Button
@@ -416,17 +466,35 @@ export default function NavBar({ user, notifications = [], allItems = [] }) {
                           <User className="h-4 w-4 text-primary" />
                         </div>
                         <div className="hidden sm:block text-left">
-                          <p className="text-sm font-medium leading-none">{user.name}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{user.email}</p>
+                          <div className="flex items-center gap-2">
+                            <div>
+                              <p className="text-sm font-medium leading-none">{user.name}</p>
+                              <p className="text-xs text-muted-foreground mt-1">{user.email}</p>
+                            </div>
+                            {userStatus && (
+                              <Badge variant={userStatus.variant} className="text-xs">
+                                <userStatus.icon className="h-3 w-3 mr-1" />
+                                {userStatus.label}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                         <ChevronDown className="h-3 w-3" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-56">
                       <DropdownMenuLabel>
-                        <div>
-                          <p className="font-medium">{user.name}</p>
-                          <p className="text-xs text-muted-foreground">{user.email}</p>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">{user.name}</p>
+                            <p className="text-xs text-muted-foreground">{user.email}</p>
+                          </div>
+                          {userStatus && (
+                            <Badge variant={userStatus.variant} className="text-xs ml-2">
+                              <userStatus.icon className="h-3 w-3 mr-1" />
+                              {userStatus.label}
+                            </Badge>
+                          )}
                         </div>
                       </DropdownMenuLabel>
                       <DropdownMenuSeparator />
