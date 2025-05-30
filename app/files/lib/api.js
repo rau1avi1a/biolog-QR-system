@@ -1,3 +1,4 @@
+// app/files/lib/api.js
 export const api = {
   /* ── folders ────────────────────────── */
   folders       : (p) => fetch(`/api/folders${p?`?parentId=${p}`:''}`)
@@ -275,6 +276,108 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
       if (!r.ok) throw new Error('Failed to complete work order');
       return r.json();
     }),
+
+  /* ── Enhanced Transaction Methods ─── */
+  
+  // Get transactions for an item with enhanced filtering
+  getItemTransactions: async (itemId, options = {}) => {
+    const params = new URLSearchParams();
+    if (options.txnType) params.append('type', options.txnType);
+    if (options.startDate) params.append('startDate', options.startDate);
+    if (options.endDate) params.append('endDate', options.endDate);
+    if (options.limit) params.append('limit', options.limit.toString());
+    if (options.page) params.append('page', options.page.toString());
+    
+    const response = await fetch(`/api/items/${itemId}/transactions?${params}`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch item transactions');
+    }
+    
+    return response.json();
+  },
+
+  // Get lot-specific transaction history
+  getLotTransactions: async (itemId, lotNumber, options = {}) => {
+    const params = new URLSearchParams({ lotNumber });
+    if (options.startDate) params.append('startDate', options.startDate);
+    if (options.endDate) params.append('endDate', options.endDate);
+    
+    const response = await fetch(`/api/items/${itemId}/lots/transactions?${params}`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch lot transactions');
+    }
+    
+    return response.json();
+  },
+
+  // Get transaction statistics for an item
+  getItemTransactionStats: async (itemId, startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    
+    const response = await fetch(`/api/items/${itemId}/transactions/stats?${params}`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch transaction stats');
+    }
+    
+    return response.json();
+  },
+
+  // Get detailed transaction by ID
+  getTransactionDetails: async (txnId) => {
+    const response = await fetch(`/api/transactions/${txnId}`, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch transaction details');
+    }
+    
+    return response.json();
+  },
+
+  // Reverse a transaction (admin only)
+  reverseTransaction: async (txnId, reason) => {
+    const response = await fetch(`/api/transactions/${txnId}/reverse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to reverse transaction');
+    }
+    
+    return response.json();
+  },
+
+  // Create inventory adjustment transaction
+  createInventoryAdjustment: async (itemId, adjustments) => {
+    const response = await fetch('/api/transactions/adjustment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemId,
+        adjustments // Array of { lotNumber, qtyChange, reason, notes }
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to create inventory adjustment');
+    }
+    
+    return response.json();
+  },
 
   /* ── ARCHIVE methods ────────────────────── */
   getArchiveFolders: () => 

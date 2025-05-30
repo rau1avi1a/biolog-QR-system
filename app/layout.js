@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import Image from 'next/image';
 import './globals.css';
 
-import Providers from './providers';         // React-Query context
+import Providers from './providers';         // React-Query + Session context
 import { ToastProvider } from '@/components/ui/toast';
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
@@ -33,8 +33,8 @@ export default function RootLayout({ children }) {
           priority
         />
 
-        {/* now wrapped in both React-Query and Toast contexts */}
-        <Providers>
+        {/* Wrapped in both React-Query, Session, and Toast contexts */}
+        <Providers session={null}>
           <ToastProvider>
             {children}
           </ToastProvider>

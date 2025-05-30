@@ -144,6 +144,24 @@ export default function ClientHome({ groups, allItems, stats }) {
     };
   }, []);
 
+  const [isTabLoading, setIsTabLoading] = useState(false);
+
+  // Clear search when switching tabs with loading state
+  useEffect(() => {
+    if (isMountedRef.current) {
+      setIsTabLoading(true);
+      setSearchQuery('');
+      setSearchFilters({});
+      
+      // Small delay to show loading state, then clear it
+      const timer = setTimeout(() => {
+        setIsTabLoading(false);
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab]);
+
   // Safe state setter wrapper
   const safeSetState = (setter) => {
     return (...args) => {
@@ -153,51 +171,69 @@ export default function ClientHome({ groups, allItems, stats }) {
     };
   };
 
-  // Memoized search and filter functionality
-  const filteredItems = useMemo(() => {
-    let items = allItems;
+  // Pre-compute grouped items by type for faster tab switching
+  const groupedItems = useMemo(() => {
+    const groups = {
+      chemical: allItems.filter(i => i.itemType === 'chemical'),
+      solution: allItems.filter(i => i.itemType === 'solution'),
+      product: allItems.filter(i => i.itemType === 'product'),
+      all: allItems
+    };
+    return groups;
+  }, [allItems]);
 
-    // Apply text search
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      items = items.filter(item => 
-        item.searchText.includes(query)
-      );
-    }
-
-    // Apply advanced filters
-    Object.entries(searchFilters).forEach(([category, values]) => {
-      if (values && values.length > 0) {
-        items = items.filter(item => {
-          switch (category) {
-            case 'itemType':
-              return values.includes(item.itemType);
-            case 'stockStatus':
-              return values.includes(getStockStatus(item));
-            case 'location':
-              return values.includes(item.location);
-            case 'vendor':
-              return values.includes(item.vendor);
-            default:
-              return true;
-          }
-        });
+  // Get items for current tab first, then apply search and filters
+  const getTabItems = useMemo(() => {
+    return (type) => {
+      // Use pre-computed groups for faster access
+      let items = groupedItems[type] || [];
+      
+      // Then apply text search
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        items = items.filter(item => 
+          item.displayName.toLowerCase().includes(query) ||
+          item.sku.toLowerCase().includes(query) ||
+          item.description.toLowerCase().includes(query) ||
+          item.vendor.toLowerCase().includes(query) ||
+          item.location.toLowerCase().includes(query)
+        );
       }
-    });
 
-    return items;
-  }, [allItems, searchQuery, searchFilters]);
+      // Apply advanced filters
+      Object.entries(searchFilters).forEach(([category, values]) => {
+        if (values && values.length > 0) {
+          items = items.filter(item => {
+            switch (category) {
+              case 'itemType':
+                return values.includes(item.itemType);
+              case 'stockStatus':
+                return values.includes(getStockStatus(item));
+              case 'location':
+                return values.includes(item.location);
+              case 'vendor':
+                return values.includes(item.vendor);
+              default:
+                return true;
+            }
+          });
+        }
+      });
 
-  // Filter by tab and stock status
-  const getTabItems = (type) => {
-    let items = type === 'all' ? filteredItems : filteredItems.filter(i => i.itemType === type);
-    
-    if (showLowStockOnly) {
-      items = items.filter(i => getStockStatus(i) === 'low');
-    }
-    
-    return items;
-  };
+      // Finally apply stock filter
+      if (showLowStockOnly) {
+        items = items.filter(i => getStockStatus(i) === 'low');
+      }
+      
+      return items;
+    };
+  }, [groupedItems, searchQuery, searchFilters, showLowStockOnly]);
+
+  // Get suggestions for SearchBar based on current tab
+  const getTabSuggestions = useMemo(() => {
+    if (activeTab === 'overview') return [];
+    return groupedItems[activeTab] || [];
+  }, [groupedItems, activeTab]);
 
   const openDrawer = type => {
     if (isMountedRef.current) {
@@ -274,8 +310,20 @@ export default function ClientHome({ groups, allItems, stats }) {
     }
   };
 
-  const ItemGrid = ({ items, emptyMessage }) => (
-    items.length === 0 ? (
+  const ItemGrid = ({ items, emptyMessage }) => {
+    // Show loading spinner when tab is switching
+    if (isTabLoading) {
+      return (
+        <div className="text-center py-12">
+          <div className="inline-flex items-center gap-3">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <span className="text-muted-foreground">Loading...</span>
+          </div>
+        </div>
+      );
+    }
+
+    return items.length === 0 ? (
       <div className="text-center py-12">
         <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
         <p className="text-muted-foreground">{emptyMessage}</p>
@@ -286,8 +334,8 @@ export default function ClientHome({ groups, allItems, stats }) {
           <ItemCard key={item._id} item={item} />
         ))}
       </div>
-    )
-  );
+    );
+  };
 
   return (
     <>
@@ -343,7 +391,7 @@ export default function ClientHome({ groups, allItems, stats }) {
               <SearchBar
                 searchQuery={searchQuery}
                 onSearchChange={safeSetState(setSearchQuery)}
-                suggestions={filteredItems}
+                suggestions={getTabSuggestions}
                 filters={searchFilters}
                 onFiltersChange={safeSetState(setSearchFilters)}
                 onQRScan={() => safeSetState(setQrScannerOpen)(true)}
@@ -400,7 +448,11 @@ export default function ClientHome({ groups, allItems, stats }) {
                       <Plus className="h-4 w-4 mr-2" />
                       Add Product
                     </Button>
-                    <UploadCSV />
+                    
+                    {/* Upload buttons for each type */}
+                    <UploadCSV type="chemical" />
+                    <UploadCSV type="solution" />
+                    <UploadCSV type="product" />
                   </div>
                 </CardContent>
               </Card>
@@ -437,6 +489,7 @@ export default function ClientHome({ groups, allItems, stats }) {
                     <p className="text-sm text-muted-foreground">
                       {getTabItems(type).length} items
                       {showLowStockOnly && " (low stock only)"}
+                      {searchQuery && ` matching "${searchQuery}"`}
                     </p>
                   </div>
                   
@@ -446,7 +499,8 @@ export default function ClientHome({ groups, allItems, stats }) {
                         <Plus className="h-4 w-4 mr-2" />
                         Add {type}
                       </Button>
-                      {type === 'chemical' && <UploadCSV />}
+                      {/* Add upload button for each specific type */}
+                      <UploadCSV type={type} />
                     </div>
                   )}
                 </div>

@@ -1,7 +1,9 @@
-// app/api/items/[id]/lots/[lotId]/route.js
+// app/api/items/[id]/lots/[lotId]/route.js - Updated DELETE method
 import { NextResponse } from "next/server";
+import { jwtVerify } from 'jose';
 import connectMongoDB  from "@/lib/index";
 import { Item }        from "@/models/Item";
+import User from "@/models/User";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +59,57 @@ export async function DELETE(request, { params }) {
       );
     }
 
+    // Get and verify JWT token from cookies
+    const token = request.cookies.get('auth_token')?.value;
+    
+    if (!token) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Unauthorized - No token provided' 
+      }, { status: 401 });
+    }
+
+    let userPayload;
+    try {
+      const { payload } = await jwtVerify(
+        token,
+        new TextEncoder().encode(process.env.JWT_SECRET)
+      );
+      userPayload = payload;
+    } catch (jwtError) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Unauthorized - Invalid token' 
+      }, { status: 401 });
+    }
+
     await connectMongoDB();
+
+    // Get fresh user data to verify current role
+    const user = await User.findById(userPayload.userId);
+    if (!user) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Unauthorized - User not found' 
+      }, { status: 401 });
+    }
+
+    // Check if user is admin - ALWAYS verify server-side
+    if (user.role !== 'admin') {
+      console.warn(`Non-admin user attempted to delete lot:`, {
+        userId: user._id,
+        userEmail: user.email,
+        userRole: user.role,
+        itemId: id,
+        lotId: lotId,
+        timestamp: new Date().toISOString()
+      });
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Forbidden - Admin access required' 
+      }, { status: 403 });
+    }
+
     const item = await Item.findById(id);
     if (!item) {
       return NextResponse.json(
@@ -66,27 +118,65 @@ export async function DELETE(request, { params }) {
       );
     }
 
+    // Find the lot before deleting for logging
+    const lotToDelete = (item.Lots || []).find(l => l._id.toString() === lotId);
+    if (!lotToDelete) {
+      return NextResponse.json(
+        { success: false, error: "Lot not found" },
+        { status: 404 }
+      );
+    }
+
+    // Store lot info for logging
+    const lotInfo = {
+      lotNumber: lotToDelete.lotNumber,
+      quantity: lotToDelete.quantity
+    };
+
+    // Remove the lot and recalculate
     item.Lots = (item.Lots || []).filter(l => l._id.toString() !== lotId);
     if (item.lotTracked) {
       item.qtyOnHand = item.Lots.reduce((sum, l) => sum + (l.quantity || 0), 0);
     }
     await item.save();
 
+    // Log the deletion
+    console.log(`Lot deleted by admin ${user.email}:`, {
+      lotId: lotId,
+      lotNumber: lotInfo.lotNumber,
+      quantityRemoved: lotInfo.quantity,
+      itemId: item._id,
+      itemSku: item.sku,
+      itemName: item.displayName,
+      newItemTotal: item.qtyOnHand,
+      deletedBy: user.email,
+      deletedAt: new Date().toISOString()
+    });
+
     return NextResponse.json({
       success: true,
+      message: `Lot ${lotInfo.lotNumber} deleted successfully`,
       item: {
         id: item._id.toString(),
         sku: item.sku,
         displayName: item.displayName,
         qtyOnHand: item.qtyOnHand,
         lots: item.Lots.map(l => ({
+          id: l._id.toString(),
           lotNumber: l.lotNumber,
-          quantity:  l.quantity
+          quantity: l.quantity
         }))
+      },
+      deletedLot: {
+        lotNumber: lotInfo.lotNumber,
+        quantityRemoved: lotInfo.quantity
       }
     });
   } catch (err) {
     console.error("DELETE /api/items/[id]/lots/[lotId] error:", err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: err.message 
+    }, { status: 500 });
   }
 }
