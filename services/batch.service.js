@@ -9,6 +9,15 @@ import { createArchiveCopy } from './archive.service.js';
 
 const asId = (id) => new mongoose.Types.ObjectId(id);
 
+/** Helper function to create a system user for transactions */
+function getSystemUser() {
+  return {
+    _id: new mongoose.Types.ObjectId('000000000000000000000000'), // Use a consistent system user ID
+    name: 'System',
+    email: 'system@company.com'
+  };
+}
+
 /** Helper function to bake overlay PNG into PDF */
 async function bakeOverlayIntoPdf(originalPdfDataUrl, overlayPng) {
   const { PDFDocument } = await import('pdf-lib');
@@ -26,14 +35,15 @@ async function bakeOverlayIntoPdf(originalPdfDataUrl, overlayPng) {
 }
 
 /** REAL implementation: Create work order (no chemical transactions) */
-async function createWorkOrderOnly(batch) {
+async function createWorkOrderOnly(batch, user = null) {
   console.log('Creating work order for batch:', batch._id);
   
   try {
     // Just create the work order record (you can expand this later for NetSuite)
     const workOrderId = `WO-${Date.now()}`;
     
-    console.log('Work order created:', workOrderId);
+    const userInfo = user || getSystemUser();
+    console.log('Work order created:', workOrderId, 'by user:', userInfo.email);
     
     return { 
       id: workOrderId, 
@@ -46,7 +56,7 @@ async function createWorkOrderOnly(batch) {
 }
 
 /** REAL implementation: Transact chemicals from inventory (for Submit for Review) */
-async function transactChemicals(batch, confirmationData) {
+async function transactChemicals(batch, confirmationData, user = null) {
   try {
     if (confirmationData?.components?.length > 0) {
       const txnLines = confirmationData.components.map(comp => {
@@ -69,18 +79,26 @@ async function transactChemicals(batch, confirmationData) {
         };
       }).filter(line => line.item && line.lot); // Only include valid lines
 
-      // Post the inventory transaction
+      // Use provided user or system user
+      const actor = user || getSystemUser();
+
+      // Post the inventory transaction with batch references and actual user
       await txnService.post({
         txnType: 'issue',
         lines: txnLines,
         actor: {
-          _id: batch._id,
-          name: 'Batch System',
-          email: 'system@company.com'
+          _id: actor._id,
+          name: actor.name,
+          email: actor.email
         },
-        memo: `Chemical consumption for batch ${batch.runNumber}`,
+        memo: `Chemical consumption for batch ${batch.runNumber || 'Unknown'}`,
         project: `Batch-${batch._id}`,
-        department: 'Production'
+        department: 'Production',
+        // ADD BATCH REFERENCES:
+        batchId: batch._id,                    // Link to batch
+        workOrderId: batch.workOrderId,        // NetSuite work order ID
+        refDoc: batch.fileId,                  // Original file reference
+        refDocType: 'batch'                    // Document type
       });
 
       return { success: true, transactionCompleted: true };
@@ -94,7 +112,7 @@ async function transactChemicals(batch, confirmationData) {
 }
 
 /** REAL implementation: Create solution lot in inventory */
-async function createSolutionLot(batch, solutionLotNumber, solutionQty = null, solutionUnit = 'L') {
+async function createSolutionLot(batch, solutionLotNumber, solutionQty = null, solutionUnit = 'L', user = null) {
   console.log('Creating solution lot for batch:', batch._id, 'lotNumber:', solutionLotNumber);
   
   try {
@@ -118,7 +136,10 @@ async function createSolutionLot(batch, solutionLotNumber, solutionQty = null, s
       }]
     });
 
-    // Create inventory transaction for the solution (positive quantity = receipt)
+    // Use provided user or system user
+    const actor = user || getSystemUser();
+
+    // Create inventory transaction for the solution (positive quantity = receipt) with batch references
     await txnService.post({
       txnType: 'build', // 'build' because we're creating/building the solution
       lines: [{
@@ -127,13 +148,18 @@ async function createSolutionLot(batch, solutionLotNumber, solutionQty = null, s
         qty: quantity // Positive for production
       }],
       actor: {
-        _id: batch._id,
-        name: 'Batch System',
-        email: 'system@company.com'
+        _id: actor._id,
+        name: actor.name,
+        email: actor.email
       },
-      memo: `Solution lot created from batch ${batch.runNumber}`,
+      memo: `Solution lot created from batch ${batch.runNumber || 'Unknown'}`,
       project: `Batch-${batch._id}`,
-      department: 'Production'
+      department: 'Production',
+      // ADD BATCH REFERENCES:
+      batchId: batch._id,
+      workOrderId: batch.workOrderId,
+      refDoc: batch.fileId,
+      refDocType: 'batch'
     });
 
     console.log('Successfully created solution lot:', { solutionLotNumber, quantity, unit });
@@ -160,7 +186,7 @@ async function completeNetSuiteWorkOrder(workOrderId) {
 export async function createBatch(payload) {
   await connectMongoDB();
   
-  let fileId, overlayPng, status, editorData, confirmationData;
+  let fileId, overlayPng, status, editorData, confirmationData, user;
   
   if (payload.originalFileId && payload.editorData) {
     fileId = payload.originalFileId;
@@ -168,10 +194,12 @@ export async function createBatch(payload) {
     editorData = payload.editorData;
     status = payload.status || 'In Progress';
     confirmationData = payload.confirmationData;
+    user = payload.user; // Get user from payload
   } else {
     fileId = payload.fileId;
     overlayPng = payload.overlayPng;
     status = payload.status || 'In Progress';
+    user = payload.user; // Get user from payload
   }
 
   const file = await getFileById(fileId, { includePdf: true });
@@ -232,7 +260,7 @@ export async function createBatch(payload) {
   // Handle work order creation (no transactions)
   if (payload.action === 'create_work_order') {
     try {
-      const workOrderResult = await createWorkOrderOnly(batch);
+      const workOrderResult = await createWorkOrderOnly(batch, user);
       
       // Update batch with work order info only
       batch.workOrderId = workOrderResult.id;
@@ -254,7 +282,7 @@ export async function createBatch(payload) {
     try {
       // 1. Transact chemicals if components provided
       if (confirmationData.components?.length > 0) {
-        const transactionResult = await transactChemicals(batch, confirmationData);
+        const transactionResult = await transactChemicals(batch, confirmationData, user);
         
         if (transactionResult.success) {
           batch.chemicalsTransacted = true;
@@ -269,7 +297,8 @@ export async function createBatch(payload) {
           batch, 
           confirmationData.solutionLotNumber,
           confirmationData.solutionQuantity || snapshot.recipeQty,
-          confirmationData.solutionUnit || snapshot.recipeUnit
+          confirmationData.solutionUnit || snapshot.recipeUnit,
+          user
         );
         
         batch.solutionCreated = true;
@@ -303,6 +332,9 @@ export async function updateBatch(id, payload) {
   const prev = await Batch.findById(id).populate('fileId','pdf').lean();
   if (!prev) throw new Error('Batch not found');
 
+  // Get user from payload for transactions
+  const user = payload.user || getSystemUser();
+
   // Handle PDF overlay updates
   if (payload.overlayPng && prev?.fileId?.pdf) {
     try {
@@ -328,7 +360,7 @@ export async function updateBatch(id, payload) {
       const confirmationData = {
         components: payload.confirmedComponents
       };
-      const transactionResult = await transactChemicals({ _id: id, snapshot: prev.snapshot }, confirmationData);
+      const transactionResult = await transactChemicals({ _id: id, runNumber: prev.runNumber, snapshot: prev.snapshot }, confirmationData, user);
       
       if (transactionResult.success) {
         console.log('Chemicals transacted successfully during update');
@@ -342,10 +374,11 @@ export async function updateBatch(id, payload) {
   if (payload.solutionCreated && !prev.solutionCreated && payload.solutionLotNumber) {
     try {
       await createSolutionLot(
-        { _id: id, snapshot: prev.snapshot }, 
+        { _id: id, runNumber: prev.runNumber, snapshot: prev.snapshot }, 
         payload.solutionLotNumber,
         payload.solutionQuantity || prev.snapshot?.recipeQty,
-        payload.solutionUnit || prev.snapshot?.recipeUnit
+        payload.solutionUnit || prev.snapshot?.recipeUnit,
+        user
       );
       payload.solutionCreatedDate = new Date();
     } catch (e) {

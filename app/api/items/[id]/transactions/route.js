@@ -1,4 +1,4 @@
-// api/items/[id]/transactions/route.js
+// api/items/[id]/transactions/route.js - Fixed duplicate item property
 import { NextResponse } from "next/server";
 import { txnService } from "@/services/txn.service";
 
@@ -22,7 +22,7 @@ export async function GET(request, { params }) {
     return NextResponse.json({
       success: true,
       transactions: txns.map((t) => ({
-        id: t._id.toString(),
+        _id: t._id.toString(),
         txnType: t.txnType,
         postedAt: t.postedAt,
         effectiveDate: t.effectiveDate,
@@ -38,18 +38,18 @@ export async function GET(request, { params }) {
         validated: t.validated,
         validatedBy: t.validatedBy,
         lines: t.lines
-                 .filter(l => {
-                     // if l.item is populated, use its _id; otherwise it's already an ObjectId
-                     const lineItemId = l.item._id 
-                       ? l.item._id.toString() 
-                       : l.item.toString();
-                     return lineItemId === id;
-                   })
-                   .map(l => ({
-                     // always return the string _id
-                     item:            l.item._id 
-                                       ? l.item._id.toString() 
-                                       : l.item.toString(),            item: l.item,
+          .filter(l => {
+            // if l.item is populated, use its _id; otherwise it's already an ObjectId
+            const lineItemId = l.item._id 
+              ? l.item._id.toString() 
+              : l.item.toString();
+            return lineItemId === id;
+          })
+          .map(l => ({
+            // FIXED: Remove duplicate item property
+            item: l.item._id 
+              ? l.item._id.toString() 
+              : l.item.toString(),
             lot: l.lot,
             qty: l.qty,
             unitCost: l.unitCost,
@@ -63,6 +63,7 @@ export async function GET(request, { params }) {
       }))
     });
   } catch (error) {
+    console.error('GET item transactions error:', error);
     return NextResponse.json(
       { success: false, error: error.message },
       { status: 500 }

@@ -1,8 +1,10 @@
-// services/txn.service.js
+// services/txn.service.js - Updated to include batch snapshot data
 import mongoose from 'mongoose';
 import connectMongoDB from '@/lib/index';
 import { Item } from '@/models/Item';
-import { InventoryTxn } from '@/models/InventoryTxn'; // Add this import
+import { InventoryTxn } from '@/models/InventoryTxn';
+import Batch from '@/models/Batch';
+import File from '@/models/File';
 
 export const txnService = {
   /**
@@ -147,7 +149,7 @@ export const txnService = {
   },
 
   /**
-   * Get transactions for a specific item with enhanced filtering
+   * Get transactions for a specific item with enhanced filtering and batch info
    */
   listByItem: async (itemId, options = {}) => {
     await connectMongoDB();
@@ -175,12 +177,41 @@ export const txnService = {
     
     const skip = (page - 1) * limit;
     
-    return InventoryTxn.find(query)
+    const transactions = await InventoryTxn.find(query)
       .sort({ postedAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate('lines.item', 'sku displayName uom')
+      .populate('batchId', 'runNumber fileId status') 
+      .populate({                                      
+        path: 'batchId',
+        populate: [
+          {
+            path: 'fileId',
+            select: 'fileName'
+          },
+          {
+            path: 'snapshot.solutionRef',
+            select: 'displayName sku'
+          },
+          {
+            path: 'snapshot.productRef', 
+            select: 'displayName sku'
+          }
+        ]
+      })
       .lean();
+
+    // Transform to include batch snapshot info
+    return transactions.map(txn => ({
+      ...txn,
+      batchSnapshot: txn.batchId ? {
+        solutionRef: txn.batchId.snapshot?.solutionRef,
+        productRef: txn.batchId.snapshot?.productRef,
+        runNumber: txn.batchId.runNumber,
+        fileName: txn.batchId.fileId?.fileName
+      } : null
+    }));
   },
 
   /**
@@ -193,6 +224,24 @@ export const txnService = {
       .populate('lines.item', 'sku displayName uom itemType')
       .populate('createdBy._id', 'name email')
       .populate('validatedBy._id', 'name email')
+      .populate('batchId', 'runNumber fileId status')
+      .populate({                                      
+        path: 'batchId',
+        populate: [
+          {
+            path: 'fileId',
+            select: 'fileName'
+          },
+          {
+            path: 'snapshot.solutionRef',
+            select: 'displayName sku'
+          },
+          {
+            path: 'snapshot.productRef', 
+            select: 'displayName sku'
+          }
+        ]
+      })
       .lean();
   },
 
@@ -251,19 +300,51 @@ export const txnService = {
   },
 
   /**
-   * Get lot history for a specific item and lot
+   * Get lot history for a specific item and lot with batch info
    */
   getLotHistory: async (itemId, lotNumber) => {
     await connectMongoDB();
     
-    return InventoryTxn.find({
+    const transactions = await InventoryTxn.find({
       "lines.item": itemId,
       "lines.lot": lotNumber,
       status: 'posted'
     })
     .sort({ postedAt: -1 })
     .populate('lines.item', 'sku displayName uom')
+    .populate('batchId', 'runNumber fileId status')
+    .populate({                                      
+      path: 'batchId',
+      populate: [
+        {
+          path: 'fileId',
+          select: 'fileName'
+        },
+        {
+          path: 'snapshot.solutionRef',
+          select: 'displayName sku'
+        },
+        {
+          path: 'snapshot.productRef', 
+          select: 'displayName sku'
+        }
+      ]
+    })
     .lean();
+
+    // Transform to include batch snapshot info and filter relevant lines
+    return transactions.map(txn => ({
+      ...txn,
+      batchSnapshot: txn.batchId ? {
+        solutionRef: txn.batchId.snapshot?.solutionRef,
+        productRef: txn.batchId.snapshot?.productRef,
+        runNumber: txn.batchId.runNumber,
+        fileName: txn.batchId.fileId?.fileName
+      } : null,
+      relevantLines: txn.lines.filter(line => 
+        line.item.toString() === itemId && line.lot === lotNumber
+      )
+    }));
   },
 
   /**

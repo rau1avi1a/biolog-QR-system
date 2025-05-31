@@ -40,7 +40,7 @@
     ".next/types/**/*.ts",
     "**/*.ts",
     "**/*.tsx"
-, "app/api/folders/route.js", "app/api/files/versions/route.js", "components/TransactionsTable.jsx", "hooks/useItemTransactions.js"  ],
+, "app/api/folders/route.js", "app/api/files/versions/route.js", "components/TxnTable.jsx", "hooks/useItemTransactions.js"  ],
   "exclude": [
     "node_modules"
   ]
