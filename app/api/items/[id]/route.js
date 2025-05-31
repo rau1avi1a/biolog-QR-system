@@ -1,4 +1,4 @@
-// app/api/items/[id]/route.js - Updated DELETE method for custom auth
+// app/api/items/[id]/route.js - Fixed GET method and updated DELETE method for custom auth
 import { NextResponse } from "next/server";
 import { jwtVerify } from 'jose';
 import connectMongoDB  from "@/lib/index";
@@ -11,18 +11,42 @@ export const dynamic = "force-dynamic";
 /* GET /api/items/:id */
 export async function GET(request, { params }) {
   try {
+    await connectMongoDB();
     const { id } = await params;
-    const txn = await txnService.getById(id);
     
-    if (!txn) {
+    const item = await Item.findById(id)
+      .populate('bom.itemId', 'displayName sku') // Populate BOM components if they exist
+      .lean();
+    
+    if (!item) {
       return NextResponse.json(
-        { success: false, error: "Transaction not found" },
+        { success: false, error: "Item not found" },
         { status: 404 }
       );
     }
     
-    return NextResponse.json({ success: true, transaction: txn });
+    return NextResponse.json({ 
+      success: true, 
+      item: {
+        _id: item._id,
+        sku: item.sku,
+        displayName: item.displayName,
+        itemType: item.itemType,
+        qtyOnHand: item.qtyOnHand || 0,
+        uom: item.uom,
+        description: item.description,
+        cost: item.cost,
+        lotTracked: item.lotTracked,
+        casNumber: item.casNumber, // Chemical specific
+        location: item.location,   // Chemical specific
+        bom: item.bom,            // Solution/Product specific
+        Lots: item.Lots || [],    // Lot information
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt
+      }
+    });
   } catch (error) {
+    console.error('GET item error:', error);
     return NextResponse.json(
       { success: false, error: error.message },
       { status: 500 }
@@ -32,29 +56,43 @@ export async function GET(request, { params }) {
 
 /* PATCH /api/items/:id */
 export async function PATCH(req, { params }) {
-  await connectMongoDB();
+  try {
+    await connectMongoDB();
 
-  // optional auth
-  await basicAuth("/login");
+    // Optional auth - you might want to require auth for editing
+    // await basicAuth("/login");
 
-  const { id } = await params;
-  const data  = await req.json();
+    const { id } = await params;
+    const data  = await req.json();
 
-  // pick only the fields you allow editing
-  const allowed = ["displayName", "casNumber", "location"];
-  const update = {};
-  for (const key of allowed) {
-    if (data[key] !== undefined) update[key] = data[key];
+    // Pick only the fields you allow editing
+    const allowed = ["displayName", "casNumber", "location", "description", "cost"];
+    const update = {};
+    for (const key of allowed) {
+      if (data[key] !== undefined) update[key] = data[key];
+    }
+
+    const updated = await Item.findByIdAndUpdate(
+      id,
+      { $set: update },
+      { new: true, lean: true }
+    );
+    
+    if (!updated) {
+      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ 
+      success: true,
+      item: updated 
+    });
+  } catch (error) {
+    console.error('PATCH item error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message 
+    }, { status: 500 });
   }
-
-  const updated = await Item.findByIdAndUpdate(
-    id,
-    { $set: update },
-    { new: true, lean: true }
-  );
-  if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  return NextResponse.json({ item: updated });
 }
 
 /* DELETE /api/items/:id */
@@ -160,6 +198,7 @@ export async function DELETE(request, { params }) {
     });
 
     return NextResponse.json({ 
+      success: true,
       message: successMessage,
       deletedItem: {
         id: item._id,

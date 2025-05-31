@@ -342,7 +342,7 @@ export default function ItemDetailClient({ item, transactions, lots }) {
     }
   };
 
-  // Enhanced Transaction History Tab Component
+  // Clean Transaction History Tab Component (removed stats and quick actions)
   const TransactionHistoryTab = () => {
     if (transactionData.loading) {
       return (
@@ -366,61 +366,6 @@ export default function ItemDetailClient({ item, transactions, lots }) {
 
     return (
       <div className="space-y-6">
-        {/* Transaction Statistics */}
-        {transactionData.stats && transactionData.stats.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {transactionData.stats.map((stat) => {
-              const getIcon = (type) => {
-                switch (type) {
-                  case 'receipt': return TrendingUp;
-                  case 'issue': return TrendingDown;
-                  case 'adjustment': return RefreshCw;
-                  case 'build': return Package;
-                  case 'transfer': return ExternalLink;
-                  default: return History;
-                }
-              };
-              
-              const Icon = getIcon(stat._id);
-              
-              return (
-                <Card key={stat._id}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium capitalize">{stat._id}</span>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span>Transactions:</span>
-                        <span className="font-medium">{stat.transactionCount}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Total Qty:</span>
-                        <span className={`font-medium ${
-                          stat.totalQty > 0 ? 'text-green-600' : 
-                          stat.totalQty < 0 ? 'text-red-600' : 'text-gray-600'
-                        }`}>
-                          {stat.totalQty > 0 ? '+' : ''}{stat.totalQty} {item.uom}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Total Value:</span>
-                        <span className={`font-medium ${
-                          stat.totalValue > 0 ? 'text-green-600' : 
-                          stat.totalValue < 0 ? 'text-red-600' : 'text-gray-600'
-                        }`}>
-                          {formatCurrency(stat.totalValue)}
-                        </span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-
         {/* Enhanced Transaction Table */}
         <Card>
           <CardHeader>
@@ -450,36 +395,6 @@ export default function ItemDetailClient({ item, transactions, lots }) {
               isAdmin={isAdmin}
               mode="item"
             />
-          </CardContent>
-        </Card>
-
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5" />
-              Quick Actions
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Button variant="outline" className="justify-start">
-                <TrendingUp className="h-4 w-4 mr-2" />
-                Add Stock
-              </Button>
-              <Button variant="outline" className="justify-start">
-                <TrendingDown className="h-4 w-4 mr-2" />
-                Issue Stock
-              </Button>
-              <Button variant="outline" className="justify-start">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Adjust Quantity
-              </Button>
-              <Button variant="outline" className="justify-start">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Transfer
-              </Button>
-            </div>
           </CardContent>
         </Card>
       </div>
@@ -728,7 +643,7 @@ export default function ItemDetailClient({ item, transactions, lots }) {
             </Card>
           </TabsContent>
 
-          {/* Enhanced Transaction History Tab */}
+          {/* Clean Transaction History Tab */}
           <TabsContent value="transactions" className="space-y-6">
             <TransactionHistoryTab />
           </TabsContent>
