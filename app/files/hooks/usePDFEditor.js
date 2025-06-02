@@ -1,4 +1,4 @@
-// app/files/hooks/usePDFEditor.js
+// app/files/hooks/usePDFEditor.js - Enhanced with Palm Rejection & Better Undo
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -18,7 +18,7 @@ export default function usePdfEditorLogic({
   const [localDraw, setLocalDraw] = useState(true);
   
   // Determine if drawing should be allowed based on document state
-  const canDraw = () => {
+  const canDraw = useCallback(() => {
     if (!doc) return false;
     
     // Original files (File model) - no drawing until work order is created
@@ -32,7 +32,7 @@ export default function usePdfEditorLogic({
     
     // Draft, In Progress, and Review batches - drawing allowed
     return true;
-  };
+  }, [doc?.isBatch, doc?.status, doc?.isArchived]);
   
   const isDraw = canDraw() && (externalDraw ?? localDraw);
   const setIsDraw = (value) => {
@@ -50,7 +50,7 @@ export default function usePdfEditorLogic({
   const [pageNo,  setPageNo]      = useState(1);
   const [pageReady, setPageReady] = useState(false);
 
-/* ── overlay / history refs ────────────────────────────────────── */
+/* ── overlay / history refs with better undo tracking ────────────────────── */
   const overlaysRef  = useRef({});      // { 1: dataUrl, 2: … }
   const historiesRef = useRef({});      // { 1: [dataUrl,…] }
 
@@ -63,9 +63,11 @@ export default function usePdfEditorLogic({
   const ctxRef           = useRef(null);
   const pageContainerRef = useRef(null);
 
-/* ── misc flags ────────────────────────────────────────────────── */
-  const [isDown,   setIsDown]   = useState(false);
+/* ── drawing state for palm rejection ────────────────────────────── */
+  const [isDown, setIsDown] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const activePointerRef = useRef(null); // Track the active pointer ID
+  const strokeStartedRef = useRef(false); // Track if we're in the middle of a stroke
 
 /* ───────────────────── initialise canvas on each page ─────────── */
   const initCanvas = useCallback(() => {
@@ -133,10 +135,15 @@ export default function usePdfEditorLogic({
     return () => ro.disconnect();
   }, [initCanvas]);
 
-  /* reset when user opens another File */
+  /* reset when user opens another File OR when document state changes */
   useEffect(() => {
     setBlobUri(doc?.pdf || null);
     setPageNo(1);
+    
+    // Reset drawing state
+    activePointerRef.current = null;
+    strokeStartedRef.current = false;
+    setIsDown(false);
     
     // For batches with baked PDFs, don't restore overlays since they're already in the PDF
     // Only restore overlays if this is an original file or a batch without a signed PDF
@@ -148,11 +155,11 @@ export default function usePdfEditorLogic({
         // Initialize history with the saved overlay
         historiesRef.current[1] = [doc.overlays[1]];
         setHistory([doc.overlays[1]]);
-        setHistIdx(0);
+        setHistIdx(0); // Point to the existing overlay
       } else {
         setOverlay(null);
         setHistory([]);
-        setHistIdx(-1);
+        setHistIdx(-1); // No history, start at -1
       }
     } else {
       // Clear overlays for new documents or baked PDFs
@@ -160,13 +167,22 @@ export default function usePdfEditorLogic({
       historiesRef.current = {};
       setOverlay(null);
       setHistory([]);
-      setHistIdx(-1);
+      setHistIdx(-1); // Start at -1 (no strokes)
     }
     
     setPageReady(false);
-  }, [doc]);
+    
+    // Force re-render of canvas to update drawing state
+    if (canvasRef.current) {
+      setTimeout(() => {
+        initCanvas();
+      }, 100);
+    }
+    
+    console.log('Document loaded, initial histIdx:', doc?.overlays?.[1] ? 0 : -1);
+  }, [doc, initCanvas]);
 
-/* ─────────────────── drawing helpers ──────────────────────────── */
+/* ─────────────────── enhanced drawing helpers with palm rejection ──────────────────────────── */
   const getPos = (e) => {
     const r = canvasRef.current.getBoundingClientRect();
     const p = e.touches?.[0] || e;
@@ -175,17 +191,34 @@ export default function usePdfEditorLogic({
 
   const down = (e) => {
     if (!isDraw || !pageReady || !canDraw()) return;
+    
+    // Palm rejection: only allow one active pointer at a time
+    if (activePointerRef.current !== null && activePointerRef.current !== e.pointerId) {
+      return; // Ignore additional pointers when one is already active
+    }
+    
     e.preventDefault();
+    
+    // Set this as the active pointer
+    activePointerRef.current = e.pointerId;
+    strokeStartedRef.current = true;
     setIsDown(true);
+    
     const { x, y } = getPos(e);
     ctxRef.current.beginPath();
     ctxRef.current.moveTo(x, y);
   };
 
-  /* 60 fps throttle */
+  /* 60 fps throttle with palm rejection */
   const lastMove = useRef(0);
   const move = (e) => {
     if (!isDraw || !isDown || !pageReady || !canDraw()) return;
+    
+    // Palm rejection: only respond to the active pointer
+    if (activePointerRef.current !== e.pointerId) {
+      return;
+    }
+    
     const now = performance.now();
     if (now - lastMove.current < 16) return;
     lastMove.current = now;
@@ -196,49 +229,108 @@ export default function usePdfEditorLogic({
     ctxRef.current.stroke();
   };
 
-  const up = () => {
+  const up = (e) => {
     if (!isDraw || !pageReady || !canDraw()) return;
+    
+    // Only respond to the active pointer
+    if (e && activePointerRef.current !== null && activePointerRef.current !== e.pointerId) {
+      return;
+    }
+    
     ctxRef.current.closePath();
     setIsDown(false);
+    
+    // Reset the active pointer when the stroke ends
+    activePointerRef.current = null;
+    strokeStartedRef.current = false;
 
-    /* snapshot off-thread */
+    /* snapshot with corrected history management */
     (window.requestIdleCallback || window.requestAnimationFrame)(() => {
-      const snap = canvasRef.current.toDataURL('image/png');
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const snap = canvas.toDataURL('image/png');
+      
+      // Update the overlay for this page
       overlaysRef.current[pageNo] = snap;
 
-      const hist = historiesRef.current[pageNo] ?? [];
-      historiesRef.current[pageNo] = [...hist, snap];
-      setHistory(historiesRef.current[pageNo]);
-      setHistIdx(historiesRef.current[pageNo].length - 1);
-
+      // Get current history
+      let currentHistory = historiesRef.current[pageNo] || [];
+      
+      // IMPORTANT FIX: If we're not at the end of history (we've undone some strokes),
+      // truncate the history at the current position before adding the new stroke
+      if (histIdx < currentHistory.length - 1) {
+        // Truncate history to current position
+        currentHistory = currentHistory.slice(0, histIdx + 1);
+      }
+      
+      // Add the new snapshot to history
+      const newHistory = [...currentHistory, snap];
+      historiesRef.current[pageNo] = newHistory;
+      
+      // Set index to point to the current state (last item)
+      const newIndex = newHistory.length - 1;
+      setHistIdx(newIndex);
+      setHistory(newHistory);
       setOverlay(snap);
+      
+      console.log(`Stroke completed. History: [${newHistory.length} items], Current index: ${newIndex}`);
     });
   };
 
-/* ───────────────────── undo (per-page) ────────────────────────── */
+  // Enhanced pointer cancel handler for better palm rejection
+  const pointerCancel = (e) => {
+    if (activePointerRef.current === e.pointerId) {
+      activePointerRef.current = null;
+      strokeStartedRef.current = false;
+      setIsDown(false);
+      ctxRef.current.closePath();
+    }
+  };
+
+/* ───────────────────── fixed undo (single click, proper behavior) ────────────────────────── */
   const undo = useCallback(() => {
-    if (!canDraw()) return; // Prevent undo if drawing not allowed
+    if (!canDraw()) return;
     
-    const hist = historiesRef.current[pageNo] ?? [];
-    if (!hist.length) return;
-    const newIdx = histIdx - 1;
+    const currentHistory = historiesRef.current[pageNo] || [];
+    if (currentHistory.length === 0) return;
+    
+    let newIdx = histIdx - 1;
+    
+    // Ensure we don't go below -1 (completely clear state)
+    if (newIdx < -1) {
+      console.log('Already at minimum undo state');
+      return;
+    }
+    
+    console.log(`Undo: Current index ${histIdx} -> New index ${newIdx} (History length: ${currentHistory.length})`);
+    
+    // Update the index
     setHistIdx(newIdx);
-    historiesRef.current[pageNo] = hist;
-    setHistory(hist);
+    
+    // Clear the canvas
+    const canvas = canvasRef.current;
+    const ctx = ctxRef.current;
+    if (!canvas || !ctx) return;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctxRef.current.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-
-    if (newIdx >= 0) {
+    if (newIdx >= 0 && newIdx < currentHistory.length) {
+      // Show the state at newIdx
+      const targetState = currentHistory[newIdx];
+      console.log(`Restoring state at index ${newIdx}`);
+      
       const img = new Image();
       img.onload = () => {
-        // No scaling needed since canvas is now 1:1
-        const canvas = canvasRef.current;
-        ctxRef.current.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       };
-      img.src = hist[newIdx];
-      overlaysRef.current[pageNo] = hist[newIdx];
-      setOverlay(hist[newIdx]);
+      img.src = targetState;
+      
+      overlaysRef.current[pageNo] = targetState;
+      setOverlay(targetState);
     } else {
+      // Clear everything (newIdx is -1)
+      console.log('Clearing all strokes');
       delete overlaysRef.current[pageNo];
       setOverlay(null);
     }
@@ -330,6 +422,13 @@ const save = useCallback(
           originalFileId: batch.fileId || doc._id
         });
         
+        // Force a re-render to update drawing capabilities
+        setTimeout(() => {
+          if (canvasRef.current) {
+            initCanvas();
+          }
+        }, 100);
+        
       } else {
         // Existing batch - use updateBatch for all actions
         const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
@@ -385,6 +484,13 @@ const save = useCallback(
             doc.pdf,
           isBatch: true
         });
+        
+        // Force a re-render to update drawing capabilities
+        setTimeout(() => {
+          if (canvasRef.current) {
+            initCanvas();
+          }
+        }, 100);
       }
 
       refreshFiles?.();
@@ -396,7 +502,7 @@ const save = useCallback(
       setIsSaving(false);
     }
   },
-  [doc, refreshFiles, setCurrentDoc, canDraw]
+  [doc, refreshFiles, setCurrentDoc, canDraw, initCanvas]
 );
 
 /* expose undo / save to toolbar refs (if parent passed them) */
@@ -405,14 +511,29 @@ const save = useCallback(
     if (externalSave)  externalSave.current  = () => save('save');
   }, [externalUndo, externalSave, undo, save]);
 
-/* ───────────────────── page navigation ────────────────────────── */
+/* ───────────────────── page navigation with proper state management ────────────────────────── */
   const gotoPage = (next) => {
     if (next < 1 || next > pages) return;
-    setHistIdx(-1);
-    setHistory(historiesRef.current[next] ?? []);
-    setOverlay(overlaysRef.current[next] ?? null);
+    
+    // Reset drawing state when changing pages
+    activePointerRef.current = null;
+    strokeStartedRef.current = false;
+    setIsDown(false);
+    
+    // Load page history and set proper index
+    const pageHistory = historiesRef.current[next] || [];
+    const pageOverlay = overlaysRef.current[next] || null;
+    
+    // Set the history index to the last item (most recent state)
+    const newIndex = pageHistory.length > 0 ? pageHistory.length - 1 : -1;
+    
+    setHistIdx(newIndex);
+    setHistory(pageHistory);
+    setOverlay(pageOverlay);
     setPageNo(next);
     setPageReady(false);
+    
+    console.log(`Switched to page ${next}. History length: ${pageHistory.length}, Index: ${newIndex}`);
   };
 
 /* ───────────────────── "print letter" helper (unchanged) ─────── */
@@ -468,6 +589,7 @@ const save = useCallback(
     down,
     move,
     up,
+    pointerCancel, // Export the pointer cancel handler
     undo,
     save, // Now supports confirmationData parameter
     gotoPage,

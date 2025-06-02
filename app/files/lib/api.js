@@ -18,6 +18,13 @@ export const api = {
   files            : (fId) => fetch(`/api/files${fId?`?folderId=${fId}`:''}`)
                              .then(r=>r.json()),
   load             : (id)   => fetch(`/api/files?id=${id}`).then(r=>r.json()),
+  searchFiles      : (query) => {
+    if (!query?.trim()) {
+      return Promise.resolve({ files: [] });
+    }
+    return fetch(`/api/files?search=${encodeURIComponent(query.trim())}`)
+           .then(r => r.json());
+  },
   upload           : (file,fId)=>{
                        const fd=new FormData();
                        fd.append('file',file);
