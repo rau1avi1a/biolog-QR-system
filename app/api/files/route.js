@@ -6,6 +6,7 @@ import {
   listFiles,
   getFileById,
   createFileFromUpload,
+  searchFiles
 } from '@/services/file.service';   // ← singular "service", not "services"
 
 export const dynamic = 'force-dynamic';
@@ -36,7 +37,7 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const id      = searchParams.get('id');          // /api/files?id=123
-    const partial = searchParams.get('partial');     // /api/files?partial=foo bar
+    const search  = searchParams.get('search');      // /api/files?search=eco a1
     const folder  = searchParams.get('folderId');    // /api/files?folderId=abc
 
     /* A. single ——————————————————————————————— */
@@ -48,33 +49,22 @@ export async function GET(req) {
       return NextResponse.json({ file });
     }
 
-    /* B. quick "filename contains *all* tokens" search ———————— */
-    if (partial) {
-      const tokens = partial.trim().split(/\s+/).filter(Boolean);
-      if (tokens.length === 0) {
-        return NextResponse.json({ error: 'Empty query' }, { status: 400 });
+    /* B. search ——————————————————————————————— */
+    if (search) {
+      const query = search.trim();
+      if (query.length === 0) {
+        return NextResponse.json({ files: [] });
       }
 
-      /* build a single Mongo `$and` regex query instead of post-filtering */
-      const and = tokens.map(t => ({
-        fileName: { $regex: `\\b${t}\\b`, $options: 'i' },
-      }));
-
-      const [hit] = await listFiles({ onlyNew: false });     // <- lightweight
-      const file  = hit ? await getFileById(hit._id, { includePdf: true }) : null;
-
-      if (!file) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
-      }
-      return NextResponse.json({ file });
+      // Call the new searchFiles function
+      const files = await searchFiles(query);
+      return NextResponse.json({ files });
     }
 
     /* C. list ——————————————————————————————————— */
-    // IMPORTANT: Only return original files, not batch copies
-    // This ensures the file explorer only shows original files
     const files = await listFiles({ 
       folderId: folder ?? null,
-      onlyOriginals: true  // Add this filter to your service
+      onlyOriginals: true
     });
     return NextResponse.json({ files });
   } catch (err) {

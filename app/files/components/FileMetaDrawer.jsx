@@ -10,6 +10,16 @@ import { ScrollArea }    from '@/components/ui/scroll-area';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction
+} from '@/components/ui/alert-dialog';
 import { 
   Loader2, 
   Plus, 
@@ -20,7 +30,8 @@ import {
   FlaskRound, 
   Beaker,
   Hash,
-  FileText
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
 import { api }           from '../lib/api';
 
@@ -226,14 +237,25 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly }) {
   );
 }
 
-/* ───────── Main drawer with enhanced styling ───────── */
-export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, readOnly = false }) {
+/* ───────── Main drawer with enhanced styling and delete functionality ───────── */
+export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, readOnly = false, onFileDeleted }) {
   const [product, setProduct] = useState(null);
   const [solution, setSolution] = useState(null);
   const [rows, setRows] = useState([]);
   const [outQty, setOutQty] = useState('');
   const [outUnit, setOutUnit] = useState('mL');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  /* Determine if delete should be available */
+  const canDelete = () => {
+    if (!file || !file.isBatch) return false; // Only batches can be deleted
+    if (file.status === 'Completed') return false; // Cannot delete completed batches
+    if (file.isArchived) return false; // Cannot delete archived batches
+    if (file.wasRejected) return false; // Cannot delete rejected batches (they need to be fixed)
+    return file.status === 'In Progress'; // Only allow deletion of In Progress batches
+  };
 
   /* Hydrate form */
   useEffect(() => {
@@ -313,206 +335,307 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     }
   };
 
+  const deleteBatch = async () => {
+    if (!file || !canDelete()) return;
+    
+    setDeleting(true);
+    try {
+      await api.deleteBatch(file._id);
+      onFileDeleted?.(); // Notify parent that file was deleted
+      onOpenChange(false); // Close the drawer
+    } catch (error) {
+      console.error('Failed to delete batch:', error);
+      // You might want to show an error toast here
+      alert('Failed to delete batch: ' + (error.message || 'Unknown error'));
+    } finally {
+      setDeleting(false);
+      setShowDeleteDialog(false);
+    }
+  };
+
   if (!file) return null;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[500px] p-0">
-        <div className="flex flex-col h-full">
-          {/* Header */}
-          <SheetHeader className="p-6 pb-4 border-b border-slate-200 dark:border-slate-700">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <FileText size={18} className="text-primary" />
-              </div>
-              <div>
-                <SheetTitle className="text-lg">
-                  {readOnly ? 'File Properties' : 'Edit Properties'}
-                </SheetTitle>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                  {file.fileName}
-                </p>
-              </div>
-            </div>
-            
-            {readOnly && (
-              <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                <p className="text-sm text-amber-800 dark:text-amber-200">
-                  {file.isBatch
-                    ? 'Properties are inherited from the original file and cannot be edited in batch copies.'
-                    : 'Properties cannot be edited in this file state.'
-                  }
-                </p>
-              </div>
-            )}
-          </SheetHeader>
-
-          {/* Content */}
-          <ScrollArea className="flex-1 p-6">
-            <div className="space-y-6">
-              {/* File Info Section */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
-                  File Information
-                </h3>
+    <>
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent side="right" className="w-[500px] p-0">
+          <div className="flex flex-col h-full">
+            {/* Header */}
+            <SheetHeader className="p-6 pb-4 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <FileText size={18} className="text-primary" />
+                </div>
+                <div className="flex-1">
+                  <SheetTitle className="text-lg">
+                    {readOnly ? 'File Properties' : 'Edit Properties'}
+                  </SheetTitle>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    {file.fileName}
+                  </p>
+                </div>
                 
-                <div className="grid gap-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <FileText size={14} className="text-slate-500" />
-                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                        File name
-                      </label>
-                    </div>
-                    <Input 
-                      value={file.fileName} 
-                      disabled 
-                      className="bg-slate-50 dark:bg-slate-800/50"
-                    />
-                  </div>
+                {/* Delete button for batches */}
+                {canDelete() && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowDeleteDialog(true)}
+                    className="h-8 w-8 p-0 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/20"
+                    title="Delete batch"
+                  >
+                    <Trash2 size={16} />
+                  </Button>
+                )}
+              </div>
+              
+              {readOnly && (
+                <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <p className="text-sm text-amber-800 dark:text-amber-200">
+                    {file.isBatch
+                      ? 'Properties are inherited from the original file and cannot be edited in batch copies.'
+                      : 'Properties cannot be edited in this file state.'
+                    }
+                  </p>
+                </div>
+              )}
+            </SheetHeader>
 
-                  {file.runNumber && (
+            {/* Content */}
+            <ScrollArea className="flex-1 p-6">
+              <div className="space-y-6">
+                {/* File Info Section */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
+                    File Information
+                  </h3>
+                  
+                  <div className="grid gap-4">
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <Hash size={14} className="text-slate-500" />
+                        <FileText size={14} className="text-slate-500" />
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                          Run Number
+                          File name
                         </label>
                       </div>
                       <Input 
-                        value={`Run ${file.runNumber}`} 
+                        value={file.fileName} 
                         disabled 
                         className="bg-slate-50 dark:bg-slate-800/50"
                       />
                     </div>
-                  )}
-                </div>
-              </div>
 
-              <Separator />
-
-              {/* Product Information Section */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
-                  Product Information
-                </h3>
-                
-                <div className="grid gap-4">
-                  <AsyncSelect
-                    label="Solution produced"
-                    type="solution"
-                    value={solution}
-                    onChange={readOnly ? undefined : setSolution}
-                    disabled={readOnly}
-                    icon={FlaskRound}
-                  />
-                  
-                  <AsyncSelect
-                    label="Product (for order)"
-                    type="product"
-                    value={product}
-                    onChange={readOnly ? undefined : setProduct}
-                    disabled={readOnly}
-                    icon={Package}
-                  />
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Beaker size={14} className="text-slate-500" />
-                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                        Recipe output
-                      </label>
-                    </div>
-                    <div className="flex gap-3">
-                      <div className="flex-1">
-                        <Input
-                          type="number"
-                          placeholder="Quantity"
-                          value={outQty}
-                          onChange={e => setOutQty(e.target.value)}
-                          disabled={readOnly}
-                          className="text-center"
+                    {file.runNumber && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Hash size={14} className="text-slate-500" />
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                            Run Number
+                          </label>
+                        </div>
+                        <Input 
+                          value={`Run ${file.runNumber}`} 
+                          disabled 
+                          className="bg-slate-50 dark:bg-slate-800/50"
                         />
                       </div>
-                      <div className="w-24">
-                        <Input
-                          placeholder="Unit"
-                          value={outUnit}
-                          onChange={e => setOutUnit(e.target.value)}
-                          disabled={readOnly}
-                          className="text-center"
-                        />
+                    )}
+
+                    {/* Batch type indicator */}
+                    {file.isBatch && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Package size={14} className="text-slate-500" />
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                            File Type
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg">
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                            Batch Copy
+                          </Badge>
+                          <span className="text-sm text-slate-600 dark:text-slate-400">
+                            Status: {file.status || 'Unknown'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Product Information Section */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
+                    Product Information
+                  </h3>
+                  
+                  <div className="grid gap-4">
+                    <AsyncSelect
+                      label="Solution produced"
+                      type="solution"
+                      value={solution}
+                      onChange={readOnly ? undefined : setSolution}
+                      disabled={readOnly}
+                      icon={FlaskRound}
+                    />
+                    
+                    <AsyncSelect
+                      label="Product (for order)"
+                      type="product"
+                      value={product}
+                      onChange={readOnly ? undefined : setProduct}
+                      disabled={readOnly}
+                      icon={Package}
+                    />
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Beaker size={14} className="text-slate-500" />
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                          Recipe output
+                        </label>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="flex-1">
+                          <Input
+                            type="number"
+                            placeholder="Quantity"
+                            value={outQty}
+                            onChange={e => setOutQty(e.target.value)}
+                            disabled={readOnly}
+                            className="text-center"
+                          />
+                        </div>
+                        <div className="w-24">
+                          <Input
+                            placeholder="Unit"
+                            value={outUnit}
+                            onChange={e => setOutUnit(e.target.value)}
+                            disabled={readOnly}
+                            className="text-center"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <Separator />
+                <Separator />
 
-              {/* Components Section */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
-                    Components Used
-                  </h3>
-                  {rows.length > 0 && (
-                    <Badge variant="outline" className="text-xs">
-                      {rows.filter(r => r.item).length} component{rows.filter(r => r.item).length !== 1 ? 's' : ''}
-                    </Badge>
-                  )}
+                {/* Components Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
+                      Components Used
+                    </h3>
+                    {rows.length > 0 && (
+                      <Badge variant="outline" className="text-xs">
+                        {rows.filter(r => r.item).length} component{rows.filter(r => r.item).length !== 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    {rows.map((row, index) => (
+                      <ComponentRow
+                        key={index}
+                        row={row}
+                        index={index}
+                        onChange={updateRow}
+                        onRemove={remRow}
+                        readOnly={readOnly}
+                      />
+                    ))}
+
+                    {!readOnly && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={addRow}
+                        className="w-full border-dashed border-slate-300 dark:border-slate-600 hover:border-primary/50 hover:bg-primary/5"
+                      >
+                        <Plus size={16} className="mr-2" />
+                        Add component
+                      </Button>
+                    )}
+                  </div>
                 </div>
-
-                <div className="space-y-3">
-                  {rows.map((row, index) => (
-                    <ComponentRow
-                      key={index}
-                      row={row}
-                      index={index}
-                      onChange={updateRow}
-                      onRemove={remRow}
-                      readOnly={readOnly}
-                    />
-                  ))}
-
-                  {!readOnly && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={addRow}
-                      className="w-full border-dashed border-slate-300 dark:border-slate-600 hover:border-primary/50 hover:bg-primary/5"
-                    >
-                      <Plus size={16} className="mr-2" />
-                      Add component
-                    </Button>
-                  )}
-                </div>
               </div>
-            </div>
-          </ScrollArea>
+            </ScrollArea>
 
-          {/* Footer */}
-          {!readOnly && (
-            <div className="p-6 pt-4 border-t border-slate-200 dark:border-slate-700">
-              <Button 
-                className="w-full" 
-                disabled={saving} 
-                onClick={save}
-                size="lg"
-              >
-                {saving ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin mr-2" />
-                    Saving changes...
-                  </>
-                ) : (
-                  'Save changes'
-                )}
-              </Button>
+            {/* Footer */}
+            {!readOnly && (
+              <div className="p-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <Button 
+                  className="w-full" 
+                  disabled={saving} 
+                  onClick={save}
+                  size="lg"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin mr-2" />
+                      Saving changes...
+                    </>
+                  ) : (
+                    'Save changes'
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              Delete Batch
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this batch? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          {/* File details outside of AlertDialogDescription */}
+          <div className="space-y-3 px-6">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded border">
+              <div className="text-sm font-medium">{file.fileName}</div>
+              {file.runNumber && (
+                <div className="text-xs text-slate-600 dark:text-slate-400">Run {file.runNumber}</div>
+              )}
             </div>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+            <div className="text-sm text-slate-600 dark:text-slate-400">
+              The original file will remain unchanged. Only this batch copy will be deleted.
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteBatch}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin mr-2" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 size={16} className="mr-2" />
+                  Delete Batch
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

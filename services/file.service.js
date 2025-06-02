@@ -108,6 +108,41 @@ export async function getFileById(id, { includePdf = false } = {}) {
   return doc;
 }
 
+export async function searchFiles(query) {
+  await connectMongoDB();
+
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return [];
+  }
+
+  // Split the query into individual terms and filter out empty ones
+  const searchTerms = trimmedQuery.split(/\s+/).filter(term => term.length > 0);
+  
+  if (searchTerms.length === 0) {
+    return [];
+  }
+
+  // Create a MongoDB query that requires ALL terms to be found in the filename
+  // This allows "eco a1" to match "EcoPlate A1-A5-A9"
+  const searchConditions = searchTerms.map(term => ({
+    fileName: { 
+      $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), // Escape special regex chars
+      $options: 'i' // Case insensitive
+    }
+  }));
+
+  const files = await File.find({
+    $and: searchConditions // ALL terms must be found
+  })
+  .select('-pdf') // Don't include PDF data in search results
+  .sort({ fileName: 1 }) // Sort alphabetically
+  .limit(50) // Limit results to prevent overwhelming the UI
+  .lean();
+
+  return files;
+}
+
 /*───────────────────────────────────────────────────────────────────*/
 /* L: List all files (optionally scoped to a folder)               */
 /*───────────────────────────────────────────────────────────────────*/

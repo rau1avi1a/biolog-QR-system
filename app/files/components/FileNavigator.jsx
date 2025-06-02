@@ -5,6 +5,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   Clock,
+  XCircle,
   CircleDot,
   Loader2,
   Home,
@@ -107,22 +108,38 @@ function FileSearch({ onSearchResults }) {
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const run = async e => {
-    e.preventDefault();
-    if (!query.trim()) return;
-    setBusy(true);
-    try {
-      const { files } = await api.files();
-      onSearchResults(files.filter(f =>
-        f.fileName.toLowerCase().includes(query.toLowerCase())
-      ));
-    } finally {
-      setBusy(false);
+  // Real-time search as user types (with debouncing)
+  useEffect(() => {
+    const trimmedQuery = query.trim();
+    
+    if (!trimmedQuery) {
+      onSearchResults(null); // Clear search when query is empty
+      return;
     }
+
+    const timeoutId = setTimeout(async () => {
+      setBusy(true);
+      try {
+        const { files } = await api.searchFiles(trimmedQuery);
+        onSearchResults(files || []);
+      } catch (error) {
+        console.error('Search failed:', error);
+        onSearchResults([]);
+      } finally {
+        setBusy(false);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [query, onSearchResults]);
+
+  const clearSearch = () => {
+    setQuery('');
+    onSearchResults(null);
   };
 
   return (
-    <form onSubmit={run} className="relative">
+    <div className="relative">
       <div className="relative">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
@@ -131,18 +148,24 @@ function FileSearch({ onSearchResults }) {
           placeholder="Search files..."
           className="pl-10 pr-12 h-9 bg-white/80 dark:bg-slate-800/80 border-slate-200/60 dark:border-slate-700/60 focus:border-primary/60 transition-colors"
         />
-        <button
-          type="submit"
-          disabled={busy}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary transition-colors"
-        >
-          {busy
-            ? <Loader2 size={16} className="animate-spin"/>
-            : <Search size={16}/>
-          }
-        </button>
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+          {busy ? (
+            <Loader2 size={16} className="animate-spin"/>
+          ) : query ? (
+            <button
+              type="button"
+              onClick={clearSearch}
+              className="hover:text-primary transition-colors"
+              title="Clear search"
+            >
+              <XCircle size={16}/>
+            </button>
+          ) : (
+            <Search size={16}/>
+          )}
+        </div>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -653,7 +676,7 @@ function FoldersPane({
   root, files, currentFolder, setCurrentFolder,
   createFolder, updateFolder, deleteFolder,
   openFile, handleFiles, uploading, refreshTrigger,
-  onFolderUpload, setSearch
+  onFolderUpload, setSearch, search
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
@@ -730,67 +753,107 @@ function FoldersPane({
         <CardContent className="p-4">
           {/* Header with title and actions */}
           <div className="flex justify-between items-center mb-4">
-            <h3 className="font-semibold text-slate-900 dark:text-slate-100">Folders & Files</h3>
+            <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+              {search ? 'Search Results' : 'Folders & Files'}
+            </h3>
             <div className="flex gap-2">
-              <UnifiedUploadButton 
-                onFilesUpload={handleFiles}
-                onFolderUpload={onFolderUpload}
-              />
-              <CreateFolderDialog onCreateFolder={createFolder} parentFolder={currentFolder}/>
+              {search && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setSearch(null)}
+                  className="bg-white/60 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-700/60"
+                >
+                  Clear Search
+                </Button>
+              )}
+              {!search && (
+                <>
+                  <UnifiedUploadButton 
+                    onFilesUpload={handleFiles}
+                    onFolderUpload={onFolderUpload}
+                  />
+                  <CreateFolderDialog onCreateFolder={createFolder} parentFolder={currentFolder}/>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Compact breadcrumb */}
-          {currentFolder && (
+          {/* Search bar - ALWAYS VISIBLE */}
+          <div className="mb-4">
+            <FileSearch onSearchResults={setSearch}/>
+          </div>
+
+          {/* Compact breadcrumb - only show when not searching and in a folder */}
+          {!search && currentFolder && (
             <div className="mb-3 p-2 bg-slate-50/60 dark:bg-slate-800/60 rounded border border-slate-200/60 dark:border-slate-700/60">
               <CompactBreadcrumb folder={currentFolder} onNavigate={setCurrentFolder}/>
             </div>
           )}
-
-          {/* Search bar - only show in folders view */}
-          <div className="mb-4">
-            <FileSearch onSearchResults={setSearch}/>
-          </div>
           
           <ScrollArea className="h-[calc(100vh-420px)]">
             <div className="space-y-1 pr-2">
-              {root.map(folder => (
-                <FolderNode
-                  key={folder._id}
-                  node={folder}
-                  currentFolder={currentFolder}
-                  onSelect={setCurrentFolder}
-                  onFileSelect={openFile}
-                  onFolderUpdate={updateFolder}
-                  onFolderDelete={deleteFolder}
-                  refreshTrigger={refreshTrigger}
-                />
-              ))}
-
-              {!currentFolder && files.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-700/60">
-                  <h4 className="font-medium text-sm mb-3 pl-2 text-slate-600 dark:text-slate-400">Root Files</h4>
-                  <div className="space-y-1">
-                    {files.map(f => (
-                      <FileItem
-                        key={f._id}
-                        file={f}
-                        onSelect={openFile}
-                      />
-                    ))}
+              {search ? (
+                // SEARCH RESULTS VIEW
+                search.length > 0 ? (
+                  search.map(f => (
+                    <FileItem
+                      key={f._id}
+                      file={f}
+                      onSelect={openFile}
+                    />
+                  ))
+                ) : (
+                  <div className="text-center p-8 text-slate-500 dark:text-slate-400">
+                    <div className="p-3 rounded-full bg-slate-100 dark:bg-slate-800 w-12 h-12 flex items-center justify-center mx-auto mb-3">
+                      <Search size={20} className="opacity-50" />
+                    </div>
+                    <p className="font-medium">No files found</p>
+                    <p className="text-xs mt-1">Try a different search term</p>
                   </div>
-                </div>
-              )}
+                )
+              ) : (
+                // NORMAL FOLDER VIEW
+                <>
+                  {root.map(folder => (
+                    <FolderNode
+                      key={folder._id}
+                      node={folder}
+                      currentFolder={currentFolder}
+                      onSelect={setCurrentFolder}
+                      onFileSelect={openFile}
+                      onFolderUpdate={updateFolder}
+                      onFolderDelete={deleteFolder}
+                      refreshTrigger={refreshTrigger}
+                    />
+                  ))}
 
-              {root.length === 0 && files.length === 0 && (
-                <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-                  <div className="p-4 rounded-full bg-slate-100 dark:bg-slate-800 w-16 h-16 flex items-center justify-center mx-auto mb-4">
-                    <UploadCloud size={24} className="opacity-50" />
-                  </div>
-                  <p className="font-medium mb-2">No folders or files yet</p>
-                  <p className="text-sm mb-3">Create a folder or upload files to get started</p>
-                  <p className="text-xs text-slate-400">💡 Tip: You can drag & drop PDF files here</p>
-                </div>
+                  {!currentFolder && files.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-700/60">
+                      <h4 className="font-medium text-sm mb-3 pl-2 text-slate-600 dark:text-slate-400">Root Files</h4>
+                      <div className="space-y-1">
+                        {files.map(f => (
+                          <FileItem
+                            key={f._id}
+                            file={f}
+                            onSelect={openFile}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {root.length === 0 && files.length === 0 && (
+                    <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                      <div className="p-4 rounded-full bg-slate-100 dark:bg-slate-800 w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                        <UploadCloud size={24} className="opacity-50" />
+                      </div>
+                      <p className="font-medium mb-2">No folders or files yet</p>
+                      <p className="text-sm mb-3">Create a folder or upload files to get started</p>
+                      <p className="text-xs text-slate-400">💡 Tip: You can drag & drop PDF files here</p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </ScrollArea>
@@ -1187,69 +1250,38 @@ export default function FileNavigator({
 
       {/* Enhanced BODY */}
       <div className="flex-1 overflow-hidden px-4 pb-4">
-        {search ? (
-          <Card className="border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/50 backdrop-blur">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-slate-900 dark:text-slate-100">Search Results</h3>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => setSearch(null)}
-                  className="text-slate-500 hover:text-slate-700"
-                >
-                  Clear
-                </Button>
-              </div>
-              <ScrollArea className="h-[calc(100vh-380px)]">
-                <div className="space-y-2 pr-2">
-                  {search.length > 0 ? (
-                    search.map(f => (
-                      <FileItem key={f._id} file={f} onSelect={openAndClose} />
-                    ))
-                  ) : (
-                    <div className="text-center p-8 text-slate-500 dark:text-slate-400">
-                      <div className="p-3 rounded-full bg-slate-100 dark:bg-slate-800 w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                        <Search size={20} className="opacity-50" />
-                      </div>
-                      <p className="font-medium">No files found</p>
-                      <p className="text-xs mt-1">Try a different search term</p>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        ) : view === 'folders' ? (
-          <FoldersPane
-            root={root}
-            files={files}
-            currentFolder={currentFolder}
-            setCurrentFolder={setCurrentFolder}
-            createFolder={createFolder}
-            updateFolder={updateFolder}
-            deleteFolder={deleteFolder}
-            openFile={openAndClose}
-            handleFiles={handleFiles}
-            uploading={uploading}
-            refreshTrigger={refreshTrigger}
-            onFolderUpload={onFolderUpload}
-            setSearch={setSearch}
-          />
-        ) : view === 'status' ? (
-          <StatusTabs
-            openFile={openFile}
-            refreshTrigger={refreshTrigger}
-            closeDrawer={closeDrawer}
-          />
-        ) : (
-          <ArchiveList
-            openFile={openFile}
-            refreshTrigger={refreshTrigger}
-            closeDrawer={closeDrawer}
-          />
-        )}
-      </div>
+  {view === 'folders' ? (
+    <FoldersPane
+      root={root}
+      files={files}
+      currentFolder={currentFolder}
+      setCurrentFolder={setCurrentFolder}
+      createFolder={createFolder}
+      updateFolder={updateFolder}
+      deleteFolder={deleteFolder}
+      openFile={openAndClose}
+      handleFiles={handleFiles}
+      uploading={uploading}
+      refreshTrigger={refreshTrigger}
+      onFolderUpload={onFolderUpload}
+      setSearch={setSearch}
+      search={search} // Pass the current search state
+    />
+  ) : view === 'status' ? (
+    <StatusTabs
+      openFile={openFile}
+      refreshTrigger={refreshTrigger}
+      closeDrawer={closeDrawer}
+    />
+  ) : (
+    <ArchiveList
+      openFile={openFile}
+      refreshTrigger={refreshTrigger}
+      closeDrawer={closeDrawer}
+    />
+  )}
+</div>
+
     </div>
   );
 }
