@@ -1,4 +1,4 @@
-// app/api/upload/route.js
+// app/api/upload/route.js - Simplified for NetSuite format only
 import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
 import connectMongoDB from '@/lib/index';
@@ -13,173 +13,175 @@ const readFile = async (file) => {
 };
 
 /**
- * Original chemical lot-string parsing logic (unchanged)
+ * Parse NetSuite CSV format
+ * Columns: Name, Display Name, Type, Internal ID, Number, On Hand
+ * One row = one lot for one item
  */
-function parseLots(lotString) {
-  if (!lotString) return [];
-  return lotString.split(',').flatMap(part => {
-    const trimmed = part.trim();
-    if (!trimmed) return [];
-    // Handle different lot string formats
-    // Format 1: LOT123(10.5)
-    let match = trimmed.match(/([A-Za-z0-9-]+)\(([^)]+)\)/);
-    if (match) {
-      const qty = parseFloat(match[2]);
-      return isNaN(qty) ? [] : [{ lotNumber: match[1].trim(), quantity: qty }];
-    }
-    // Format 2: LOT123:10.5
-    match = trimmed.match(/([A-Za-z0-9-]+):([0-9.]+)/);
-    if (match) {
-      const qty = parseFloat(match[2]);
-      return isNaN(qty) ? [] : [{ lotNumber: match[1].trim(), quantity: qty }];
-    }
-    // Format 3: Just lot number (assume quantity 1)
-    if (/^[A-Za-z0-9-]+$/.test(trimmed)) {
-      return [{ lotNumber: trimmed, quantity: 1 }];
-    }
-    console.warn(`Could not parse lot string: "${trimmed}"`);
-    return [];
-  });
-}
-
-/**
- * Parse CSV for chemical items, preserving original logic
- * Expects header row matching /^Item\s*,/ and columns: sku, displayName, lotString
- */
-function parseCSVToChemicals(csv) {
-  console.log('Parsing CSV for chemicals...');
-  const lines = csv.split(/\r?\n/).filter(Boolean);
-  const hdr = lines.findIndex(l => /^Item\s*,/i.test(l));
-  if (hdr < 0) throw new Error('CSV header row not found');
-  const data = lines.slice(hdr + 1).join('\n');
-  const records = parse(data, {
-    columns: ['sku','displayName','lotString'],
-    skip_empty_lines: true,
-    trim: true
-  });
-  const items = records.map(r => ({
-    sku: r.sku?.trim()?.toUpperCase(),
-    displayName: r.displayName?.trim(),
-    lots: parseLots(r.lotString)
-  })).filter(item => item.sku && item.displayName);
-  console.log(`Parsed ${items.length} chemical items from CSV`);
-  return items;
-}
-
-/**
- * Parse CSV for solutions/products (flat four-column format)
- * Columns: sku, displayName, lotNumber, quantity
- */
-function parseCSVToInventory(csv) {
-  console.log('Parsing CSV for inventory (solutions/products)...');
+function parseNetSuiteCSV(csv) {
+  console.log('Parsing NetSuite CSV...');
+  
   const records = parse(csv, {
-    columns: ['sku','displayName','lotNumber','quantity'],
+    columns: true, // Use first row as headers
     skip_empty_lines: true,
     trim: true
   });
-  const map = new Map();
-  for (const r of records) {
-    const sku = r.sku?.trim()?.toUpperCase();
-    const displayName = r.displayName?.trim();
-    const lotNum = r.lotNumber?.trim();
-    const qty = parseFloat(r.quantity);
-    if (!sku || !displayName || !lotNum || isNaN(qty)) continue;
-    if (!map.has(sku)) {
-      map.set(sku, { sku, displayName, lots: [] });
+  
+  const itemsMap = new Map();
+  
+  for (const record of records) {
+    const sku = record.Name?.trim()?.toUpperCase();
+    const displayName = record['Display Name']?.trim();
+    const type = record.Type?.trim();
+    const netsuiteInternalId = record['Internal ID']?.trim();
+    const lotNumber = record.Number?.trim();
+    const onHand = parseFloat(record['On Hand']) || 0;
+    
+    if (!sku || !netsuiteInternalId) {
+      console.warn(`Skipping row - missing SKU or Internal ID:`, record);
+      continue;
     }
-    map.get(sku).lots.push({ lotNumber: lotNum, quantity: qty });
+    
+    // Initialize item if we haven't seen it yet
+    if (!itemsMap.has(sku)) {
+      itemsMap.set(sku, {
+        sku,
+        displayName,
+        type,
+        netsuiteInternalId,
+        lots: []
+      });
+    }
+    
+    // Only add lots with non-zero quantities (but still create the item)
+    if (lotNumber && onHand > 0) {
+      itemsMap.get(sku).lots.push({
+        lotNumber,
+        quantity: onHand
+      });
+      console.log(`  Added lot ${lotNumber}: ${onHand} for ${sku}`);
+    } else if (lotNumber && onHand === 0) {
+      console.log(`  Skipped zero-quantity lot ${lotNumber} for ${sku}`);
+    }
   }
-  const items = Array.from(map.values());
-  console.log(`Parsed ${items.length} inventory items from CSV`);
+  
+  const items = Array.from(itemsMap.values());
+  console.log(`Parsed ${items.length} items from NetSuite CSV`);
   return items;
+}
+
+/**
+ * Determine item type from NetSuite Type field
+ */
+function determineItemType(netsuiteType) {
+  if (!netsuiteType) return 'chemical'; // default
+  
+  const type = netsuiteType.toLowerCase();
+  if (type.includes('solution')) return 'solution';
+  if (type.includes('product')) return 'product';
+  return 'chemical'; // default
 }
 
 export async function POST(req) {
   try {
     const url = new URL(req.url);
-    const type = url.searchParams.get('type') || 'chemical';
-    console.log(`Upload type: ${type}`);
+    const type = url.searchParams.get('type') || 'chemical'; // This comes from the upload button
+    
+    console.log(`Processing NetSuite CSV upload, target type: ${type}`);
+    
     const form = await req.formData();
     const file = form.get('file');
     if (!file) {
       return NextResponse.json({ error: 'No CSV file provided' }, { status: 400 });
     }
+    
     console.log('Processing uploaded file:', file.name);
     const text = await readFile(file);
-    const items = type === 'chemical'
-      ? parseCSVToChemicals(text)
-      : parseCSVToInventory(text);
+    
+    const items = parseNetSuiteCSV(text);
+    
     if (!items.length) {
       return NextResponse.json({ error: 'No valid rows found in CSV' }, { status: 400 });
     }
+    
     await connectMongoDB();
-    const Model = type === 'chemical'
-      ? Chemical
-      : type === 'solution'
-        ? Solution
-        : Product;
+    
     let created = 0, updated = 0, errors = [];
-    for (const { sku, displayName, lots } of items) {
-      console.log(`Processing SKU ${sku}: ${displayName}, ${lots.length} lots`);
+    
+    for (const itemData of items) {
+      const { sku, displayName, type: csvType, netsuiteInternalId, lots } = itemData;
+      
+      console.log(`Processing ${sku}: ${displayName} (${lots.length} lots)`);
+      
       try {
         let doc = await Item.findOne({ sku });
+        
         if (!doc) {
-          console.log(`Creating new ${type}: ${sku}`);
-          const total = lots.reduce((sum, l) => sum + (l.quantity || 0), 0);
-          doc = await Model.create({
+          // Create new item
+          console.log(`Creating new item: ${sku} as ${type}`);
+          
+          // Use the type from the URL parameter (from the tab you're on)
+          const itemType = type; // Use the type from the upload button, not CSV
+          const Model = itemType === 'chemical' ? Chemical : 
+                       itemType === 'solution' ? Solution : Product;
+          
+          const totalQty = lots.reduce((sum, l) => sum + (l.quantity || 0), 0);
+          
+          const docData = {
             sku,
             displayName,
-            itemType: type,
-            lotTracked: true,
-            qtyOnHand: total,
+            itemType,
+            netsuiteInternalId,
+            lotTracked: lots.length > 0,
+            qtyOnHand: totalQty,
             Lots: lots
-          });
+          };
+          
+          doc = await Model.create(docData);
           created++;
-          console.log(`✓ Created ${sku} with total qty ${doc.qtyOnHand}`);
+          console.log(`✓ Created ${sku} with ${lots.length} lots, total qty: ${totalQty}`);
+          
         } else {
-          if (doc.itemType !== type) {
-            console.warn(`Skipping ${sku} - type mismatch (${doc.itemType})`);
-            continue;
-          }
-          console.log(`Updating existing ${type}: ${sku}`);
+          // Update existing item
+          console.log(`Updating existing item: ${sku}`);
+          
           doc.displayName = displayName;
-          doc.lotTracked = true;
-          if (!Array.isArray(doc.Lots)) doc.Lots = [];
-          for (const newLot of lots) {
-            const idx = doc.Lots.findIndex(l => l.lotNumber === newLot.lotNumber);
-            if (idx >= 0) {
-              doc.Lots[idx].quantity = newLot.quantity;
-              console.log(`  Updated lot ${newLot.lotNumber} to ${newLot.quantity}`);
-            } else {
-              doc.Lots.push(newLot);
-              console.log(`  Added lot ${newLot.lotNumber}: ${newLot.quantity}`);
-            }
-          }
-          doc.qtyOnHand = doc.Lots.reduce((sum, l) => sum + (l.quantity || 0), 0);
+          doc.netsuiteInternalId = netsuiteInternalId;
+          doc.lotTracked = lots.length > 0;
+          
+          // Replace lots entirely with new data from CSV
+          doc.Lots = lots;
+          doc.qtyOnHand = lots.reduce((sum, l) => sum + (l.quantity || 0), 0);
+          
           await doc.save();
           updated++;
-          console.log(`✓ Updated ${sku} - new total qty ${doc.qtyOnHand}`);
+          console.log(`✓ Updated ${sku} with ${lots.length} lots, total qty: ${doc.qtyOnHand}`);
         }
-        // Optional verification log
-        const saved = await Model.findOne({ sku }).lean();
-        console.log(`Verification ${sku}:`, saved.Lots.map(l => `${l.lotNumber}(${l.quantity})`).join(', '));
+        
       } catch (e) {
         console.error(`Error processing ${sku}:`, e);
         errors.push(`${sku}: ${e.message}`);
       }
     }
+    
     const response = {
       message: `Upload complete: ${created} created, ${updated} updated.`,
       created,
       updated,
-      total: items.length
+      total: items.length,
+      details: {
+        itemsProcessed: items.length,
+        totalLots: items.reduce((sum, item) => sum + item.lots.length, 0)
+      }
     };
+    
     if (errors.length) {
       response.errors = errors;
       response.message += ` ${errors.length} errors occurred.`;
     }
+    
     console.log('Upload result:', response);
     return NextResponse.json(response);
+    
   } catch (err) {
     console.error('Upload error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
