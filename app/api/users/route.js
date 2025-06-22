@@ -3,10 +3,16 @@ import connectMongoDB from "@lib/index.js";
 import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
-// Create a new user
+// Create a new user with optional NetSuite credentials
 export async function POST(request) {
     try {
-        const { name, email, password, role } = await request.json();
+        const { 
+            name, 
+            email, 
+            password, 
+            role,
+            netsuiteCredentials 
+        } = await request.json();
 
         if (!name || !email || !password) {
             return NextResponse.json({ message: "Missing required fields" }, { status: 400 });
@@ -19,7 +25,41 @@ export async function POST(request) {
             return NextResponse.json({ message: "User with this email already exists" }, { status: 400 });
         }
 
-        const newUser = await User.create({ name, email, password, role: role || "user" });
+        const newUser = await User.create({ 
+            name, 
+            email, 
+            password, 
+            role: role || "operator" 
+        });
+
+        // Set up NetSuite credentials if provided
+        if (netsuiteCredentials) {
+            if (netsuiteCredentials.useEnvVars) {
+                // Use environment variables
+                newUser.setNetSuiteCredentials({
+                    accountId: process.env.NETSUITE_ACCOUNT_ID,
+                    consumerKey: process.env.NETSUITE_CONSUMER_KEY,
+                    consumerSecret: process.env.NETSUITE_CONSUMER_SECRET,
+                    tokenId: process.env.NETSUITE_TOKEN_ID,
+                    tokenSecret: process.env.NETSUITE_TOKEN_SECRET
+                });
+            } else {
+                // Use provided credentials
+                const { accountId, consumerKey, consumerSecret, tokenId, tokenSecret } = netsuiteCredentials;
+                
+                if (accountId && consumerKey && consumerSecret && tokenId && tokenSecret) {
+                    newUser.setNetSuiteCredentials({
+                        accountId,
+                        consumerKey,
+                        consumerSecret,
+                        tokenId,
+                        tokenSecret
+                    });
+                }
+            }
+            
+            await newUser.save();
+        }
 
         // Exclude sensitive data (password) in the response
         const responseUser = {
@@ -28,10 +68,12 @@ export async function POST(request) {
             email: newUser.email,
             role: newUser.role,
             createdAt: newUser.createdAt,
+            netsuiteConfigured: newUser.hasNetSuiteAccess()
         };
 
-        return NextResponse.json(responseUser, { message: "User created successfully" }, { status: 201 });
+        return NextResponse.json(responseUser, { status: 201 });
     } catch (error) {
+        console.error('User creation error:', error);
         return NextResponse.json({ message: "Error creating user", error: error.message }, { status: 500 });
     }
 }
@@ -50,6 +92,7 @@ export async function GET() {
             email: user.email,
             role: user.role,
             createdAt: user.createdAt,
+            netsuiteConfigured: user.hasNetSuiteAccess()
         }));
 
         return NextResponse.json(formattedUsers);
