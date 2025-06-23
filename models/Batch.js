@@ -1,4 +1,4 @@
-// models/Batch.js
+// models/Batch.js - Updated with NetSuite Work Order support
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
@@ -32,6 +32,20 @@ const snapshotSchema = new Schema({
   components  : [ componentSchema ]
 }, { _id: false });
 
+// ─── NetSuite work order data sub-schema ───────────────
+const netsuiteWorkOrderSchema = new Schema({
+  workOrderId  : String,        // NetSuite internal work order ID
+  tranId       : String,        // NetSuite transaction ID (user-friendly)
+  bomId        : String,        // NetSuite BOM ID
+  revisionId   : String,        // NetSuite BOM revision ID
+  quantity     : Number,        // Quantity from work order
+  status       : String,        // NetSuite work order status
+  createdAt    : Date,          // When work order was created
+  completedAt  : Date,          // When work order was completed
+  cancelledAt  : Date,          // When work order was cancelled (if applicable)
+  lastSyncAt   : Date           // Last time we synced with NetSuite
+}, { _id: false });
+
 // ─── main Batch schema ─────────────────────────────────
 const batchSchema = new Schema({
   fileId   : { type: Schema.Types.ObjectId, ref: 'File', required: true, index: true },
@@ -51,20 +65,33 @@ const batchSchema = new Schema({
   archivedAt : Date,
   folderPath : String,
 
-  workOrderId        : String,
+  // ─── Enhanced Work Order fields ───────────────────
+  workOrderId        : String,  // This can be NetSuite tranId or local ID
   workOrderCreated   : { type: Boolean, default: false },
+  workOrderStatus    : String,  // 'in_progress', 'completed', 'cancelled'
+  workOrderCreatedAt : Date,
+  
+  // ─── NetSuite-specific work order data ────────────
+  netsuiteWorkOrderData: netsuiteWorkOrderSchema,
+
+  // ─── Chemical transaction fields ──────────────────
   chemicalsTransacted: { type: Boolean, default: false },
   transactionDate    : Date,
 
+  // ─── Solution creation fields ─────────────────────
   solutionCreated    : { type: Boolean, default: false },
   solutionLotNumber  : String,
+  solutionQuantity   : Number,  // Actual quantity produced
+  solutionUnit       : String,  // Unit of measurement
   solutionCreatedDate: Date,
 
+  // ─── Rejection handling ───────────────────────────
   wasRejected    : { type: Boolean, default: false },
   rejectionReason: String,
   rejectedBy     : String,
   rejectedAt     : Date,
 
+  // ─── Confirmed components (from UI) ───────────────
   confirmedComponents: [{
     itemId       : { type: Schema.Types.ObjectId, ref: 'Item' },
     plannedAmount: Number,
@@ -82,7 +109,6 @@ const batchSchema = new Schema({
   signedBy    : String,
   signedAt    : Date,
 
-  workOrderCreatedAt   : Date,
   submittedForReviewAt : Date,
   completedAt          : Date
 }, { timestamps: true });
@@ -98,5 +124,47 @@ batchSchema.pre('validate', async function(next) {
   this.runNumber = last ? last.runNumber + 1 : 1;
   next();
 });
+
+// ─── Instance methods for NetSuite work order management ───
+batchSchema.methods.hasNetSuiteWorkOrder = function() {
+  return this.netsuiteWorkOrderData && this.netsuiteWorkOrderData.workOrderId;
+};
+
+batchSchema.methods.isWorkOrderCompleted = function() {
+  return this.workOrderStatus === 'completed' || 
+         (this.netsuiteWorkOrderData && this.netsuiteWorkOrderData.status === 'built');
+};
+
+batchSchema.methods.getWorkOrderDisplayId = function() {
+  if (this.netsuiteWorkOrderData && this.netsuiteWorkOrderData.tranId) {
+    return this.netsuiteWorkOrderData.tranId;
+  }
+  return this.workOrderId || 'No Work Order';
+};
+
+// ─── Static methods for NetSuite work order queries ───
+batchSchema.statics.findByNetSuiteWorkOrder = function(workOrderId) {
+  return this.find({
+    $or: [
+      { 'netsuiteWorkOrderData.workOrderId': workOrderId },
+      { 'netsuiteWorkOrderData.tranId': workOrderId },
+      { workOrderId: workOrderId }
+    ]
+  });
+};
+
+batchSchema.statics.findPendingWorkOrders = function() {
+  return this.find({
+    workOrderCreated: true,
+    status: { $in: ['In Progress', 'Review'] },
+    workOrderStatus: { $ne: 'completed' }
+  });
+};
+
+// ─── Indexes for NetSuite work order queries ───
+batchSchema.index({ 'netsuiteWorkOrderData.workOrderId': 1 });
+batchSchema.index({ 'netsuiteWorkOrderData.tranId': 1 });
+batchSchema.index({ workOrderId: 1 });
+batchSchema.index({ workOrderStatus: 1 });
 
 export default mongoose.models.Batch || mongoose.model('Batch', batchSchema);
