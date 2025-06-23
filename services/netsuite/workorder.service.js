@@ -1,33 +1,103 @@
-// services/netsuite/workorder.service.js - NetSuite Work Order Management
+// services/netsuite/workorder.service.js - Enhanced to capture tranId from Location header
 import { createNetSuiteAuth } from './auth.service.js';
 import { createBOMService } from './bom.service.js';
-import { Item } from '@/models/Item'; // Assuming you have an Item model for MongoDB
+import { Item } from '@/models/Item';
 
 /**
  * NetSuite Work Order Service
- * Handles creating and managing work orders in NetSuite
+ * Enhanced to handle Location header and fetch tranId
  */
 export class NetSuiteWorkOrderService {
   constructor(user) {
     this.auth = createNetSuiteAuth(user);
     this.bomService = createBOMService(user);
     
-    // Default NetSuite settings - update these based on your setup
-    this.defaultLocation = { id: "6" };      // Your production location
-    this.defaultSubsidiary = { id: "2" };    // Your subsidiary
-    this.defaultDepartment = { id: "3" }; // Your department (if applicable)
+    // Default NetSuite settings
+    this.defaultLocation = { id: "6" };
+    this.defaultSubsidiary = { id: "2" };
+    this.defaultDepartment = { id: "3" };
   }
 
   /**
-   * Create a Work Order in NetSuite
-   * @param {Object} params - Work order parameters
-   * @param {string} params.assemblyItemId - NetSuite assembly item ID
-   * @param {number} params.quantity - Quantity to produce
-   * @param {string} params.startDate - Start date (YYYY-MM-DD format)
-   * @param {string} params.endDate - End date (optional)
-   * @param {Object} params.location - Location override (optional)
-   * @param {Object} params.subsidiary - Subsidiary override (optional)
-   * @returns {Object} Created work order data
+   * Enhanced makeRequest method to handle Location header
+   */
+  async makeRequestWithLocation(endpoint, method = 'GET', body = null) {
+    const url = `${this.auth.baseUrl}${endpoint}`;
+    
+    console.log('Making request to:', url);
+    console.log('Method:', method);
+    
+    const requestData = { url, method };
+    const oauthData = this.auth.oauth.authorize(requestData, this.auth.token);
+    
+    // Add realm parameter for NetSuite
+    const authHeader = this.auth.oauth.toHeader(oauthData);
+    authHeader.Authorization = authHeader.Authorization.replace(
+      'OAuth ',
+      `OAuth realm="${this.auth.credentials.accountId}", `
+    );
+    
+    const headers = {
+      ...authHeader,
+      'Content-Type': 'application/json',
+    };
+    
+    const options = { method, headers };
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    try {
+      const response = await fetch(url, options);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Response status:', response.status);
+        console.error('Response text:', errorText);
+        throw new Error(`NetSuite API Error: ${response.status} - ${errorText}`);
+      }
+
+      // For POST requests, NetSuite often returns location header instead of body
+      const locationHeader = response.headers.get('location');
+      let responseData = null;
+      
+      try {
+        responseData = await response.json();
+      } catch (e) {
+        // No JSON body, which is normal for some NetSuite POST operations
+        console.log('No JSON response body, checking location header');
+      }
+
+      return {
+        data: responseData,
+        location: locationHeader,
+        status: response.status,
+        headers: response.headers
+      };
+    } catch (error) {
+      console.error('NetSuite API Error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Extract work order ID from location header
+   */
+  extractWorkOrderIdFromLocation(locationHeader) {
+    if (!locationHeader) return null;
+    
+    console.log('Extracting work order ID from location:', locationHeader);
+    
+    // Extract ID from URL - handle both cases: workOrder and workorder
+    const matches = locationHeader.match(/\/workorder\/(\d+)$/i);
+    const workOrderId = matches ? matches[1] : null;
+    
+    console.log('Extracted work order ID:', workOrderId);
+    return workOrderId;
+  }
+
+  /**
+   * Create a Work Order in NetSuite with enhanced response handling
    */
   async createWorkOrder({
     assemblyItemId,
@@ -70,27 +140,54 @@ export class NetSuiteWorkOrderService {
       
       console.log('Work order payload:', JSON.stringify(workOrderPayload, null, 2));
       
-      // Step 3: Create the work order in NetSuite
-      const response = await this.auth.makeRequest('/workOrder', 'POST', workOrderPayload);
+      // Step 3: Create the work order in NetSuite using enhanced method
+      const createResponse = await this.makeRequestWithLocation('/workOrder', 'POST', workOrderPayload);
       
-      console.log('Work order created successfully:', response);
+      console.log('Work order creation response:', {
+        status: createResponse.status,
+        location: createResponse.location,
+        hasData: !!createResponse.data
+      });
       
-      // Return formatted response
+      // Step 4: Extract work order ID from location header
+      const workOrderId = this.extractWorkOrderIdFromLocation(createResponse.location);
+      if (!workOrderId) {
+        console.error('Failed to extract work order ID:', {
+          location: createResponse.location,
+          status: createResponse.status,
+          hasLocation: !!createResponse.location
+        });
+        throw new Error(`Could not extract work order ID from location: ${createResponse.location}`);
+      }
+      
+      console.log('Extracted work order ID:', workOrderId);
+      
+      // Step 5: Fetch full work order details to get tranId
+      const workOrderDetails = await this.auth.makeRequest(`/workOrder/${workOrderId}`);
+      
+      console.log('Work order details fetched:', {
+        id: workOrderDetails.id,
+        tranId: workOrderDetails.tranId,
+        status: workOrderDetails.status
+      });
+      
+      // Return formatted response with all the details you need
       return {
         success: true,
         workOrder: {
-          id: response.id,
-          tranId: response.tranId,
+          id: workOrderDetails.id,
+          tranId: workOrderDetails.tranId, // This is what you want to store
           assemblyItemId: assemblyItemId,
           quantity: quantity,
-          status: response.status,
+          status: workOrderDetails.status?.refName || workOrderDetails.status?.id,
           startDate: workOrderPayload.startDate,
           endDate: workOrderPayload.endDate,
           bomId: bomData.bomId,
           revisionId: bomData.revisionId,
           location: workOrderPayload.location,
           subsidiary: workOrderPayload.subsidiary,
-          netsuiteResponse: response
+          orderStatus: workOrderDetails.orderStatus?.refName,
+          netsuiteResponse: workOrderDetails
         },
         bomData: bomData
       };
@@ -103,13 +200,10 @@ export class NetSuiteWorkOrderService {
 
   /**
    * Create work order from a batch (your main use case)
-   * @param {Object} batch - Batch data from your MongoDB
-   * @param {number} quantity - Quantity to produce
-   * @param {Object} options - Additional options
    */
   async createWorkOrderFromBatch(batch, quantity, options = {}) {
     try {
-      // Resolve the solution item (populated or lookup)
+      // Resolve the solution item
       let solutionItem;
       if (
         batch.snapshot?.solutionRef &&

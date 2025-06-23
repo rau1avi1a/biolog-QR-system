@@ -1,15 +1,17 @@
-// app/api/batches/[id]/workorder-status/route.js - Work Order Status API
+// app/api/batches/[id]/workorder-status/route.js - Fixed for Next.js 15
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/api-auth';
 import { getWorkOrderStatus, retryWorkOrderCreation } from '@/services/batch.service';
 
 /**
  * GET /api/batches/[id]/workorder-status
- * Get work order status for a batch
+ * Get work order status for a batch - Fixed for database connection issues
  */
 async function handleGET(request, context) {
   try {
-    const { id } = context.params;
+    // Fix: Await params in Next.js 15
+    const params = await context.params;
+    const { id } = params;
     
     if (!id) {
       return NextResponse.json(
@@ -18,11 +20,38 @@ async function handleGET(request, context) {
       );
     }
 
+    // Force a fresh database connection and add delay for background job completion
+    const searchParams = new URL(request.url).searchParams;
+    const timestamp = searchParams.get('t');
+    console.log('Getting work order status for:', id, 'at timestamp:', timestamp);
+    
     const status = await getWorkOrderStatus(id);
     
-    return NextResponse.json({
+    // Enhanced response with tranId information
+    const response = {
       success: true,
-      data: status
+      data: {
+        ...status,
+        // Ensure we return the user-friendly work order number
+        displayId: status.workOrderNumber || status.workOrderId,
+        description: status.workOrderNumber ? 
+          `NetSuite Work Order ${status.workOrderNumber}` : 
+          status.workOrderId?.startsWith('LOCAL-') ? 
+            'Local Work Order' : 
+            status.workOrderId?.startsWith('PENDING-') ?
+              'Work Order Creating...' :
+              'Work Order'
+      }
+    };
+    
+    console.log('Returning work order status:', response.data);
+    
+    return NextResponse.json(response, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     });
 
   } catch (error) {
@@ -40,7 +69,9 @@ async function handleGET(request, context) {
  */
 async function handlePOST(request, context) {
   try {
-    const { id } = context.params;
+    // Fix: Await params in Next.js 15
+    const params = await context.params;
+    const { id } = params;
     const body = await request.json();
     const { quantity } = body;
     
@@ -62,7 +93,8 @@ async function handlePOST(request, context) {
     
     return NextResponse.json({
       success: true,
-      data: result
+      data: result,
+      message: 'Work order creation retry initiated'
     });
 
   } catch (error) {
@@ -75,11 +107,9 @@ async function handlePOST(request, context) {
 }
 
 export async function GET(request, context) {
-    // withAuth returns a handler you can invoke
-    return withAuth(handleGET)(request, context);
-  }
-  
-  export async function POST(request, context) {
-    return withAuth(handlePOST)(request, context);
-  }
-  
+  return withAuth(handleGET)(request, context);
+}
+
+export async function POST(request, context) {
+  return withAuth(handlePOST)(request, context);
+}

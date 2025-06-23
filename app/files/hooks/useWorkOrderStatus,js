@@ -1,0 +1,172 @@
+// hooks/useWorkOrderStatus.js - Enhanced polling hook for real-time updates
+import { useState, useEffect, useRef } from 'react';
+
+/**
+ * Custom hook for polling work order status with smart polling intervals
+ * Automatically polls when work order is in 'creating' status
+ */
+export function useWorkOrderStatus(batchId, enabled = true) {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const intervalRef = useRef(null);
+  const mountedRef = useRef(true);
+  const pollCountRef = useRef(0);
+
+  // Check work order status
+  const checkStatus = async () => {
+    if (!batchId || !enabled) return;
+
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/batches/${batchId}/workorder-status`);
+      const data = await response.json();
+
+      if (!mountedRef.current) return;
+
+      if (data.success) {
+        setStatus(data.data);
+        setError(null);
+        
+        // Reset poll count when we get a successful response
+        pollCountRef.current = 0;
+        
+        // If work order is now created, stop polling
+        if (data.data.status === 'created' || data.data.status === 'failed') {
+          console.log('Work order status resolved, stopping polling');
+          stopPolling();
+        }
+      } else {
+        setError(data.error || 'Failed to fetch status');
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err.message);
+        pollCountRef.current++;
+        
+        // Stop polling after too many failures
+        if (pollCountRef.current > 10) {
+          console.log('Too many polling failures, stopping');
+          stopPolling();
+        }
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Smart polling with adaptive intervals
+  const startPolling = () => {
+    if (intervalRef.current) return; // Already polling
+
+    console.log('Starting work order status polling...');
+    
+    // Start with shorter intervals, then increase
+    let pollInterval = 2000; // Start with 2 seconds
+    
+    const poll = () => {
+      checkStatus();
+      
+      // Gradually increase interval to reduce server load
+      if (pollCountRef.current > 5) pollInterval = 5000;  // 5 seconds after 5 polls
+      if (pollCountRef.current > 15) pollInterval = 10000; // 10 seconds after 15 polls
+      
+      intervalRef.current = setTimeout(poll, pollInterval);
+    };
+    
+    // Start first poll immediately
+    poll();
+  };
+
+  // Stop polling
+  const stopPolling = () => {
+    if (intervalRef.current) {
+      clearTimeout(intervalRef.current);
+      intervalRef.current = null;
+      console.log('Work order polling stopped');
+    }
+  };
+
+  // Initial check
+  useEffect(() => {
+    if (enabled && batchId) {
+      checkStatus();
+    }
+  }, [batchId, enabled]);
+
+  // Auto-start/stop polling based on status
+  useEffect(() => {
+    if (!status) return;
+
+    // Start polling if work order is being created
+    if (status.status === 'creating' && status.created) {
+      console.log('Work order creating, starting polling...');
+      startPolling();
+    } 
+    // Stop polling if work order is complete, failed, or doesn't exist
+    else if (status.status === 'created' || status.status === 'failed' || !status.created) {
+      console.log('Work order status final, stopping polling...');
+      stopPolling();
+    }
+
+    return () => stopPolling();
+  }, [status?.status, status?.created]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      stopPolling();
+    };
+  }, []);
+
+  // Retry failed work order creation
+  const retryCreation = async (quantity = 1000) => {
+    if (!batchId) return;
+
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/batches/${batchId}/workorder-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Restart polling
+        pollCountRef.current = 0;
+        startPolling();
+        setError(null);
+        return data.data;
+      } else {
+        setError(data.error || 'Failed to retry work order creation');
+        return null;
+      }
+    } catch (err) {
+      setError(err.message);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return {
+    status,
+    loading,
+    error,
+    isPolling: !!intervalRef.current,
+    checkStatus,
+    retryCreation,
+    // Helper properties for easy status checking
+    isCreating: status?.status === 'creating',
+    isCreated: status?.status === 'created',
+    isFailed: status?.status === 'failed',
+    workOrderNumber: status?.workOrderNumber || status?.displayId,
+    displayId: status?.displayId,
+    hasWorkOrder: status?.created
+  };
+}

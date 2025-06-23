@@ -1,10 +1,10 @@
-// app/layout.js
+// app/layout.js - Updated with Toaster component
 import { Geist, Geist_Mono } from 'next/font/google';
 import Image from 'next/image';
 import './globals.css';
 
-import Providers from './providers';         // React-Query + Session context
-import { ToastProvider } from '@/components/ui/toast';
+import Providers from './providers';
+import { Toaster } from '@/components/ui/toaster'; // Add this import
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
@@ -33,11 +33,10 @@ export default function RootLayout({ children }) {
           priority
         />
 
-        {/* Wrapped in both React-Query, Session, and Toast contexts */}
+        {/* Wrapped in React-Query and Session contexts */}
         <Providers session={null}>
-          <ToastProvider>
-            {children}
-          </ToastProvider>
+          {children}
+          <Toaster /> {/* Add the Toaster component here */}
         </Providers>
       </body>
     </html>
