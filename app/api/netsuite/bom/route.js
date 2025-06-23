@@ -1,4 +1,4 @@
-// app/api/netsuite/bom/route.js
+// app/api/netsuite/bom/route.js - Updated with search support
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 import connectMongoDB from '@/lib/index';
@@ -45,51 +45,79 @@ export async function GET(request) {
     const user = await getUserFromRequest(request);
     
     const { searchParams } = new URL(request.url);
-    const assemblyItemId = searchParams.get('assemblyItemId');
     const action = searchParams.get('action');
-
-    if (!assemblyItemId) {
-      return NextResponse.json(
-        { success: false, message: 'Assembly Item ID is required' },
-        { status: 400 }
-      );
-    }
+    const assemblyItemId = searchParams.get('assemblyItemId');
+    const searchQuery = searchParams.get('q');
 
     const bomService = createBOMService(user);
 
     switch (action) {
-      case 'getBOM':
-        const bomData = await bomService.getAssemblyBOM(assemblyItemId);
-        const recipe = bomService.formatBOMAsRecipe(bomData);
-        
-        return NextResponse.json({
-          success: true,
-          bom: bomData,
-          recipe: recipe
-        });
-
       case 'search':
-        // For searching assembly items when user needs to pick a solution
-        const searchTerm = searchParams.get('q') || '';
-        const assemblyItems = await bomService.searchAssemblyItems(searchTerm);
-        
-        return NextResponse.json({
-          success: true,
-          items: assemblyItems
-        });
+        // Search for assembly items/solutions
+        if (!searchQuery || searchQuery.trim().length < 2) {
+          return NextResponse.json({
+            success: true,
+            items: [],
+            message: 'Search query too short'
+          });
+        }
+
+        try {
+          const assemblyItems = await bomService.searchAssemblyItems(searchQuery.trim());
+          
+          return NextResponse.json({
+            success: true,
+            items: assemblyItems || [],
+            query: searchQuery,
+            count: assemblyItems?.length || 0
+          });
+        } catch (searchError) {
+          console.error('Assembly item search error:', searchError);
+          return NextResponse.json({
+            success: false,
+            message: `Search failed: ${searchError.message}`,
+            items: []
+          });
+        }
+
+      case 'getBOM':
+        // Get BOM for specific assembly item
+        if (!assemblyItemId) {
+          return NextResponse.json({
+            success: false,
+            message: 'Assembly Item ID is required for getBOM action'
+          }, { status: 400 });
+        }
+
+        try {
+          const bomData = await bomService.getAssemblyBOM(assemblyItemId);
+          const recipe = bomService.formatBOMAsRecipe(bomData);
+          
+          return NextResponse.json({
+            success: true,
+            bom: bomData,
+            recipe: recipe
+          });
+        } catch (bomError) {
+          console.error('BOM fetch error:', bomError);
+          return NextResponse.json({
+            success: false,
+            message: `Failed to fetch BOM: ${bomError.message}`
+          }, { status: 500 });
+        }
 
       default:
-        return NextResponse.json(
-          { success: false, message: 'Invalid action. Use getBOM or search' },
-          { status: 400 }
-        );
+        return NextResponse.json({
+          success: false,
+          message: 'Invalid action. Use "search" or "getBOM"'
+        }, { status: 400 });
     }
 
   } catch (error) {
-    console.error('BOM API Error:', error);
+    console.error('NetSuite BOM API Error:', error);
     return NextResponse.json({ 
       success: false,
-      message: 'Failed to fetch BOM data',
+      message: 'Authentication or configuration error',
       error: error.message 
     }, { status: 500 });
   }
