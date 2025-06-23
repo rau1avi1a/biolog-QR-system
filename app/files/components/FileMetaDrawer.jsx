@@ -1,4 +1,4 @@
-// app/files/components/FileMetaDrawer.jsx - Simplified with direct NetSuite import
+// app/files/components/FileMetaDrawer.jsx - Cleaned version
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
@@ -190,23 +190,127 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
   );
 }
 
-/* ───────── Component row with full-width chemical name ───────── */
-function ComponentRow({ row, index, onChange, onRemove, readOnly }) {
+/* ───────── Component row with batch-aware quantities ───────── */
+function ComponentRow({ row, index, onChange, onRemove, readOnly, batchInfo }) {
+  // Determine mapping status
+  const getMappingStatus = () => {
+    if (!row.netsuiteData) return null;
+    
+    if (row.item && row.netsuiteData.mappedSuccessfully) {
+      return {
+        type: 'success',
+        label: row.netsuiteData.mappingType === 'netsuite_id_exact' ? 'Exact Match' : 
+               row.netsuiteData.confidence >= 0.8 ? 'High Confidence' : 'Medium Confidence',
+        color: 'bg-green-100 text-green-800 border-green-200'
+      };
+    } else if (row.netsuiteData && !row.item) {
+      return {
+        type: 'warning',
+        label: 'Needs Mapping',
+        color: 'bg-amber-100 text-amber-800 border-amber-200'
+      };
+    }
+    
+    return null;
+  };
+
+  const mappingStatus = getMappingStatus();
+
+  // Calculate display quantities based on batch info
+  const getDisplayQuantity = () => {
+    console.log('getDisplayQuantity called with:', {
+      isBatch: batchInfo?.isBatch,
+      hasConfirmedComponents: !!batchInfo?.confirmedComponents,
+      confirmedComponentsLength: batchInfo?.confirmedComponents?.length || 0,
+      rowItemId: row.item?._id,
+      rowQty: row.qty
+    });
+
+    // If this is a batch with confirmed components, show those quantities
+    if (batchInfo?.isBatch && batchInfo?.confirmedComponents?.length > 0) {
+      console.log('Looking for confirmed component match...');
+      
+      const confirmedComp = batchInfo.confirmedComponents.find(comp => {
+        const compItemId = comp.itemId?._id || comp.itemId;
+        const rowItemId = row.item?._id;
+        console.log('Comparing:', { compItemId, rowItemId, matches: compItemId === rowItemId });
+        return compItemId === rowItemId;
+      });
+      
+      if (confirmedComp) {
+        console.log('Found confirmed component:', confirmedComp);
+        const quantity = confirmedComp.actualAmount || confirmedComp.plannedAmount || confirmedComp.scaledAmount || row.qty;
+        return {
+          quantity: quantity,
+          label: 'Batch Quantity',
+          isScaled: true
+        };
+      } else {
+        console.log('No confirmed component match found');
+      }
+    }
+    
+    // Default to component quantity
+    console.log('Using default quantity:', row.qty);
+    return {
+      quantity: row.qty,
+      label: 'Recipe Quantity',
+      isScaled: false
+    };
+  };
+
+  const displayQty = getDisplayQuantity();
+
   return (
     <Card className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
       <CardContent className="p-4">
         <div className="space-y-3">
-          {/* Chemical selection - full width */}
+          {/* Chemical selection with mapping status */}
           <div className="flex items-start gap-2">
             <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Chemical</label>
+                {mappingStatus && (
+                  <Badge variant="outline" className={`text-xs ${mappingStatus.color}`}>
+                    {mappingStatus.label}
+                  </Badge>
+                )}
+              </div>
+              
               <AsyncSelect
-                label="Chemical"
+                label=""
                 type="chemical"
                 value={row.item}
                 onChange={readOnly ? undefined : (item => onChange(index, 'item', item))}
                 disabled={readOnly}
                 icon={Beaker}
               />
+              
+              {/* NetSuite mapping info */}
+              {row.netsuiteData && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs">
+                  <div className="flex items-center gap-1 mb-1">
+                    <Zap className="h-3 w-3 text-blue-600" />
+                    <span className="font-medium text-blue-800">NetSuite Component</span>
+                  </div>
+                  <div className="text-blue-700 space-y-1">
+                    <div><strong>Name:</strong> {row.netsuiteData.ingredient}</div>
+                    <div><strong>NetSuite ID:</strong> {row.netsuiteData.itemId}</div>
+                    {row.netsuiteData.itemRefName && (
+                      <div><strong>Ref:</strong> {row.netsuiteData.itemRefName}</div>
+                    )}
+                    {row.netsuiteData.confidence && (
+                      <div><strong>Match Confidence:</strong> {Math.round(row.netsuiteData.confidence * 100)}%</div>
+                    )}
+                  </div>
+                  
+                  {!row.item && !readOnly && (
+                    <div className="mt-2 text-amber-700 text-xs">
+                      ⚠ Please select a chemical from the dropdown above to complete the mapping
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             
             {!readOnly && (
@@ -226,15 +330,24 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly }) {
           <div className="flex gap-3">
             <div className="flex-1">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Quantity</label>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    {displayQty.label}
+                  </label>
+                  {displayQty.isScaled && (
+                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                      Scaled
+                    </Badge>
+                  )}
+                </div>
                 <Input
                   type="number"
                   placeholder="0"
                   step="0.01"
-                  value={row.qty}
+                  value={displayQty.quantity}
                   onChange={readOnly ? undefined : (e => onChange(index, 'qty', e.target.value))}
                   disabled={readOnly}
-                  className="text-center"
+                  className={`text-center ${displayQty.isScaled ? 'bg-blue-50 font-medium' : ''}`}
                 />
               </div>
             </div>
@@ -253,19 +366,14 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly }) {
             </div>
           </div>
 
-          {/* NetSuite data display if available */}
-          {row.netsuiteData && (
-            <div className="bg-blue-50 border border-blue-200 rounded p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <Zap className="h-4 w-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-800">NetSuite Import Data</span>
-              </div>
-              <div className="text-xs text-blue-700 space-y-1">
-                <div><strong>Ingredient:</strong> {row.netsuiteData.ingredient}</div>
-                <div><strong>NetSuite ID:</strong> {row.netsuiteData.itemId}</div>
-                <div><strong>Ref Name:</strong> {row.netsuiteData.itemRefName}</div>
-                <div><strong>BOM Qty:</strong> {row.netsuiteData.bomQuantity}</div>
-                <div><strong>Yield:</strong> {row.netsuiteData.componentYield}%</div>
+          {/* Show stock information if chemical is selected */}
+          {row.item && row.item.qtyOnHand !== undefined && (
+            <div className="bg-slate-50 border border-slate-200 rounded p-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Current Stock:</span>
+                <span className="font-medium text-slate-800">
+                  {row.item.qtyOnHand} {row.item.uom}
+                </span>
               </div>
             </div>
           )}
@@ -277,11 +385,8 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly }) {
 
 /* ───────── Main drawer with enhanced styling and simplified NetSuite integration ───────── */
 export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, readOnly = false, onFileDeleted }) {
-  const [product, setProduct] = useState(null);
   const [solution, setSolution] = useState(null);
   const [rows, setRows] = useState([]);
-  const [outQty, setOutQty] = useState('');
-  const [outUnit, setOutUnit] = useState('mL');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -306,8 +411,6 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     if (!file) return;
 
     const data = file.snapshot || file;
-
-    setProduct(data.productRef || null);
     
     // FIXED: If we have a solution reference, we need to fetch the full solution data
     // including the netsuiteInternalId which isn't stored in the file
@@ -322,9 +425,6 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     } else {
       setSolution(null);
     }
-    
-    setOutQty(data.recipeQty ?? '');
-    setOutUnit(data.recipeUnit ?? 'mL');
 
     if (data.components?.length) {
       setRows(
@@ -385,14 +485,6 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
   /* Handle NetSuite BOM import */
   const handleNetSuiteImport = (importData) => {
     console.log('NetSuite import data received:', importData);
-    
-    // Set recipe quantity and unit if provided
-    if (importData.recipeQty) {
-      setOutQty(importData.recipeQty.toString());
-    }
-    if (importData.recipeUnit) {
-      setOutUnit(importData.recipeUnit);
-    }
 
     // Import the components - these will be saved to the File model
     if (importData.components?.length > 0) {
@@ -412,10 +504,7 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     try {
       // Save the BOM data to the File model
       await api.updateFileMeta(file._id, {
-        productRef: product?._id || null,
         solutionRef: solution?._id || null,
-        recipeQty: importData.recipeQty ? Number(importData.recipeQty) : (outQty ? Number(outQty) : null),
-        recipeUnit: importData.recipeUnit || outUnit,
         components: importData.components
           .filter(r => r.qty) // Only save components with quantities
           .map(r => ({
@@ -441,10 +530,7 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     setSaving(true);
     try {
       await api.updateFileMeta(file._id, {
-        productRef: product?._id || null,
         solutionRef: solution?._id || null,
-        recipeQty: outQty ? Number(outQty) : null,
-        recipeUnit: outUnit,
         components: rows
           .filter(r => r.item && r.qty)
           .map(r => ({
@@ -599,55 +685,14 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
                     Product Information
                   </h3>
                   
-                  <div className="grid gap-4">
-                    <AsyncSelect
-                      label="Solution produced"
-                      type="solution"
-                      value={solution}
-                      onChange={readOnly ? undefined : setSolution}
-                      disabled={readOnly}
-                      icon={FlaskRound}
-                    />
-                    
-                    <AsyncSelect
-                      label="Product (for order)"
-                      type="product"
-                      value={product}
-                      onChange={readOnly ? undefined : setProduct}
-                      disabled={readOnly}
-                      icon={Package}
-                    />
-
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Beaker size={14} className="text-slate-500" />
-                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                          Recipe output
-                        </label>
-                      </div>
-                      <div className="flex gap-3">
-                        <div className="flex-1">
-                          <Input
-                            type="number"
-                            placeholder="Quantity"
-                            value={outQty}
-                            onChange={e => setOutQty(e.target.value)}
-                            disabled={readOnly}
-                            className="text-center"
-                          />
-                        </div>
-                        <div className="w-24">
-                          <Input
-                            placeholder="Unit"
-                            value={outUnit}
-                            onChange={e => setOutUnit(e.target.value)}
-                            disabled={readOnly}
-                            className="text-center"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <AsyncSelect
+                    label="Solution produced"
+                    type="solution"
+                    value={solution}
+                    onChange={readOnly ? undefined : setSolution}
+                    disabled={readOnly}
+                    icon={FlaskRound}
+                  />
                 </div>
 
                 <Separator />
@@ -666,27 +711,6 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
                   </div>
 
                   {/* NetSuite Import Button - only show when solution has NetSuite ID */}
-                  {!readOnly && (
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-3">
-                      <div className="text-xs text-slate-600 space-y-1">
-                        <div><strong>Debug Info:</strong></div>
-                        <div>Solution selected: {solution ? 'Yes' : 'No'}</div>
-                        <div>Solution name: {solution?.displayName || 'None'}</div>
-                        <div>NetSuite ID: {solution?.netsuiteInternalId || 'None'}</div>
-                        <div>Can import: {canImportFromNetSuite() ? 'Yes' : 'No'}</div>
-                        <div>ReadOnly: {readOnly ? 'Yes' : 'No'}</div>
-                        {solution && (
-                          <div className="mt-2 p-2 bg-white border rounded">
-                            <div><strong>Full Solution Object:</strong></div>
-                            <pre className="text-xs overflow-auto max-h-32">
-                              {JSON.stringify(solution, null, 2)}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
                   {!readOnly && canImportFromNetSuite() && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                       <div className="flex items-center justify-between">
@@ -721,6 +745,11 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
                         onChange={updateRow}
                         onRemove={remRow}
                         readOnly={readOnly}
+                        batchInfo={{
+                          isBatch: file.isBatch,
+                          confirmedComponents: file.confirmedComponents,
+                          status: file.status
+                        }}
                       />
                     ))}
 
