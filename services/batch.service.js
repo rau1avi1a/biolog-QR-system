@@ -1,11 +1,14 @@
+// services/batch.service.js - Updated with NetSuite Work Order integration
 import mongoose from 'mongoose';
 import connectMongoDB from '@/lib/index';
 import Batch    from '@/models/Batch.js';
 import File     from '@/models/File.js';
 import { Item } from '@/models/Item.js';
+import User from '@/models/User.js';
 import { txnService } from './txn.service.js';
 import { getFileById }       from './file.service.js';
 import { createArchiveCopy } from './archive.service.js';
+import { createWorkOrderService } from './netsuite/workorder.service.js';
 
 const asId = (id) => new mongoose.Types.ObjectId(id);
 
@@ -16,6 +19,29 @@ function getSystemUser() {
     name: 'System',
     email: 'system@company.com'
   };
+}
+
+/** Helper function to get a full User document with methods */
+async function getFullUser(user) {
+  if (!user) return null;
+  
+  // If it's already a Mongoose document with methods, return as is
+  if (typeof user.hasNetSuiteAccess === 'function') {
+    return user;
+  }
+  
+  // If it's a plain object with _id, fetch the full user
+  if (user._id) {
+    try {
+      const fullUser = await User.findById(user._id);
+      return fullUser;
+    } catch (error) {
+      console.error('Error fetching full user:', error);
+      return user; // Return original if fetch fails
+    }
+  }
+  
+  return user;
 }
 
 /** Helper function to bake overlay PNG into PDF */
@@ -34,24 +60,75 @@ async function bakeOverlayIntoPdf(originalPdfDataUrl, overlayPng) {
   return Buffer.from(modifiedPdfBytes);
 }
 
-/** REAL implementation: Create work order (no chemical transactions) */
-async function createWorkOrderOnly(batch, user = null) {
-  console.log('Creating work order for batch:', batch._id);
+/** ENHANCED: Create work order in NetSuite */
+async function createNetSuiteWorkOrder(batch, quantity, user = null) {
+  console.log('Creating NetSuite work order for batch:', batch._id);
   
   try {
-    // Just create the work order record (you can expand this later for NetSuite)
-    const workOrderId = `WO-${Date.now()}`;
+    // Get full user with methods
+    const fullUser = await getFullUser(user);
     
-    const userInfo = user || getSystemUser();
-    console.log('Work order created:', workOrderId, 'by user:', userInfo.email);
+    // Check if user has NetSuite access
+    let hasNetSuiteAccess = false;
     
-    return { 
-      id: workOrderId, 
-      status: 'in_progress'
+    if (fullUser) {
+      // If user is a Mongoose document, call the method
+      if (typeof fullUser.hasNetSuiteAccess === 'function') {
+        hasNetSuiteAccess = fullUser.hasNetSuiteAccess();
+      }
+      // If user is a plain object, check the property directly
+      else if (fullUser.netsuiteCredentials && fullUser.netsuiteCredentials.isConfigured) {
+        hasNetSuiteAccess = true;
+      }
+    }
+    
+    // Also check environment variables as fallback
+    if (!hasNetSuiteAccess && process.env.NETSUITE_ACCOUNT_ID && process.env.NETSUITE_CONSUMER_KEY && 
+        process.env.NETSUITE_CONSUMER_SECRET && process.env.NETSUITE_TOKEN_ID && 
+        process.env.NETSUITE_TOKEN_SECRET) {
+      hasNetSuiteAccess = true;
+      console.log('Using environment variables for NetSuite access');
+    }
+    
+    if (!hasNetSuiteAccess) {
+      console.log('User does not have NetSuite access, skipping work order creation');
+      return { 
+        id: `LOCAL-WO-${Date.now()}`, 
+        status: 'created_locally',
+        source: 'local'
+      };
+    }
+    
+    const workOrderService = createWorkOrderService(fullUser);
+    
+    // Create work order from batch
+    const result = await workOrderService.createWorkOrderFromBatch(batch, quantity);
+    
+    console.log('NetSuite work order created:', result.workOrder.tranId);
+    
+    return {
+      id: result.workOrder.tranId || result.workOrder.id,
+      netsuiteId: result.workOrder.id,
+      tranId: result.workOrder.tranId,
+      status: result.workOrder.status,
+      bomId: result.workOrder.bomId,
+      revisionId: result.workOrder.revisionId,
+      quantity: quantity,
+      source: 'netsuite',
+      fullResponse: result
     };
+    
   } catch (error) {
-    console.error('Error creating work order:', error);
-    throw error;
+    console.error('Error creating NetSuite work order:', error);
+    
+    // Fall back to local work order creation
+    console.log('Falling back to local work order creation');
+    return { 
+      id: `LOCAL-WO-${Date.now()}`, 
+      status: 'created_locally',
+      source: 'local',
+      error: error.message
+    };
   }
 }
 
@@ -117,24 +194,24 @@ async function createSolutionLot(batch, solutionLotNumber, solutionQty = null, s
   
   try {
     // Get the solution item from the batch snapshot
-    const solutionItemId = batch.snapshot?.solutionRef;
-    if (!solutionItemId) {
-      throw new Error('No solution reference found in batch snapshot');
-    }
+    // Fetch the solution item so we can read its netsuiteInternalId
+      const solutionItemId = batch.snapshot?.solutionRef;
+      if (!solutionItemId) {
+        throw new Error('Batch snapshot missing solutionRef');
+      }
+      const solutionItem = await Item.findById(solutionItemId).lean();
+      if (!solutionItem?.netsuiteInternalId) {
+        throw new Error('Solution item does not have a NetSuite Internal ID');
+      }
+
+      const assemblyItemId = solutionItem.netsuiteInternalId;
+
 
     // Default quantity from recipe if not provided
     const quantity = solutionQty || batch.snapshot?.recipeQty || 1;
     const unit = solutionUnit || batch.snapshot?.recipeUnit || 'L';
 
     console.log('Creating solution with:', { solutionItemId, solutionLotNumber, quantity, unit });
-    console.log('Transaction data being sent:', {
-      txnType: 'build',
-      lines: [{
-        item: solutionItemId,
-        lot: solutionLotNumber,
-        qty: quantity
-      }]
-    });
 
     // Use provided user or system user
     const actor = user || getSystemUser();
@@ -176,13 +253,65 @@ async function createSolutionLot(batch, solutionLotNumber, solutionQty = null, s
   }
 }
 
-/** Placeholder for completing work order */
-async function completeNetSuiteWorkOrder(workOrderId) {
-  console.log('Completing work order:', workOrderId);
-  return { id: workOrderId, status:'completed' };
+/** ENHANCED: Complete NetSuite work order */
+async function completeNetSuiteWorkOrder(workOrderId, user = null, quantityCompleted = null) {
+  console.log('Completing NetSuite work order:', workOrderId);
+  
+  try {
+    // Get full user with methods
+    const fullUser = await getFullUser(user);
+    
+    // Check if this is a local work order or if user has NetSuite access
+    let hasNetSuiteAccess = false;
+    
+    if (fullUser) {
+      // If user is a Mongoose document, call the method
+      if (typeof fullUser.hasNetSuiteAccess === 'function') {
+        hasNetSuiteAccess = fullUser.hasNetSuiteAccess();
+      }
+      // If user is a plain object, check the property directly
+      else if (fullUser.netsuiteCredentials && fullUser.netsuiteCredentials.isConfigured) {
+        hasNetSuiteAccess = true;
+      }
+    }
+    
+    // Also check environment variables as fallback
+    if (!hasNetSuiteAccess && process.env.NETSUITE_ACCOUNT_ID && process.env.NETSUITE_CONSUMER_KEY && 
+        process.env.NETSUITE_CONSUMER_SECRET && process.env.NETSUITE_TOKEN_ID && 
+        process.env.NETSUITE_TOKEN_SECRET) {
+      hasNetSuiteAccess = true;
+    }
+    
+    if (workOrderId.startsWith('LOCAL-WO-') || !hasNetSuiteAccess) {
+      console.log('Local work order or no NetSuite access, marking as completed locally');
+      return { id: workOrderId, status: 'completed_locally', source: 'local' };
+    }
+    
+    const workOrderService = createWorkOrderService(fullUser);
+    const result = await workOrderService.completeWorkOrder(workOrderId, quantityCompleted);
+    
+    console.log('NetSuite work order completed:', workOrderId);
+    return { 
+      id: workOrderId, 
+      status: 'completed',
+      source: 'netsuite',
+      result: result
+    };
+    
+  } catch (error) {
+    console.error('Error completing NetSuite work order:', error);
+    
+    // Fall back to local completion
+    return { 
+      id: workOrderId, 
+      status: 'completed_locally', 
+      source: 'local',
+      error: error.message
+    };
+  }
 }
 
-/** CREATE a new Batch from a File template with enhanced workflow */
+/** CREATE a new Batch from a File template with enhanced NetSuite workflow */
 export async function createBatch(payload) {
   await connectMongoDB();
   
@@ -257,20 +386,35 @@ export async function createBatch(payload) {
   // Create the batch
   const batch = await Batch.create(batchData);
 
-  // Handle work order creation (no transactions)
+  // ENHANCED: Handle work order creation with NetSuite integration
   if (payload.action === 'create_work_order') {
     try {
-      const workOrderResult = await createWorkOrderOnly(batch, user);
+      // Get quantity from confirmation data or default
+      const quantity = confirmationData?.batchQuantity || confirmationData?.solutionQuantity || snapshot.recipeQty || 1;
       
-      // Update batch with work order info only
+      const workOrderResult = await createNetSuiteWorkOrder(batch, quantity, user);
+      
+      // Update batch with work order info
       batch.workOrderId = workOrderResult.id;
       batch.workOrderCreated = true;
       batch.workOrderCreatedAt = new Date();
-      // Don't set chemicalsTransacted here
+      
+      // Store NetSuite-specific data if it's a NetSuite work order
+      if (workOrderResult.source === 'netsuite') {
+        batch.netsuiteWorkOrderData = {
+          workOrderId: workOrderResult.netsuiteId,
+          tranId: workOrderResult.tranId,
+          bomId: workOrderResult.bomId,
+          revisionId: workOrderResult.revisionId,
+          quantity: quantity,
+          status: workOrderResult.status,
+          createdAt: new Date()
+        };
+      }
       
       await batch.save();
       
-      console.log('Work order created successfully (no transactions)');
+      console.log('Work order created successfully:', workOrderResult.source);
     } catch (e) {
       console.error('Failed to create work order:', e);
       // Don't throw - let the batch be created even if work order fails
@@ -320,12 +464,12 @@ export async function createBatch(payload) {
   return Batch.findById(batch._id)
     .populate('fileId', 'fileName pdf')
     .populate('snapshot.productRef',  '_id displayName sku')
-    .populate('snapshot.solutionRef', '_id displayName sku')
+    .populate('snapshot.solutionRef', '_id displayName sku netsuiteInternalId')
     .populate('snapshot.components.itemId', '_id displayName sku')
     .lean();
 }
 
-/** UPDATE a batch with enhanced workflow logic */
+/** UPDATE a batch with enhanced NetSuite workflow logic */
 export async function updateBatch(id, payload) {
   await connectMongoDB();
   
@@ -351,6 +495,35 @@ export async function updateBatch(id, payload) {
       payload.overlayHistory = allOverlays;
     } catch (e) {
       console.error('Failed to bake overlays during update:', e);
+    }
+  }
+
+  // ENHANCED: Handle work order creation during update
+  if (payload.workOrderCreated && !prev.workOrderCreated) {
+    try {
+      // Get quantity from confirmed components or default
+      const quantity = payload.confirmedComponents?.reduce((sum, comp) => sum + (comp.actualAmount || comp.amount || 0), 0) || 
+                      prev.snapshot?.recipeQty || 1;
+      
+      const workOrderResult = await createNetSuiteWorkOrder(prev, quantity, user);
+      
+      payload.workOrderId = workOrderResult.id;
+      payload.workOrderCreatedAt = new Date();
+      
+      // Store NetSuite-specific data if it's a NetSuite work order
+      if (workOrderResult.source === 'netsuite') {
+        payload.netsuiteWorkOrderData = {
+          workOrderId: workOrderResult.netsuiteId,
+          tranId: workOrderResult.tranId,
+          bomId: workOrderResult.bomId,
+          revisionId: workOrderResult.revisionId,
+          quantity: quantity,
+          status: workOrderResult.status,
+          createdAt: new Date()
+        };
+      }
+    } catch (e) {
+      console.error('Failed to create work order during update:', e);
     }
   }
 
@@ -386,12 +559,26 @@ export async function updateBatch(id, payload) {
     }
   }
 
-  // Handle work order completion
+  // ENHANCED: Handle work order completion
   if (payload.status === 'Completed' && prev.status !== 'Completed' && prev.workOrderId) {
     try {
-      await completeNetSuiteWorkOrder(prev.workOrderId);
+      const completionResult = await completeNetSuiteWorkOrder(
+        prev.workOrderId, 
+        user,
+        payload.solutionQuantity || prev.snapshot?.recipeQty
+      );
+      
       payload.workOrderStatus = 'completed';
       payload.completedAt = new Date();
+      
+      // Update NetSuite work order data if it exists
+      if (prev.netsuiteWorkOrderData && completionResult.source === 'netsuite') {
+        payload.netsuiteWorkOrderData = {
+          ...prev.netsuiteWorkOrderData,
+          status: 'completed',
+          completedAt: new Date()
+        };
+      }
     } catch (e) {
       console.error('Failed to complete work order during update:', e);
     }
@@ -417,7 +604,7 @@ export async function getBatchById(id) {
   const batch = await Batch.findById(id)
     .populate('fileId', 'fileName pdf')
     .populate('snapshot.productRef',  '_id displayName sku')
-    .populate('snapshot.solutionRef', '_id displayName sku')
+    .populate('snapshot.solutionRef', '_id displayName sku netsuiteInternalId')
     .populate('snapshot.components.itemId', '_id displayName sku')
     .lean();
   if (!batch) return null;
@@ -436,7 +623,7 @@ export async function listBatches(options = {}) {
     query = query
       .populate('fileId', 'fileName')
       .populate('snapshot.productRef',  '_id displayName sku')
-      .populate('snapshot.solutionRef', '_id displayName sku')
+      .populate('snapshot.solutionRef', '_id displayName sku netsuiteInternalId')
       .populate('snapshot.components.itemId', '_id displayName sku');
   }
   const batches = await query.sort(sort).limit(limit).skip(skip).lean();
