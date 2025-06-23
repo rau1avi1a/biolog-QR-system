@@ -1,4 +1,4 @@
-// app/files/components/SaveConfirmationDialog.jsx - NetSuite Workflow Version
+// app/files/components/SaveConfirmationDialog.jsx - Enhanced with batch quantity input
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -30,7 +30,8 @@ import {
   Beaker,
   FileText,
   Settings,
-  AlertTriangle
+  AlertTriangle,
+  Calculator
 } from 'lucide-react';
 import { api } from '../lib/api';
 
@@ -41,12 +42,15 @@ function SaveConfirmationDialog({
   currentDoc, 
   action = 'save'
 }) {
+  const [batchQuantity, setBatchQuantity] = useState('1000'); // Default batch size
+  const [batchUnit, setBatchUnit] = useState('mL');
   const [solutionLotNumber, setSolutionLotNumber] = useState('');
   const [solutionQuantity, setSolutionQuantity] = useState('');
   const [solutionUnit, setSolutionUnit] = useState('');
   const [confirmedComponents, setConfirmedComponents] = useState([]);
   const [availableLots, setAvailableLots] = useState({}); // { itemId: [lots] }
   const [isLoadingLots, setIsLoadingLots] = useState(false);
+  const [scaledComponents, setScaledComponents] = useState([]);
 
   // Determine what this action will do
   const getActionInfo = () => {
@@ -73,12 +77,13 @@ function SaveConfirmationDialog({
       }
       
       return {
-        title: 'Create NetSuite Work Order',
-        description: 'This will create a work order in NetSuite with the recipe as BOM. File status will change to In Progress.',
+        title: 'Create Work Order & Scale Recipe',
+        description: 'This will create a work order and scale the recipe to your batch size. Components are shown per 1 mL from NetSuite.',
         icon: <Package className="h-5 w-5 text-blue-500" />,
         requiresChemicals: false,
         requiresLot: false,
-        actions: ['Create Work Order in NetSuite', 'Set Status to In Progress']
+        requiresBatchSize: true,
+        actions: ['Scale Recipe to Batch Size', 'Create Work Order', 'Set Status to In Progress']
       };
     }
     
@@ -87,14 +92,15 @@ function SaveConfirmationDialog({
         return {
           title: 'Transact Chemicals & Create Solution',
           description: wasRejected 
-            ? 'This will create the solution lot. Chemicals were already transacted when first submitted.'
-            : 'This will transact chemicals from inventory and create the solution lot in NetSuite.',
+            ? 'This will create the solution lot using the scaled quantities.'
+            : 'This will transact the scaled chemical quantities and create the solution lot.',
           icon: <Beaker className="h-5 w-5 text-green-500" />,
-          requiresChemicals: !wasRejected, // Only need chemical confirmation if not previously rejected
+          requiresChemicals: !wasRejected,
           requiresLot: true,
+          requiresBatchSize: false, // Batch size already set from work order
           actions: wasRejected 
             ? ['Create Solution Lot', 'Move to Review Status']
-            : ['Transact Chemicals from Inventory', 'Create Solution Lot', 'Move to Review Status']
+            : ['Transact Scaled Chemical Quantities', 'Create Solution Lot', 'Move to Review Status']
         };
       } else {
         return {
@@ -103,6 +109,7 @@ function SaveConfirmationDialog({
           icon: <FileText className="h-5 w-5 text-blue-500" />,
           requiresChemicals: false,
           requiresLot: false,
+          requiresBatchSize: false,
           actions: ['Move to Review Status']
         };
       }
@@ -111,11 +118,12 @@ function SaveConfirmationDialog({
     if (action === 'complete') {
       return {
         title: 'Complete Work Order & Archive',
-        description: 'This will complete the NetSuite work order and archive this batch.',
+        description: 'This will complete the work order and archive this batch.',
         icon: <CheckCircle2 className="h-5 w-5 text-green-500" />,
         requiresChemicals: false,
         requiresLot: false,
-        actions: ['Complete NetSuite Work Order', 'Archive Batch']
+        requiresBatchSize: false,
+        actions: ['Complete Work Order', 'Archive Batch']
       };
     }
     
@@ -126,6 +134,7 @@ function SaveConfirmationDialog({
         icon: <AlertTriangle className="h-5 w-5 text-red-500" />,
         requiresChemicals: false,
         requiresLot: false,
+        requiresBatchSize: false,
         requiresReason: true,
         actions: ['Move to In Progress Status', 'Keep Solution & Transactions']
       };
@@ -138,46 +147,94 @@ function SaveConfirmationDialog({
       icon: <Clock className="h-5 w-5 text-amber-500" />,
       requiresChemicals: false,
       requiresLot: false,
+      requiresBatchSize: false,
       actions: ['Save Changes']
     };
   };
 
   const actionInfo = getActionInfo();
 
-  // Initialize components and solution details from the current document
+  // Scale components based on batch quantity - FIXED to handle multiple data sources
   useEffect(() => {
-    if (currentDoc?.snapshot?.components) {
-      setConfirmedComponents(
-        currentDoc.snapshot.components.map(comp => ({
-          ...comp,
-          plannedAmount: comp.amount || 0,
-          actualAmount: comp.amount || 0,
-          lotNumber: '',
-          lotId: null,
-          // Ensure we have component info for display
-          displayName: comp.itemId?.displayName || comp.displayName || 'Unknown Component',
-          sku: comp.itemId?.sku || comp.sku || 'No SKU'
-        }))
-      );
-    } else if (currentDoc?.components) {
-      setConfirmedComponents(
-        currentDoc.components.map(comp => ({
-          ...comp,
-          plannedAmount: comp.amount || 0,
-          actualAmount: comp.amount || 0,
-          lotNumber: '',
-          lotId: null,
-          // Ensure we have component info for display
-          displayName: comp.itemId?.displayName || comp.displayName || 'Unknown Component',
-          sku: comp.itemId?.sku || comp.sku || 'No SKU'
-        }))
-      );
+    console.log('Scaling effect triggered:', {
+      requiresBatchSize: actionInfo.requiresBatchSize,
+      batchQuantity,
+      currentDoc: currentDoc ? 'exists' : 'null',
+      snapshotComponents: currentDoc?.snapshot?.components?.length || 0,
+      directComponents: currentDoc?.components?.length || 0
+    });
+
+    if (actionInfo.requiresBatchSize) {
+      const quantity = parseFloat(batchQuantity) || 1000;
+      
+      // Try multiple sources for components
+      let components = currentDoc?.snapshot?.components || 
+                      currentDoc?.components || 
+                      [];
+      
+      console.log('Found components:', components);
+      
+      if (components.length > 0) {
+        const scaled = components.map(comp => {
+          const scaledAmount = (comp.amount || 0) * quantity;
+          console.log(`Component ${comp.itemId?.displayName || comp.displayName}: ${comp.amount} × ${quantity} = ${scaledAmount}`);
+          
+          return {
+            ...comp,
+            scaledAmount: scaledAmount,
+            originalAmount: comp.amount,
+            plannedAmount: scaledAmount,
+            actualAmount: scaledAmount,
+            lotNumber: '',
+            lotId: null,
+            displayName: comp.itemId?.displayName || comp.displayName || 'Unknown Component',
+            sku: comp.itemId?.sku || comp.sku || 'No SKU'
+          };
+        });
+        
+        console.log('Scaled components:', scaled);
+        setScaledComponents(scaled);
+        setConfirmedComponents(scaled);
+      } else {
+        console.log('No components found in any source');
+        setScaledComponents([]);
+        setConfirmedComponents([]);
+      }
+    } else {
+      // For other actions, use existing confirmed components or snapshot
+      const components = currentDoc?.snapshot?.components || currentDoc?.components || [];
+      
+      if (components.length > 0) {
+        setConfirmedComponents(
+          components.map(comp => ({
+            ...comp,
+            plannedAmount: comp.amount || 0,
+            actualAmount: comp.amount || 0,
+            lotNumber: '',
+            lotId: null,
+            displayName: comp.itemId?.displayName || comp.displayName || 'Unknown Component',
+            sku: comp.itemId?.sku || comp.sku || 'No SKU'
+          }))
+        );
+      }
     }
-    
-    // Initialize solution details from document
-    setSolutionQuantity(currentDoc?.snapshot?.recipeQty || currentDoc?.recipeQty || '');
-    setSolutionUnit(currentDoc?.snapshot?.recipeUnit || currentDoc?.recipeUnit || 'L');
-  }, [currentDoc]);
+  }, [batchQuantity, currentDoc?.snapshot?.components, currentDoc?.components, actionInfo.requiresBatchSize]);
+
+  // Auto-set solution quantity when batch quantity changes
+  useEffect(() => {
+    if (actionInfo.requiresBatchSize && batchQuantity) {
+      setSolutionQuantity(batchQuantity);
+      setSolutionUnit(batchUnit);
+    }
+  }, [batchQuantity, batchUnit, actionInfo.requiresBatchSize]);
+
+  // Initialize solution details from document
+  useEffect(() => {
+    if (!actionInfo.requiresBatchSize) {
+      setSolutionQuantity(currentDoc?.snapshot?.recipeQty || currentDoc?.recipeQty || '');
+      setSolutionUnit(currentDoc?.snapshot?.recipeUnit || currentDoc?.recipeUnit || 'L');
+    }
+  }, [currentDoc, actionInfo.requiresBatchSize]);
 
   // Load available lots for each component when dialog opens
   useEffect(() => {
@@ -192,7 +249,6 @@ function SaveConfirmationDialog({
     
     await Promise.all(
       confirmedComponents.map(async comp => {
-        // Extract ID more reliably
         let itemId;
         if (typeof comp.itemId === 'object' && comp.itemId !== null) {
           itemId = comp.itemId._id || comp.itemId.toString();
@@ -200,14 +256,10 @@ function SaveConfirmationDialog({
           itemId = comp.itemId;
         }
         
-        if (!itemId) {
-          return;
-        }
+        if (!itemId) return;
         
         try {
           const { lots } = await api.getAvailableLots(itemId);
-          
-          // Store lots using both possible key formats to ensure access works
           lotsMap[itemId] = lots;
           if (typeof comp.itemId === 'object' && comp.itemId !== null) {
             lotsMap[comp.itemId._id] = lots;
@@ -223,7 +275,6 @@ function SaveConfirmationDialog({
     setIsLoadingLots(false);
   };
 
-  // Helper function to get item key consistently
   const getItemKey = (component) => {
     if (typeof component.itemId === 'object' && component.itemId !== null) {
       return component.itemId._id || component.itemId.toString();
@@ -236,7 +287,6 @@ function SaveConfirmationDialog({
       prev.map((comp, i) => {
         if (i === index) {
           if (field === 'lotNumber') {
-            // Find the selected lot to get its ID using the item key
             const itemKey = getItemKey(comp);
             const availableLotsForItem = availableLots[itemKey] || [];
             const selectedLot = availableLotsForItem.find(lot => lot.lotNumber === value);
@@ -255,10 +305,13 @@ function SaveConfirmationDialog({
 
   const handleConfirm = () => {
     const confirmationData = {
+      batchQuantity: actionInfo.requiresBatchSize ? Number(batchQuantity) : null,
+      batchUnit: actionInfo.requiresBatchSize ? batchUnit : null,
       solutionLotNumber: solutionLotNumber.trim(),
       solutionQuantity: solutionQuantity ? Number(solutionQuantity) : null,
       solutionUnit: solutionUnit.trim() || 'L',
       components: confirmedComponents,
+      scaledComponents: actionInfo.requiresBatchSize ? scaledComponents : null,
       action
     };
     
@@ -267,7 +320,8 @@ function SaveConfirmationDialog({
   };
 
   const isValid = () => {
-    if (actionInfo.requiresSetup) return false; // Can't proceed without setup
+    if (actionInfo.requiresSetup) return false;
+    if (actionInfo.requiresBatchSize && (!batchQuantity || Number(batchQuantity) <= 0)) return false;
     if (actionInfo.requiresLot && !solutionLotNumber.trim()) return false;
     if (actionInfo.requiresChemicals && confirmedComponents.some(c => !c.lotNumber)) return false;
     return true;
@@ -304,7 +358,6 @@ function SaveConfirmationDialog({
             <Button variant="outline" onClick={onClose}>Cancel</Button>
             <Button onClick={() => {
               onClose();
-              // TODO: Open file properties dialog
             }}>
               Open Properties
             </Button>
@@ -341,14 +394,120 @@ function SaveConfirmationDialog({
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* Solution Details with Quantity Input */}
+          {/* Batch Size Configuration */}
+          {actionInfo.requiresBatchSize && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-medium flex items-center gap-2">
+                  <Calculator className="h-5 w-5 text-blue-500" />
+                  Batch Size & Recipe Scaling
+                </h3>
+                <Badge variant="outline">
+                  NetSuite quantities are per mL
+                </Badge>
+              </div>
+              
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-amber-800 mb-2">
+                  <AlertCircle className="h-4 w-4" />
+                  <span className="font-medium">Recipe Scaling Information</span>
+                </div>
+                <p className="text-sm text-amber-700">
+                  The recipe quantities from NetSuite are per 1 mL of solution produced. 
+                  Enter your desired batch size below to automatically scale all component quantities.
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="batchQuantity">Batch Size to Produce *</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="batchQuantity"
+                    type="number"
+                    step="1"
+                    min="1"
+                    value={batchQuantity}
+                    onChange={(e) => setBatchQuantity(e.target.value)}
+                    placeholder="1000"
+                    className="font-mono"
+                  />
+                  <Select value={batchUnit} onValueChange={setBatchUnit}>
+                    <SelectTrigger className="w-20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mL">mL</SelectItem>
+                      <SelectItem value="L">L</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  How much solution do you want to make in this batch?
+                </p>
+              </div>
+
+              {/* Dynamic Scaled Components Preview - IMPROVED */}
+              {scaledComponents.length > 0 && batchQuantity && Number(batchQuantity) > 0 && (
+                <div className="space-y-2">
+                  <Label>Scaled Component Quantities ({scaledComponents.length} components)</Label>
+                  <div className="border rounded-lg p-1">
+                    <div className="space-y-1 max-h-64 overflow-y-auto">
+                      {scaledComponents.map((component, index) => (
+                        <div key={index} className="flex justify-between items-center text-sm p-2 bg-white rounded border">
+                          <span className="font-medium flex-1 truncate pr-2">
+                            {component.displayName || `Component ${index + 1}`}
+                          </span>
+                          <div className="flex items-center gap-2 text-right">
+                            <span className="text-muted-foreground text-xs">
+                              {(component.originalAmount || 0).toFixed(3)} {component.unit} →
+                            </span>
+                            <span className="font-bold text-primary bg-blue-50 px-2 py-1 rounded text-xs">
+                              {(component.scaledAmount || 0).toFixed(2)} {component.unit}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-xs text-blue-600">
+                    Quantities automatically scale with batch size (base recipe is per 1 mL)
+                  </p>
+                </div>
+              )}
+              
+              {/* Debug info to see what's happening */}
+              {actionInfo.requiresBatchSize && (
+                <div className="text-xs text-gray-500 border p-2 rounded">
+                  Debug: scaledComponents.length = {scaledComponents.length}, batchQuantity = {batchQuantity}
+                  <br />Total snapshot components: {currentDoc?.snapshot?.components?.length || 0}
+                  <br />Total direct components: {currentDoc?.components?.length || 0}
+                  <br />Current doc keys: {currentDoc ? Object.keys(currentDoc).join(', ') : 'none'}
+                  {currentDoc?.snapshot && (
+                    <div>Snapshot keys: {Object.keys(currentDoc.snapshot).join(', ')}</div>
+                  )}
+                  {scaledComponents.length > 0 && (
+                    <div className="mt-1">
+                      <div>First component: scaledAmount = {scaledComponents[0]?.scaledAmount}, originalAmount = {scaledComponents[0]?.originalAmount}</div>
+                      {scaledComponents.length > 1 && (
+                        <div>Second component: {scaledComponents[1]?.displayName} = {scaledComponents[1]?.scaledAmount}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Solution Details */}
           {actionInfo.requiresLot && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-medium">Solution Details</h3>
-                <Badge variant="outline">
-                  Recipe: {currentDoc?.snapshot?.recipeQty || currentDoc?.recipeQty || 0} {currentDoc?.snapshot?.recipeUnit || currentDoc?.recipeUnit || 'L'}
-                </Badge>
+                {actionInfo.requiresBatchSize && (
+                  <Badge variant="outline">
+                    Auto-filled from batch size
+                  </Badge>
+                )}
               </div>
               
               <div className="grid grid-cols-2 gap-4">
@@ -367,7 +526,7 @@ function SaveConfirmationDialog({
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="solutionQuantity">Actual Solution Quantity</Label>
+                  <Label htmlFor="solutionQuantity">Solution Quantity Produced</Label>
                   <div className="flex gap-2">
                     <Input
                       id="solutionQuantity"
@@ -375,17 +534,22 @@ function SaveConfirmationDialog({
                       step="0.01"
                       value={solutionQuantity}
                       onChange={(e) => setSolutionQuantity(e.target.value)}
-                      placeholder={`${currentDoc?.snapshot?.recipeQty || currentDoc?.recipeQty || 'Auto'}`}
+                      placeholder={actionInfo.requiresBatchSize ? batchQuantity : "Auto"}
+                      disabled={actionInfo.requiresBatchSize}
                     />
                     <Input
                       className="w-20"
                       value={solutionUnit}
                       onChange={(e) => setSolutionUnit(e.target.value)}
                       placeholder="Unit"
+                      disabled={actionInfo.requiresBatchSize}
                     />
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Actual quantity produced (leave blank to use recipe quantity)
+                    {actionInfo.requiresBatchSize 
+                      ? 'Automatically set to match batch size'
+                      : 'Actual quantity produced (leave blank to use recipe quantity)'
+                    }
                   </p>
                 </div>
               </div>
@@ -405,8 +569,11 @@ function SaveConfirmationDialog({
                 
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <p className="text-sm text-amber-800">
-                    <strong>Important:</strong> This will permanently transact these chemicals from NetSuite inventory. 
-                    Verify lots and quantities are correct.
+                    <strong>Important:</strong> This will permanently transact these chemicals from inventory. 
+                    {actionInfo.requiresBatchSize 
+                      ? 'Quantities shown are scaled to your batch size.'
+                      : 'Verify lots and quantities are correct.'
+                    }
                   </p>
                 </div>
                 
@@ -420,7 +587,6 @@ function SaveConfirmationDialog({
                 ) : confirmedComponents.length > 0 ? (
                   <div className="space-y-4">
                     {confirmedComponents.map((component, index) => {
-                      // Extract itemId consistently
                       const itemKey = getItemKey(component);
                       const componentLots = availableLots[itemKey] || [];
                       
@@ -437,11 +603,13 @@ function SaveConfirmationDialog({
                           
                           <div className="grid grid-cols-3 gap-4">
                             <div className="space-y-2">
-                              <Label>Planned Amount</Label>
+                              <Label>
+                                {actionInfo.requiresBatchSize ? 'Base Amount (per mL)' : 'Planned Amount'}
+                              </Label>
                               <div className="flex gap-2">
                                 <Input
                                   type="number"
-                                  value={component.plannedAmount}
+                                  value={component.originalAmount || component.plannedAmount}
                                   readOnly
                                   className="bg-gray-50"
                                 />
@@ -452,7 +620,9 @@ function SaveConfirmationDialog({
                             </div>
                             
                             <div className="space-y-2">
-                              <Label>Actual Amount Used *</Label>
+                              <Label>
+                                {actionInfo.requiresBatchSize ? `Scaled Amount (${batchQuantity} ${batchUnit})` : 'Actual Amount Used'} *
+                              </Label>
                               <div className="flex gap-2">
                                 <Input
                                   type="number"
@@ -464,6 +634,11 @@ function SaveConfirmationDialog({
                                   {component.unit || 'g'}
                                 </span>
                               </div>
+                              {actionInfo.requiresBatchSize && (
+                                <p className="text-xs text-blue-600">
+                                  Scaled from {component.originalAmount} × {batchQuantity}
+                                </p>
+                              )}
                             </div>
                             
                             <div className="space-y-2">
@@ -483,7 +658,7 @@ function SaveConfirmationDialog({
                                           <span>{lot.lotNumber}</span>
                                           <div className="flex items-center gap-2 text-xs text-muted-foreground ml-4">
                                             <span>{lot.availableQty} {lot.unit}</span>
-                                            <span>Exp: {lot.expiryDate}</span>
+                                            {lot.expiryDate && <span>Exp: {lot.expiryDate}</span>}
                                           </div>
                                         </div>
                                       </SelectItem>
@@ -509,7 +684,7 @@ function SaveConfirmationDialog({
                                     <span>Selected: <strong>{selectedLot.lotNumber}</strong></span>
                                     <div className="flex items-center gap-4 text-muted-foreground">
                                       <span>Available: {selectedLot.availableQty} {selectedLot.unit}</span>
-                                      <span>Expires: {selectedLot.expiryDate}</span>
+                                      {selectedLot.expiryDate && <span>Expires: {selectedLot.expiryDate}</span>}
                                     </div>
                                   </div>
                                 ) : (
