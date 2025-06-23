@@ -1,4 +1,4 @@
-// app/api/netsuite/setup/route.js
+// app/api/netsuite/setup/route.js - Enhanced with configuration check
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 import connectMongoDB from '@/lib/index';
@@ -98,9 +98,23 @@ export async function GET(request) {
   try {
     const user = await getUserFromRequest(request);
     
+    // Check if user has NetSuite access configured
+    const hasAccess = user.hasNetSuiteAccess();
+    
+    // Also check if environment variables are available as fallback
+    const envConfigured = !!(
+      process.env.NETSUITE_ACCOUNT_ID &&
+      process.env.NETSUITE_CONSUMER_KEY &&
+      process.env.NETSUITE_CONSUMER_SECRET &&
+      process.env.NETSUITE_TOKEN_ID &&
+      process.env.NETSUITE_TOKEN_SECRET
+    );
+    
     return NextResponse.json({
       success: true,
-      configured: user.hasNetSuiteAccess(),
+      configured: hasAccess || envConfigured,
+      userConfigured: hasAccess,
+      envConfigured: envConfigured,
       user: {
         name: user.name,
         email: user.email,
@@ -112,7 +126,8 @@ export async function GET(request) {
     console.error('NetSuite setup status error:', error);
     return NextResponse.json({
       success: false,
+      configured: false,
       message: error.message
-    }, { status: 500 });
+    }, { status: 200 }); // Return 200 but configured: false for auth issues
   }
 }

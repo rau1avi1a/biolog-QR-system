@@ -85,6 +85,7 @@ async function ensureFolderStructure(relativePath, baseFolderId = null) {
 
 /*───────────────────────────────────────────────────────────────────*/
 /* R: Get a file by ID (optionally include PDF data)                */
+/* FIXED: Include netsuiteInternalId in populated references        */
 /*───────────────────────────────────────────────────────────────────*/
 export async function getFileById(id, { includePdf = false } = {}) {
   if (!isId(id)) return null;
@@ -94,9 +95,9 @@ export async function getFileById(id, { includePdf = false } = {}) {
   const sel = includePdf ? '+pdf' : '-pdf';
   const doc = await File.findById(asId(id))
     .select(sel)
-    .populate('productRef',  'displayName sku')
-    .populate('solutionRef', 'displayName sku')
-    .populate('components.itemId', 'displayName sku')
+    .populate('productRef', 'displayName sku netsuiteInternalId')  // FIXED: Added netsuiteInternalId
+    .populate('solutionRef', 'displayName sku netsuiteInternalId') // FIXED: Added netsuiteInternalId
+    .populate('components.itemId', 'displayName sku netsuiteInternalId') // FIXED: Added netsuiteInternalId
     .lean();
 
   if (!doc) return null;
@@ -261,9 +262,12 @@ export async function createMultipleFilesFromUpload(files, baseFolderId = null) 
   return results;
 }
 
-/*───────────────────────────────────────────────────────────────────*/
+// services/file.service.js - Updated updateFileMeta to handle NetSuite data
+
+/* ───────────────────────────────────────────────────────────────────*/
 /* U: Update file metadata (description, recipe fields, components) */
-/*───────────────────────────────────────────────────────────────────*/
+/*   ENHANCED: Now supports NetSuite import data                     */
+/* ───────────────────────────────────────────────────────────────────*/
 export async function updateFileMeta(id, payload = {}) {
   await connectMongoDB();
 
@@ -275,12 +279,46 @@ export async function updateFileMeta(id, payload = {}) {
     recipeUnit  : payload.recipeUnit   ?? null,
   };
 
+  // Handle components with NetSuite data
   if (Array.isArray(payload.components)) {
-    $set.components = payload.components.map(c => ({
-      itemId : c.itemId,
-      amount : Number(c.amount),
-      unit   : c.unit || 'g'
-    }));
+    $set.components = payload.components.map(c => {
+      const component = {
+        itemId : c.itemId,
+        amount : Number(c.amount),
+        unit   : c.unit || 'g'
+      };
+      
+      // Include NetSuite data if available
+      if (c.netsuiteData) {
+        component.netsuiteData = {
+          itemId: c.netsuiteData.itemId,
+          itemRefName: c.netsuiteData.itemRefName,
+          ingredient: c.netsuiteData.ingredient,
+          bomQuantity: c.netsuiteData.bomQuantity,
+          componentYield: c.netsuiteData.componentYield,
+          units: c.netsuiteData.units,
+          lineId: c.netsuiteData.lineId,
+          bomComponentId: c.netsuiteData.bomComponentId,
+          itemSource: c.netsuiteData.itemSource,
+          type: 'netsuite'
+        };
+      }
+      
+      return component;
+    });
+  }
+
+  // Handle NetSuite import metadata
+  if (payload.netsuiteImportData) {
+    $set.netsuiteImportData = {
+      bomId: payload.netsuiteImportData.bomId,
+      bomName: payload.netsuiteImportData.bomName,
+      revisionId: payload.netsuiteImportData.revisionId,
+      revisionName: payload.netsuiteImportData.revisionName,
+      importedAt: new Date(payload.netsuiteImportData.importedAt),
+      solutionNetsuiteId: payload.netsuiteImportData.solutionNetsuiteId,
+      lastSyncAt: new Date()
+    };
   }
 
   await File.findByIdAndUpdate(asId(id), $set, { runValidators: true });

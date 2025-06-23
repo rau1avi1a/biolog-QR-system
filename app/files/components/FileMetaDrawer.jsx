@@ -1,3 +1,4 @@
+// app/files/components/FileMetaDrawer.jsx - Simplified with direct NetSuite import
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
@@ -31,9 +32,11 @@ import {
   Beaker,
   Hash,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Zap
 } from 'lucide-react';
 import { api }           from '../lib/api';
+import SimpleNetSuiteBOMImport from './SimpleNetSuiteBOMImport';
 
 /* ───────── Enhanced async picker with modern styling ───────── */
 function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Icon }) {
@@ -48,9 +51,12 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
       setBusy(true);
+      console.log('AsyncSelect searching for:', type, 'with term:', q);
       const res = await fetch(`/api/items?type=${type}&search=${encodeURIComponent(q)}`);
-      const { items = [] } = await res.json();
-      setOpts(items);
+      const data = await res.json();
+      console.log('AsyncSelect received data:', data);
+      console.log('First item in results:', data.items?.[0]);
+      setOpts(data.items || []);
       setBusy(false);
     }, 300);
     return () => clearTimeout(timer.current);
@@ -76,6 +82,11 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
             {value.sku && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 SKU: {value.sku}
+              </div>
+            )}
+            {value.netsuiteInternalId && (
+              <div className="text-xs text-blue-600 dark:text-blue-400">
+                NetSuite ID: {value.netsuiteInternalId}
               </div>
             )}
           </div>
@@ -131,36 +142,46 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
         >
           <CardContent className="p-0">
             <ScrollArea className="max-h-48">
-              {busy && (
-                <div className="flex items-center justify-center p-4 text-slate-500">
-                  <Loader2 size={16} className="animate-spin mr-2" />
-                  <span className="text-sm">Searching...</span>
-                </div>
-              )}
-              {!busy && opts.length === 0 && (
-                <div className="p-4 text-center text-slate-500">
-                  <div className="text-sm">No results found</div>
-                  <div className="text-xs mt-1">Try a different search term</div>
-                </div>
-              )}
-              {!busy && opts.map(it => (
-                <div
-                  key={it._id}
-                  onClick={() => { onChange(it); setQ(it.displayName); setOpen(false); }}
-                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 border-b border-slate-100 dark:border-slate-700 last:border-b-0 transition-colors"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-slate-900 dark:text-slate-100 truncate">
-                      {it.displayName}
-                    </div>
-                    {it.sku && (
+              <div className="max-h-48 overflow-y-auto">
+                {busy && (
+                  <div className="flex items-center justify-center p-4 text-slate-500">
+                    <Loader2 size={16} className="animate-spin mr-2" />
+                    <span className="text-sm">Searching...</span>
+                  </div>
+                )}
+                {!busy && opts.length === 0 && (
+                  <div className="p-4 text-center text-slate-500">
+                    <div className="text-sm">No results found</div>
+                    <div className="text-xs mt-1">Try a different search term</div>
+                  </div>
+                )}
+                {!busy && opts.map(it => (
+                  <div
+                    key={it._id}
+                    onClick={() => { 
+                    console.log('Selecting item:', it);
+                    onChange(it); 
+                    setQ(it.displayName); 
+                    setOpen(false); 
+                  }}
+                    className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 border-b border-slate-100 dark:border-slate-700 last:border-b-0 transition-colors"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm text-slate-900 dark:text-slate-100 truncate">
+                        {it.displayName}
+                      </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
                         SKU: {it.sku}
+                        {it.netsuiteInternalId && (
+                          <span className="text-blue-600 dark:text-blue-400 ml-2">
+                            NetSuite: {it.netsuiteInternalId}
+                          </span>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </ScrollArea>
           </CardContent>
         </Card>
@@ -231,13 +252,30 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly }) {
               </div>
             </div>
           </div>
+
+          {/* NetSuite data display if available */}
+          {row.netsuiteData && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-medium text-blue-800">NetSuite Import Data</span>
+              </div>
+              <div className="text-xs text-blue-700 space-y-1">
+                <div><strong>Ingredient:</strong> {row.netsuiteData.ingredient}</div>
+                <div><strong>NetSuite ID:</strong> {row.netsuiteData.itemId}</div>
+                <div><strong>Ref Name:</strong> {row.netsuiteData.itemRefName}</div>
+                <div><strong>BOM Qty:</strong> {row.netsuiteData.bomQuantity}</div>
+                <div><strong>Yield:</strong> {row.netsuiteData.componentYield}%</div>
+              </div>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-/* ───────── Main drawer with enhanced styling and delete functionality ───────── */
+/* ───────── Main drawer with enhanced styling and simplified NetSuite integration ───────── */
 export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, readOnly = false, onFileDeleted }) {
   const [product, setProduct] = useState(null);
   const [solution, setSolution] = useState(null);
@@ -247,6 +285,7 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showNetSuiteImport, setShowNetSuiteImport] = useState(false);
 
   /* Determine if delete should be available */
   const canDelete = () => {
@@ -257,6 +296,11 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     return file.status === 'In Progress'; // Only allow deletion of In Progress batches
   };
 
+  /* Check if NetSuite import is available */
+  const canImportFromNetSuite = () => {
+    return solution && solution.netsuiteInternalId && solution.netsuiteInternalId.trim();
+  };
+
   /* Hydrate form */
   useEffect(() => {
     if (!file) return;
@@ -264,7 +308,21 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     const data = file.snapshot || file;
 
     setProduct(data.productRef || null);
-    setSolution(data.solutionRef || null);
+    
+    // FIXED: If we have a solution reference, we need to fetch the full solution data
+    // including the netsuiteInternalId which isn't stored in the file
+    if (data.solutionRef) {
+      if (typeof data.solutionRef === 'object' && data.solutionRef._id) {
+        // Already populated
+        setSolution(data.solutionRef);
+      } else {
+        // Just an ID, need to fetch full solution data
+        fetchSolutionData(data.solutionRef);
+      }
+    } else {
+      setSolution(null);
+    }
+    
     setOutQty(data.recipeQty ?? '');
     setOutUnit(data.recipeUnit ?? 'mL');
 
@@ -291,22 +349,91 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
           return {
             item: item,
             qty: c.amount,
-            unit: c.unit
+            unit: c.unit,
+            netsuiteData: c.netsuiteData || null // Preserve NetSuite data if available
           };
         })
       );
     } else {
-      setRows([{ item: null, qty: '', unit: 'g' }]);
+      setRows([{ item: null, qty: '', unit: 'g', netsuiteData: null }]);
     }
   }, [file]);
 
-  const addRow = () => setRows(r => [...r, { item: null, qty: '', unit: 'g' }]);
+  /* Fetch full solution data including netsuiteInternalId */
+  const fetchSolutionData = async (solutionId) => {
+    try {
+      const response = await fetch(`/api/items?type=solution&search=`);
+      const data = await response.json();
+      const fullSolution = data.items?.find(item => item._id === solutionId);
+      if (fullSolution) {
+        setSolution(fullSolution);
+      }
+    } catch (error) {
+      console.error('Failed to fetch solution data:', error);
+    }
+  };
+
+  const addRow = () => setRows(r => [...r, { item: null, qty: '', unit: 'g', netsuiteData: null }]);
   const remRow = i => setRows(r => r.filter((_, ix) => ix !== i));
 
   const updateRow = (index, field, value) => {
     const newRows = [...rows];
     newRows[index][field] = value;
     setRows(newRows);
+  };
+
+  /* Handle NetSuite BOM import */
+  const handleNetSuiteImport = (importData) => {
+    console.log('NetSuite import data received:', importData);
+    
+    // Set recipe quantity and unit if provided
+    if (importData.recipeQty) {
+      setOutQty(importData.recipeQty.toString());
+    }
+    if (importData.recipeUnit) {
+      setOutUnit(importData.recipeUnit);
+    }
+
+    // Import the components - these will be saved to the File model
+    if (importData.components?.length > 0) {
+      setRows(importData.components);
+    }
+
+    setShowNetSuiteImport(false);
+    
+    // Auto-save the imported BOM data immediately
+    autoSaveImportedBOM(importData);
+  };
+
+  /* Auto-save imported BOM data to preserve NetSuite link */
+  const autoSaveImportedBOM = async (importData) => {
+    if (!file || readOnly) return;
+    
+    try {
+      // Save the BOM data to the File model
+      await api.updateFileMeta(file._id, {
+        productRef: product?._id || null,
+        solutionRef: solution?._id || null,
+        recipeQty: importData.recipeQty ? Number(importData.recipeQty) : (outQty ? Number(outQty) : null),
+        recipeUnit: importData.recipeUnit || outUnit,
+        components: importData.components
+          .filter(r => r.qty) // Only save components with quantities
+          .map(r => ({
+            itemId: r.item?._id || null, // This will be null initially, user can map later
+            amount: Number(r.qty),
+            unit: r.unit || 'g',
+            netsuiteData: r.netsuiteData || undefined // Store NetSuite metadata
+          })),
+        // Store additional NetSuite metadata at the file level
+        netsuiteImportData: importData.netsuiteImportData
+      });
+      
+      console.log('BOM data auto-saved successfully');
+      onSaved?.(); // Trigger refresh
+    } catch (error) {
+      console.error('Failed to auto-save imported BOM data:', error);
+      // Don't show error to user since this is auto-save, they can manually save later
+    }
   };
 
   const save = async () => {
@@ -323,7 +450,8 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
           .map(r => ({
             itemId: r.item._id,
             amount: Number(r.qty),
-            unit: r.unit || 'g'
+            unit: r.unit || 'g',
+            netsuiteData: r.netsuiteData || undefined // Include NetSuite data if available
           }))
       });
       onSaved?.();
@@ -537,6 +665,53 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
                     )}
                   </div>
 
+                  {/* NetSuite Import Button - only show when solution has NetSuite ID */}
+                  {!readOnly && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-3">
+                      <div className="text-xs text-slate-600 space-y-1">
+                        <div><strong>Debug Info:</strong></div>
+                        <div>Solution selected: {solution ? 'Yes' : 'No'}</div>
+                        <div>Solution name: {solution?.displayName || 'None'}</div>
+                        <div>NetSuite ID: {solution?.netsuiteInternalId || 'None'}</div>
+                        <div>Can import: {canImportFromNetSuite() ? 'Yes' : 'No'}</div>
+                        <div>ReadOnly: {readOnly ? 'Yes' : 'No'}</div>
+                        {solution && (
+                          <div className="mt-2 p-2 bg-white border rounded">
+                            <div><strong>Full Solution Object:</strong></div>
+                            <pre className="text-xs overflow-auto max-h-32">
+                              {JSON.stringify(solution, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {!readOnly && canImportFromNetSuite() && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-blue-600" />
+                          <div>
+                            <span className="text-sm font-medium text-blue-800">NetSuite Integration Available</span>
+                            <p className="text-xs text-blue-600 mt-1">
+                              Import BOM components for "{solution.displayName}"
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowNetSuiteImport(true)}
+                          className="border-blue-300 text-blue-700 hover:bg-blue-100"
+                        >
+                          <Zap className="h-3 w-3 mr-1" />
+                          Import BOM
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     {rows.map((row, index) => (
                       <ComponentRow
@@ -588,6 +763,14 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Simplified NetSuite BOM Import Dialog */}
+      <SimpleNetSuiteBOMImport
+        open={showNetSuiteImport}
+        onClose={() => setShowNetSuiteImport(false)}
+        onImport={handleNetSuiteImport}
+        solution={solution}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

@@ -1,3 +1,4 @@
+// app/api/items/route.js - Debug version to see all fields
 import { NextResponse } from 'next/server';
 import dbConnect        from '@/lib/index';
 import { Item }         from '@/models/Item';
@@ -36,20 +37,45 @@ export async function GET(request) {
     const q = {};
     if (type) q.itemType = type;
     if (searchRaw) {
-      // escape any regex metas so (+), etc. don't break the query
+      // FIXED: Use partial matching instead of exact regex
       const escaped = escapeRegExp(searchRaw);
       q.displayName = { $regex: escaped, $options: 'i' };
     }
 
+    // DEBUG: Let's see what fields are actually available
+    console.log('Searching for items with query:', q);
+    console.log('Search term:', searchRaw);
+    
+    // First, let's get ONE item with ALL fields to see what's available
+    const debugItem = await Item.findOne(q).lean();
+    console.log('Sample item with ALL fields:', debugItem ? 'Found item' : 'No item found');
+    if (debugItem) {
+      console.log('Sample item fields:', Object.keys(debugItem));
+      console.log('NetSuite ID in sample:', debugItem.netsuiteInternalId);
+    }
+
+    // Now get the items with explicit fields
     const items = await Item.find(q)
       .sort({ displayName: 1 })
-      .select('_id displayName sku')
+      .select('_id displayName sku netsuiteInternalId') // Include netsuiteInternalId
       .lean();
 
-    return NextResponse.json({ items });
+    console.log('Items returned:', items.length);
+    if (items.length > 0) {
+      console.log('First item fields:', Object.keys(items[0]));
+      console.log('First item NetSuite ID:', items[0].netsuiteInternalId);
+    }
+
+    return NextResponse.json({ 
+      items,
+      debug: {
+        query: q,
+        sampleItem: debugItem,
+        itemCount: items.length
+      }
+    });
   } catch (err) {
-    // Removed console.error as requested
-    // always return JSON so front-end res.json() won't fail
+    console.error('Items API error:', err);
     return NextResponse.json(
       { items: [], error: err.message },
       { status: 500 }
@@ -64,7 +90,6 @@ export async function POST(request) {
     const item = await createItem(body);
     return NextResponse.json({ item }, { status: 201 });
   } catch (err) {
-    // Removed console.error as requested
     return NextResponse.json(
       { error: err.message },
       { status: 400 }

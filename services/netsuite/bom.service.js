@@ -1,4 +1,4 @@
-// services/netsuite/bom.service.js
+// services/netsuite/bom.service.js - Updated with enhanced search
 import { createNetSuiteAuth } from './auth.service.js';
 
 /**
@@ -11,6 +11,77 @@ export class NetSuiteBOMService {
   }
 
   /**
+   * Search for Solutions/Assembly Items by name or internal ID
+   * Enhanced search with better error handling
+   */
+  async searchAssemblyItems(searchTerm = '') {
+    try {
+      console.log('Searching for assembly items:', searchTerm);
+      
+      if (!searchTerm || searchTerm.trim().length < 2) {
+        return [];
+      }
+
+      // Try different search approaches
+      let endpoint = '/assemblyItem';
+      
+      // If search term is numeric, assume it's an internal ID
+      if (/^\d+$/.test(searchTerm.trim())) {
+        endpoint += `?q=internalid:${encodeURIComponent(searchTerm.trim())}`;
+      } else {
+        // Text search - search in item ID/name fields
+        endpoint += `?q=${encodeURIComponent(searchTerm.trim())}`;
+      }
+      
+      console.log('Search endpoint:', endpoint);
+      
+      const results = await this.auth.makeRequest(endpoint);
+      
+      // Handle different response formats
+      if (results && results.items) {
+        return results.items;
+      } else if (Array.isArray(results)) {
+        return results;
+      } else if (results && results.links) {
+        // Single item returned
+        return [results];
+      } else {
+        console.log('Unexpected search result format:', results);
+        return [];
+      }
+      
+    } catch (error) {
+      console.error('Error searching assembly items:', error);
+      
+      // Try a simpler search as fallback
+      try {
+        console.log('Trying fallback search...');
+        const fallbackEndpoint = `/assemblyItem?limit=10`;
+        const fallbackResults = await this.auth.makeRequest(fallbackEndpoint);
+        
+        if (fallbackResults && fallbackResults.items) {
+          // Filter results client-side
+          const filtered = fallbackResults.items.filter(item => {
+            const itemId = item.itemid || item.id || '';
+            const displayName = item.displayName || item.itemid || '';
+            const searchLower = searchTerm.toLowerCase();
+            
+            return itemId.toLowerCase().includes(searchLower) || 
+                   displayName.toLowerCase().includes(searchLower);
+          });
+          
+          return filtered;
+        }
+      } catch (fallbackError) {
+        console.error('Fallback search also failed:', fallbackError);
+      }
+      
+      // Return empty array instead of throwing to prevent UI errors
+      return [];
+    }
+  }
+
+  /**
    * Get Assembly Item BOM and its components
    * Based on your Postman testing:
    * 1. Get BOM list with expandSubResources=true
@@ -19,6 +90,8 @@ export class NetSuiteBOMService {
    */
   async getAssemblyBOM(assemblyItemId) {
     try {
+      console.log('Getting BOM for assembly item:', assemblyItemId);
+      
       // Step 1: Get BOMs for this assembly item with expanded details
       const endpoint = `/assemblyItem/${assemblyItemId}/billOfMaterials?expandSubResources=true`;
       const bomsResponse = await this.auth.makeRequest(endpoint);
@@ -71,25 +144,6 @@ export class NetSuiteBOMService {
       return revisionData.component.items;
     } catch (error) {
       console.error('Error fetching BOM revision components:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Search for Solutions/Assembly Items by name or internal ID
-   */
-  async searchAssemblyItems(searchTerm = '') {
-    try {
-      let endpoint = '/assemblyItem';
-      if (searchTerm) {
-        // Add search parameters - adjust based on NetSuite's search API
-        endpoint += `?q=${encodeURIComponent(searchTerm)}`;
-      }
-      
-      const results = await this.auth.makeRequest(endpoint);
-      return results.items || results || [];
-    } catch (error) {
-      console.error('Error searching assembly items:', error);
       throw error;
     }
   }
