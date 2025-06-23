@@ -1,11 +1,11 @@
-// app/files/components/PDFEditor.jsx - Enhanced Mobile Version
+// app/files/components/PDFEditor.jsx - Enhanced with Properties Opening and Work Order Status
 'use client';
 
 import React, { useState } from 'react';
 import {
   Menu, Pencil, Undo, Save, CheckCircle, Printer, Settings,
   ChevronLeft, ChevronRight, ArrowRightCircle, XCircle, Package,
-  AlertTriangle, FileText, Lock, MoreHorizontal
+  AlertTriangle, FileText, Lock, MoreHorizontal, Clock
 } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
@@ -41,6 +41,9 @@ export default function PDFEditor(props) {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveAction, setSaveAction] = useState('save');
 
+  /* Work order creation status */
+  const [isCreatingWorkOrder, setIsCreatingWorkOrder] = useState(false);
+
   /* logic hook */
   const {
     canvasRef, pageContainerRef,
@@ -62,9 +65,39 @@ export default function PDFEditor(props) {
   const isCompleted = status === 'Completed';
   const isArchived = doc.isArchived;
 
+  /* Get work order display information */
+  const getWorkOrderInfo = () => {
+    if (!doc.isBatch) return null;
+    
+    if (doc.workOrderCreated) {
+      // Prioritize NetSuite work order ID over local ID
+      const displayId = doc.netsuiteWorkOrderData?.tranId || 
+                       doc.netsuiteWorkOrderData?.workOrderId || 
+                       doc.workOrderId || 'Unknown';
+      
+      return {
+        id: displayId,
+        status: doc.workOrderStatus || 'created',
+        createdAt: doc.workOrderCreatedAt,
+        netsuiteId: doc.netsuiteWorkOrderData?.tranId || doc.netsuiteWorkOrderData?.workOrderId,
+        isNetSuite: !!(doc.netsuiteWorkOrderData?.tranId || doc.netsuiteWorkOrderData?.workOrderId),
+        isLocal: displayId.startsWith('LOCAL-WO-') || displayId.startsWith('PENDING-')
+      };
+    }
+    
+    return null;
+  };
+
+  const workOrderInfo = getWorkOrderInfo();
+
   /* Handle save button clicks with NetSuite workflow */
-  const handleSave = (action = 'save') => {
+  const handleSave = async (action = 'save') => {
     setSaveAction(action);
+    
+    // Special handling for work order creation to show loading state
+    if (action === 'create_work_order') {
+      setIsCreatingWorkOrder(true);
+    }
     
     // Determine if we need to show confirmation dialog
     const needsConfirmation = shouldShowConfirmation(action);
@@ -73,7 +106,11 @@ export default function PDFEditor(props) {
       setShowSaveDialog(true);
     } else {
       // For simple actions, save directly
-      save(action);
+      try {
+        await save(action);
+      } finally {
+        setIsCreatingWorkOrder(false);
+      }
     }
   };
 
@@ -106,6 +143,7 @@ export default function PDFEditor(props) {
     // Refresh the file list
     refreshFiles?.();
   };
+
   const handleSaveConfirm = async (confirmationData) => {
     try {
       await save(saveAction, confirmationData);
@@ -120,7 +158,14 @@ export default function PDFEditor(props) {
       }, 200);
     } catch (error) {
       // You might want to show an error toast here
+    } finally {
+      setIsCreatingWorkOrder(false);
     }
+  };
+
+  /* Open properties drawer */
+  const handleOpenProperties = () => {
+    setMetaOpen(true);
   };
 
   /* Get the appropriate button text and action */
@@ -131,7 +176,8 @@ export default function PDFEditor(props) {
         text: compact ? 'Create WO' : 'Create Work Order',
         icon: Package,
         variant: 'default',
-        disabled: isSaving
+        disabled: isSaving || isCreatingWorkOrder,
+        loading: isCreatingWorkOrder
       };
     }
     
@@ -208,7 +254,7 @@ export default function PDFEditor(props) {
             onClick={() => handleSave(primaryButton.action)}
             className={`flex items-center gap-1 text-xs px-2 ${primaryButton.className || ''}`}
           >
-            {isSaving && primaryButton.action === saveAction ? (
+            {primaryButton.loading || (isSaving && primaryButton.action === saveAction) ? (
               <primaryButton.icon size={14} className="animate-spin" />
             ) : (
               <primaryButton.icon size={14} />
@@ -260,7 +306,7 @@ export default function PDFEditor(props) {
               onClick={() => handleSave(config.action)}
               className={`flex items-center gap-1 ${compact ? 'text-xs px-2' : ''} ${config.className || ''}`}
             >
-              {isSaving && config.action === saveAction ? (
+              {config.loading || (isSaving && config.action === saveAction) ? (
                 <IconComponent size={compact ? 14 : 16} className="animate-spin" />
               ) : (
                 <IconComponent size={compact ? 14 : 16} />
@@ -326,6 +372,20 @@ export default function PDFEditor(props) {
                compact ? status.slice(0, 8) : status}
             </Badge>
 
+            {/* Work Order Status - show for batches with work orders */}
+            {workOrderInfo && (
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 flex items-center gap-1 shrink-0">
+                <Package size={8} />
+                {compact ? 'WO' : 'Work Order'}
+                {!workOrderInfo.isLocal && (
+                  <span className="text-xs">({workOrderInfo.id})</span>
+                )}
+                {workOrderInfo.isLocal && (
+                  <span className="text-xs text-amber-600">(Local)</span>
+                )}
+              </Badge>
+            )}
+
             {/* Workflow restrictions indicator for original files */}
             {isOriginal && (
               <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 flex items-center gap-1 shrink-0">
@@ -384,6 +444,14 @@ export default function PDFEditor(props) {
               {compact ? (isArchived ? 'Arc' : 'Done') : (isArchived ? 'Archived' : 'Completed')}
             </Badge>
           )}
+
+          {/* Work Order Creation Loading Indicator */}
+          {isCreatingWorkOrder && (
+            <div className="flex items-center gap-1 text-xs text-blue-600">
+              <Clock size={12} className="animate-spin" />
+              <span className="hidden sm:inline">Creating WO...</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -437,10 +505,14 @@ export default function PDFEditor(props) {
       {/* Save Confirmation Dialog */}
       <SaveConfirmationDialog
         open={showSaveDialog}
-        onClose={() => setShowSaveDialog(false)}
+        onClose={() => {
+          setShowSaveDialog(false);
+          setIsCreatingWorkOrder(false);
+        }}
         onConfirm={handleSaveConfirm}
         currentDoc={doc}
         action={saveAction}
+        onOpenProperties={handleOpenProperties} // Pass the function to open properties
       />
     </div>
   );

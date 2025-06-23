@@ -1,4 +1,4 @@
-// app/files/components/SaveConfirmationDialog.jsx - Enhanced with batch quantity input
+// app/files/components/SaveConfirmationDialog.jsx - Fixed "Open Properties" functionality
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -40,7 +40,8 @@ function SaveConfirmationDialog({
   onClose, 
   onConfirm, 
   currentDoc, 
-  action = 'save'
+  action = 'save',
+  onOpenProperties // NEW: Function to open properties drawer
 }) {
   const [batchQuantity, setBatchQuantity] = useState('1000'); // Default batch size
   const [batchUnit, setBatchUnit] = useState('mL');
@@ -327,7 +328,7 @@ function SaveConfirmationDialog({
     return true;
   };
 
-  // Handle setup requirement
+  // Handle setup requirement with proper properties opening
   if (actionInfo.requiresSetup) {
     return (
       <Dialog open={open} onOpenChange={onClose}>
@@ -357,7 +358,10 @@ function SaveConfirmationDialog({
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>Cancel</Button>
             <Button onClick={() => {
-              onClose();
+              onClose(); // Close this dialog first
+              if (onOpenProperties) {
+                onOpenProperties(); // Then open properties
+              }
             }}>
               Open Properties
             </Button>
@@ -472,27 +476,6 @@ function SaveConfirmationDialog({
                   <p className="text-xs text-blue-600">
                     Quantities automatically scale with batch size (base recipe is per 1 mL)
                   </p>
-                </div>
-              )}
-              
-              {/* Debug info to see what's happening */}
-              {actionInfo.requiresBatchSize && (
-                <div className="text-xs text-gray-500 border p-2 rounded">
-                  Debug: scaledComponents.length = {scaledComponents.length}, batchQuantity = {batchQuantity}
-                  <br />Total snapshot components: {currentDoc?.snapshot?.components?.length || 0}
-                  <br />Total direct components: {currentDoc?.components?.length || 0}
-                  <br />Current doc keys: {currentDoc ? Object.keys(currentDoc).join(', ') : 'none'}
-                  {currentDoc?.snapshot && (
-                    <div>Snapshot keys: {Object.keys(currentDoc.snapshot).join(', ')}</div>
-                  )}
-                  {scaledComponents.length > 0 && (
-                    <div className="mt-1">
-                      <div>First component: scaledAmount = {scaledComponents[0]?.scaledAmount}, originalAmount = {scaledComponents[0]?.originalAmount}</div>
-                      {scaledComponents.length > 1 && (
-                        <div>Second component: {scaledComponents[1]?.displayName} = {scaledComponents[1]?.scaledAmount}</div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
             </div>
