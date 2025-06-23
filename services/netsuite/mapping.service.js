@@ -1,15 +1,15 @@
-// services/netsuite/mapping.service.js - Enhanced component mapping service
+// services/netsuite/mapping.service.js - Enhanced to search both chemicals and solutions
 import connectMongoDB from '@/lib/index';
 import { Item } from '@/models/Item';
 
 /**
  * Enhanced NetSuite Component Mapping Service
- * Maps NetSuite BOM components to local chemicals using multiple strategies
+ * Maps NetSuite BOM components to local chemicals AND solutions using multiple strategies
  */
 export class NetSuiteMappingService {
   
   /**
-   * Map NetSuite components to local chemicals using multiple strategies
+   * Map NetSuite components to local chemicals and solutions using multiple strategies
    * @param {Array} netsuiteComponents - Array of NetSuite BOM components
    * @returns {Array} Mapping results with confidence scores
    */
@@ -18,15 +18,26 @@ export class NetSuiteMappingService {
     
     const mappingResults = [];
     
-    // Get all local chemicals for fuzzy matching
-    const localChemicals = await Item.find({ itemType: 'chemical' })
-      .select('_id displayName sku casNumber netsuiteInternalId qtyOnHand uom')
-      .lean();
+    // Get all local chemicals AND solutions for mapping
+    const [localChemicals, localSolutions] = await Promise.all([
+      Item.find({ itemType: 'chemical' })
+        .select('_id displayName sku casNumber netsuiteInternalId qtyOnHand uom itemType')
+        .lean(),
+      Item.find({ itemType: 'solution' })
+        .select('_id displayName sku netsuiteInternalId qtyOnHand uom itemType')
+        .lean()
+    ]);
     
-    console.log(`Found ${localChemicals.length} local chemicals for mapping`);
+    // Combine all components and add itemCategory for identification
+    const allLocalComponents = [
+      ...localChemicals.map(item => ({ ...item, itemCategory: 'chemical' })),
+      ...localSolutions.map(item => ({ ...item, itemCategory: 'solution' }))
+    ];
+    
+    console.log(`Found ${localChemicals.length} chemicals and ${localSolutions.length} solutions for mapping (${allLocalComponents.length} total)`);
     
     for (const component of netsuiteComponents) {
-      const mappingResult = await this.mapSingleComponent(component, localChemicals);
+      const mappingResult = await this.mapSingleComponent(component, allLocalComponents);
       mappingResults.push(mappingResult);
     }
     
@@ -34,70 +45,91 @@ export class NetSuiteMappingService {
   }
   
   /**
-   * Map a single NetSuite component to local chemicals
+   * Map a single NetSuite component to local chemicals and solutions
    * @param {Object} component - NetSuite component data
-   * @param {Array} localChemicals - Array of local chemicals
+   * @param {Array} allLocalComponents - Array of local chemicals and solutions
    * @returns {Object} Mapping result with matches and confidence
    */
-  async mapSingleComponent(component, localChemicals) {
+  async mapSingleComponent(component, allLocalComponents) {
     const matches = [];
+    
+    console.log(`Mapping NetSuite component: ${component.ingredient} (ID: ${component.itemId})`);
     
     // Strategy 1: Exact NetSuite Internal ID match (highest confidence)
     if (component.itemId) {
-      const exactMatch = localChemicals.find(chem => 
-        chem.netsuiteInternalId === component.itemId
+      const exactMatch = allLocalComponents.find(item => 
+        item.netsuiteInternalId === component.itemId
       );
       
       if (exactMatch) {
+        console.log(`✓ Found exact NetSuite ID match: ${exactMatch.displayName} (${exactMatch.itemCategory})`);
         matches.push({
-          chemical: exactMatch,
+          chemical: exactMatch, // Keep naming for compatibility
           confidence: 1.0,
           matchType: 'netsuite_id_exact',
-          reason: 'Exact NetSuite Internal ID match'
+          reason: `Exact NetSuite Internal ID match (${exactMatch.itemCategory})`
         });
       }
     }
     
     // Strategy 2: Name-based fuzzy matching (if no exact ID match)
     if (matches.length === 0 && component.ingredient) {
-      const nameMatches = this.findNameMatches(component.ingredient, localChemicals);
+      console.log(`No exact ID match found, trying name-based matching for: ${component.ingredient}`);
+      const nameMatches = this.findNameMatches(component.ingredient, allLocalComponents);
       matches.push(...nameMatches);
+      
+      if (nameMatches.length > 0) {
+        console.log(`Found ${nameMatches.length} name-based matches`);
+      }
     }
     
     // Strategy 3: SKU/Reference matching (if available)
     if (matches.length === 0 && component.itemRefName) {
-      const skuMatches = this.findSKUMatches(component.itemRefName, localChemicals);
+      console.log(`No name matches found, trying SKU matching for: ${component.itemRefName}`);
+      const skuMatches = this.findSKUMatches(component.itemRefName, allLocalComponents);
       matches.push(...skuMatches);
+      
+      if (skuMatches.length > 0) {
+        console.log(`Found ${skuMatches.length} SKU-based matches`);
+      }
     }
     
     // Sort matches by confidence (highest first)
     matches.sort((a, b) => b.confidence - a.confidence);
     
-    return {
+    const result = {
       netsuiteComponent: component,
       matches: matches.slice(0, 5), // Top 5 matches
       bestMatch: matches.length > 0 ? matches[0] : null,
       mappedSuccessfully: matches.length > 0 && matches[0].confidence >= 0.8
     };
+    
+    if (result.bestMatch) {
+      console.log(`✓ Best match for ${component.ingredient}: ${result.bestMatch.chemical.displayName} (${result.bestMatch.chemical.itemCategory}) - confidence: ${Math.round(result.bestMatch.confidence * 100)}%`);
+    } else {
+      console.log(`✗ No suitable match found for ${component.ingredient}`);
+    }
+    
+    return result;
   }
   
   /**
    * Find name-based matches using fuzzy string matching
    */
-  findNameMatches(ingredientName, localChemicals) {
+  findNameMatches(ingredientName, allLocalComponents) {
     const matches = [];
     const searchName = ingredientName.toLowerCase().trim();
     
-    for (const chemical of localChemicals) {
-      const chemName = chemical.displayName.toLowerCase().trim();
-      const confidence = this.calculateNameSimilarity(searchName, chemName);
+    for (const component of allLocalComponents) {
+      const componentName = component.displayName.toLowerCase().trim();
+      const confidence = this.calculateNameSimilarity(searchName, componentName);
       
       if (confidence > 0.3) { // Only include reasonable matches
         matches.push({
-          chemical,
+          chemical: component, // Keep naming for compatibility
           confidence,
           matchType: confidence > 0.8 ? 'name_high' : confidence > 0.6 ? 'name_medium' : 'name_low',
-          reason: `Name similarity: ${Math.round(confidence * 100)}%`
+          reason: `Name similarity: ${Math.round(confidence * 100)}% (${component.itemCategory})`
         });
       }
     }
@@ -108,29 +140,29 @@ export class NetSuiteMappingService {
   /**
    * Find SKU/Reference based matches
    */
-  findSKUMatches(itemRefName, localChemicals) {
+  findSKUMatches(itemRefName, allLocalComponents) {
     const matches = [];
     const searchRef = itemRefName.toLowerCase().trim();
     
-    for (const chemical of localChemicals) {
-      const chemSku = chemical.sku.toLowerCase().trim();
+    for (const component of allLocalComponents) {
+      const componentSku = component.sku.toLowerCase().trim();
       
       // Exact SKU match
-      if (chemSku === searchRef) {
+      if (componentSku === searchRef) {
         matches.push({
-          chemical,
+          chemical: component, // Keep naming for compatibility
           confidence: 0.9,
           matchType: 'sku_exact',
-          reason: 'Exact SKU match'
+          reason: `Exact SKU match (${component.itemCategory})`
         });
       }
       // Partial SKU match
-      else if (chemSku.includes(searchRef) || searchRef.includes(chemSku)) {
+      else if (componentSku.includes(searchRef) || searchRef.includes(componentSku)) {
         matches.push({
-          chemical,
+          chemical: component, // Keep naming for compatibility
           confidence: 0.7,
           matchType: 'sku_partial',
-          reason: 'Partial SKU match'
+          reason: `Partial SKU match (${component.itemCategory})`
         });
       }
     }
@@ -219,7 +251,8 @@ export class NetSuiteMappingService {
       mediumConfidenceMatches: 0,
       lowConfidenceMatches: 0,
       unmapped: 0,
-      byMatchType: {}
+      byMatchType: {},
+      byItemType: { chemical: 0, solution: 0 }
     };
     
     for (const result of mappingResults) {
@@ -228,6 +261,7 @@ export class NetSuiteMappingService {
       } else {
         const confidence = result.bestMatch.confidence;
         const matchType = result.bestMatch.matchType;
+        const itemType = result.bestMatch.chemical.itemCategory;
         
         if (confidence === 1.0) stats.exactMatches++;
         else if (confidence >= 0.8) stats.highConfidenceMatches++;
@@ -235,6 +269,7 @@ export class NetSuiteMappingService {
         else stats.lowConfidenceMatches++;
         
         stats.byMatchType[matchType] = (stats.byMatchType[matchType] || 0) + 1;
+        stats.byItemType[itemType] = (stats.byItemType[itemType] || 0) + 1;
       }
     }
     

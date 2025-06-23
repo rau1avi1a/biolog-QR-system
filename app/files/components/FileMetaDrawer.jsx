@@ -1,4 +1,4 @@
-// app/files/components/FileMetaDrawer.jsx - Cleaned version
+// app/files/components/FileMetaDrawer.jsx - Updated to support solutions in components
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
@@ -33,12 +33,13 @@ import {
   Hash,
   FileText,
   AlertTriangle,
-  Zap
+  Zap,
+  Settings
 } from 'lucide-react';
 import { api }           from '../lib/api';
 import SimpleNetSuiteBOMImport from './SimpleNetSuiteBOMImport';
 
-/* ───────── Enhanced async picker with modern styling ───────── */
+/* ───────── Enhanced async picker with chemical/solution support ───────── */
 function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Icon }) {
   const [opts, setOpts] = useState([]);
   const [q, setQ] = useState(value?.displayName || '');
@@ -52,11 +53,34 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
     timer.current = setTimeout(async () => {
       setBusy(true);
       console.log('AsyncSelect searching for:', type, 'with term:', q);
-      const res = await fetch(`/api/items?type=${type}&search=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      console.log('AsyncSelect received data:', data);
-      console.log('First item in results:', data.items?.[0]);
-      setOpts(data.items || []);
+      
+      // For components, search both chemicals and solutions
+      if (type === 'component') {
+        try {
+          const [chemRes, solRes] = await Promise.all([
+            fetch(`/api/items?type=chemical&search=${encodeURIComponent(q)}`),
+            fetch(`/api/items?type=solution&search=${encodeURIComponent(q)}`)
+          ]);
+          const chemData = await chemRes.json();
+          const solData = await solRes.json();
+          
+          const allItems = [
+            ...(chemData.items || []).map(item => ({...item, itemCategory: 'chemical'})),
+            ...(solData.items || []).map(item => ({...item, itemCategory: 'solution'}))
+          ];
+          
+          setOpts(allItems);
+        } catch (error) {
+          console.error('Error searching components:', error);
+          setOpts([]);
+        }
+      } else {
+        // Regular single-type search
+        const res = await fetch(`/api/items?type=${type}&search=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        setOpts(data.items || []);
+      }
+      
       setBusy(false);
     }, 300);
     return () => clearTimeout(timer.current);
@@ -82,6 +106,11 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
             {value.sku && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 SKU: {value.sku}
+              </div>
+            )}
+            {value.itemCategory && (
+              <div className="text-xs text-purple-600 dark:text-purple-400">
+                Type: {value.itemCategory === 'chemical' ? 'Chemical' : 'Solution'}
               </div>
             )}
             {value.netsuiteInternalId && (
@@ -159,11 +188,11 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
                   <div
                     key={it._id}
                     onClick={() => { 
-                    console.log('Selecting item:', it);
-                    onChange(it); 
-                    setQ(it.displayName); 
-                    setOpen(false); 
-                  }}
+                      console.log('Selecting item:', it);
+                      onChange(it); 
+                      setQ(it.displayName); 
+                      setOpen(false); 
+                    }}
                     className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 border-b border-slate-100 dark:border-slate-700 last:border-b-0 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
@@ -172,6 +201,11 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
                       </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
                         SKU: {it.sku}
+                        {it.itemCategory && (
+                          <span className="text-purple-600 dark:text-purple-400 ml-2">
+                            {it.itemCategory === 'chemical' ? 'Chemical' : 'Solution'}
+                          </span>
+                        )}
                         {it.netsuiteInternalId && (
                           <span className="text-blue-600 dark:text-blue-400 ml-2">
                             NetSuite: {it.netsuiteInternalId}
@@ -190,7 +224,7 @@ function AsyncSelect({ label, type, value, onChange, disabled = false, icon: Ico
   );
 }
 
-/* ───────── Component row with batch-aware quantities ───────── */
+/* ───────── Component row with Work Order status display ───────── */
 function ComponentRow({ row, index, onChange, onRemove, readOnly, batchInfo }) {
   // Determine mapping status
   const getMappingStatus = () => {
@@ -265,11 +299,11 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly, batchInfo }) {
     <Card className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50">
       <CardContent className="p-4">
         <div className="space-y-3">
-          {/* Chemical selection with mapping status */}
+          {/* Component selection with mapping status */}
           <div className="flex items-start gap-2">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Chemical</label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Component</label>
                 {mappingStatus && (
                   <Badge variant="outline" className={`text-xs ${mappingStatus.color}`}>
                     {mappingStatus.label}
@@ -279,7 +313,7 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly, batchInfo }) {
               
               <AsyncSelect
                 label=""
-                type="chemical"
+                type="component"
                 value={row.item}
                 onChange={readOnly ? undefined : (item => onChange(index, 'item', item))}
                 disabled={readOnly}
@@ -306,7 +340,7 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly, batchInfo }) {
                   
                   {!row.item && !readOnly && (
                     <div className="mt-2 text-amber-700 text-xs">
-                      ⚠ Please select a chemical from the dropdown above to complete the mapping
+                      ⚠ Please select a component from the dropdown above to complete the mapping
                     </div>
                   )}
                 </div>
@@ -366,7 +400,7 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly, batchInfo }) {
             </div>
           </div>
 
-          {/* Show stock information if chemical is selected */}
+          {/* Show stock information if component is selected */}
           {row.item && row.item.qtyOnHand !== undefined && (
             <div className="bg-slate-50 border border-slate-200 rounded p-2 text-xs">
               <div className="flex items-center justify-between">
@@ -383,7 +417,7 @@ function ComponentRow({ row, index, onChange, onRemove, readOnly, batchInfo }) {
   );
 }
 
-/* ───────── Main drawer with enhanced styling and simplified NetSuite integration ───────── */
+/* ───────── Main drawer with Work Order status display ───────── */
 export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, readOnly = false, onFileDeleted }) {
   const [solution, setSolution] = useState(null);
   const [rows, setRows] = useState([]);
@@ -405,6 +439,31 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
   const canImportFromNetSuite = () => {
     return solution && solution.netsuiteInternalId && solution.netsuiteInternalId.trim();
   };
+
+  /* Get work order display information */
+  const getWorkOrderInfo = () => {
+    if (!file.isBatch) return null;
+    
+    if (file.workOrderCreated) {
+      // Prioritize NetSuite work order ID over local ID
+      const displayId = file.netsuiteWorkOrderData?.tranId || 
+                       file.netsuiteWorkOrderData?.workOrderId || 
+                       file.workOrderId || 'Unknown';
+      
+      return {
+        id: displayId,
+        status: file.workOrderStatus || 'created',
+        createdAt: file.workOrderCreatedAt,
+        netsuiteId: file.netsuiteWorkOrderData?.tranId || file.netsuiteWorkOrderData?.workOrderId,
+        isNetSuite: !!(file.netsuiteWorkOrderData?.tranId || file.netsuiteWorkOrderData?.workOrderId),
+        isLocal: displayId.startsWith('LOCAL-WO-') || displayId.startsWith('PENDING-')
+      };
+    }
+    
+    return null;
+  };
+
+  const workOrderInfo = getWorkOrderInfo();
 
   /* Hydrate form */
   useEffect(() => {
@@ -435,13 +494,15 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
               item = {
                 _id: c.itemId._id,
                 displayName: c.itemId.displayName || 'Unknown Item',
-                sku: c.itemId.sku || ''
+                sku: c.itemId.sku || '',
+                itemCategory: c.itemId.itemType || 'chemical'
               };
             } else {
               item = {
                 _id: c.itemId,
                 displayName: c.name || 'Unknown Item',
-                sku: ''
+                sku: '',
+                itemCategory: 'chemical'
               };
             }
           }
@@ -567,6 +628,11 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
     }
   };
 
+  /* Open properties when missing setup */
+  const handleOpenProperties = () => {
+    onOpenChange(true); // This should open the drawer
+  };
+
   if (!file) return null;
 
   return (
@@ -652,6 +718,52 @@ export default function FileMetaDrawer({ file, open, onOpenChange, onSaved, read
                           disabled 
                           className="bg-slate-50 dark:bg-slate-800/50"
                         />
+                      </div>
+                    )}
+
+                    {/* Work Order Information */}
+                    {workOrderInfo && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Package size={14} className="text-slate-500" />
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                            Work Order
+                          </label>
+                        </div>
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium">
+                                {workOrderInfo.id}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs">
+                                  {workOrderInfo.status}
+                                </Badge>
+                                {workOrderInfo.isNetSuite && (
+                                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                    NetSuite
+                                  </Badge>
+                                )}
+                                {workOrderInfo.isLocal && (
+                                  <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
+                                    Local
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            {workOrderInfo.createdAt && (
+                              <div className="text-xs text-slate-500">
+                                Created: {new Date(workOrderInfo.createdAt).toLocaleDateString()}
+                              </div>
+                            )}
+                            {workOrderInfo.isLocal && (
+                              <div className="text-xs text-amber-600">
+                                ⚠ This is a local work order. NetSuite integration may have failed.
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
 

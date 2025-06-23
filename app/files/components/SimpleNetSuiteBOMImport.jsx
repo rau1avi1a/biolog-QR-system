@@ -1,4 +1,4 @@
-// app/files/components/SimpleNetSuiteBOMImport.jsx - Enhanced with auto-mapping
+// app/files/components/SimpleNetSuiteBOMImport.jsx - Fixed scrolling for components
 'use client';
 
 import React, { useState } from 'react';
@@ -37,7 +37,7 @@ const mapNetSuiteUnit = (netsuiteUnitId) => {
   return unitMapping[netsuiteUnitId] || 'g';
 };
 
-// Enhanced NetSuite BOM Import Component with Auto-Mapping
+// Enhanced NetSuite BOM Import Component with Auto-Mapping and Fixed Scrolling
 export default function SimpleNetSuiteBOMImport({ open, onClose, onImport, solution }) {
   const [loading, setLoading] = useState(false);
   const [bomData, setBomData] = useState(null);
@@ -246,8 +246,8 @@ export default function SimpleNetSuiteBOMImport({ open, onClose, onImport, solut
 
   return (
     <Dialog open={true} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-blue-500" />
             Import BOM from NetSuite
@@ -257,179 +257,220 @@ export default function SimpleNetSuiteBOMImport({ open, onClose, onImport, solut
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {/* Solution Info */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Beaker className="h-4 w-4 text-blue-600" />
-              <span className="font-medium text-blue-800">Selected Solution</span>
-            </div>
-            <div className="text-sm text-blue-700">
-              <div><strong>Name:</strong> {solution?.displayName}</div>
-              <div><strong>SKU:</strong> {solution?.sku}</div>
-              <div><strong>NetSuite ID:</strong> {solution?.netsuiteInternalId}</div>
-            </div>
-          </div>
-
-          {/* Error Display */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 text-red-800">
-                <AlertCircle className="h-4 w-4" />
-                <span className="font-medium">Error</span>
-              </div>
-              <p className="text-sm text-red-700 mt-1">{error}</p>
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={fetchBOMAndMap}
-                className="mt-2"
-              >
-                Retry
-              </Button>
-            </div>
-          )}
-
-          {/* Loading State */}
-          {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Loading BOM and mapping components...</span>
-              </div>
-            </div>
-          )}
-
-          {/* Mapping Results Summary */}
-          {mappingResults && !loading && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 text-green-800 mb-2">
-                <MapPin className="h-4 w-4" />
-                <span className="font-medium">Component Mapping Results</span>
-              </div>
-              <div className="text-sm text-green-700">
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <span className="font-semibold">{totalComponents}</span> Total Components
-                  </div>
-                  <div>
-                    <span className="font-semibold text-green-600">{successfulMappings}</span> Successfully Mapped
-                  </div>
-                  <div>
-                    <span className="font-semibold text-amber-600">{totalComponents - successfulMappings}</span> Need Manual Mapping
-                  </div>
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <ScrollArea className="flex-1">
+            <div className="space-y-4 p-1">
+              {/* Solution Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Beaker className="h-4 w-4 text-blue-600" />
+                  <span className="font-medium text-blue-800">Selected Solution</span>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* BOM Data Display */}
-          {bomData && !loading && (
-            <div className="space-y-4">
-              {/* BOM Info */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h4 className="font-medium mb-2">BOM Information</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div><span className="font-medium">BOM Name:</span> {bomData.bom?.bomName}</div>
-                  <div><span className="font-medium">Revision:</span> {bomData.bom?.revisionName}</div>
-                  <div><span className="font-medium">Effective Date:</span> {bomData.bom?.effectiveStartDate}</div>
-                  <div><span className="font-medium">Components:</span> {bomData.recipe?.length || 0}</div>
+                <div className="text-sm text-blue-700">
+                  <div><strong>Name:</strong> {solution?.displayName}</div>
+                  <div><strong>SKU:</strong> {solution?.sku}</div>
+                  <div><strong>NetSuite ID:</strong> {solution?.netsuiteInternalId}</div>
                 </div>
               </div>
 
-              {/* Components with Enhanced Mapping Status */}
-              {mappingResults && mappingResults.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="font-medium">Components to Import:</h4>
-                  <ScrollArea className="max-h-64 border rounded-lg">
-                    <div className="p-2 space-y-2">
-                      {mappingResults.map((result, index) => (
-                        <div key={index} className="p-3 bg-white border rounded">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{result.netsuiteComponent.ingredient}</span>
-                              {result.mappedSuccessfully ? (
-                                <Badge variant="default" className="bg-green-100 text-green-800 border-green-200">
-                                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  {result.confidence >= 1.0 ? 'Exact' : 
-                                   result.confidence >= 0.8 ? 'High' : 
-                                   result.confidence >= 0.6 ? 'Medium' : 'Low'}
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">
-                                  <AlertTriangle className="h-3 w-3 mr-1" />
-                                  No Match
-                                </Badge>
-                              )}
-                              {result.confidence && result.confidence < 1.0 && result.confidence >= 0.6 && (
-                                <span className="text-xs text-gray-500">
-                                  {Math.round(result.confidence * 100)}% confidence
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-right">
-                              <div className="font-medium">
-                                {result.netsuiteComponent.quantity} {mapNetSuiteUnit(result.netsuiteComponent.units)}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                BOM Qty: {result.netsuiteComponent.bomQuantity}
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="text-xs text-muted-foreground">
-                            <div>NetSuite ID: {result.netsuiteComponent.itemId}</div>
-                            {result.localChemical && (
-                              <div className="text-green-600 mt-1">
-                                ✓ Mapped to: {result.localChemical.displayName} ({result.localChemical.sku})
-                                {result.localChemical.qtyOnHand !== undefined && (
-                                  <span className="ml-2 text-blue-600">
-                                    Stock: {result.localChemical.qtyOnHand} {result.localChemical.uom}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {!result.localChemical && (
-                              <div className="text-amber-600 mt-1">
-                                ⚠ Will need manual mapping after import
-                              </div>
-                            )}
-                            {result.allMatches && result.allMatches.length > 1 && (
-                              <div className="text-blue-600 mt-1">
-                                💡 {result.allMatches.length - 1} alternative match(es) available
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
+              {/* Error Display */}
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-red-800">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="font-medium">Error</span>
+                  </div>
+                  <p className="text-sm text-red-700 mt-1">{error}</p>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={fetchBOMAndMap}
+                    className="mt-2"
+                  >
+                    Retry
+                  </Button>
                 </div>
               )}
 
-              {/* Ready to Import */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-center gap-2 text-blue-800">
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span className="font-medium">Ready to Import</span>
+              {/* Loading State */}
+              {loading && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Loading BOM and mapping components...</span>
+                  </div>
                 </div>
-                <p className="text-sm text-blue-700 mt-1">
-                  {successfulMappings} of {totalComponents} components automatically mapped. 
-                  {totalComponents - successfulMappings > 0 && (
-                    <span className="text-amber-700">
-                      {' '}{totalComponents - successfulMappings} component(s) will need manual mapping after import.
-                    </span>
+              )}
+
+              {/* Mapping Results Summary */}
+              {mappingResults && !loading && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-green-800 mb-2">
+                    <MapPin className="h-4 w-4" />
+                    <span className="font-medium">Component Mapping Results</span>
+                  </div>
+                  <div className="text-sm text-green-700">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <span className="font-semibold">{totalComponents}</span> Total Components
+                      </div>
+                      <div>
+                        <span className="font-semibold text-green-600">{successfulMappings}</span> Successfully Mapped
+                      </div>
+                      <div>
+                        <span className="font-semibold text-amber-600">{totalComponents - successfulMappings}</span> Need Manual Mapping
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* BOM Data Display */}
+              {bomData && !loading && (
+                <div className="space-y-4">
+                  {/* BOM Info */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="font-medium mb-2">BOM Information</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div><span className="font-medium">BOM Name:</span> {bomData.bom?.bomName}</div>
+                      <div><span className="font-medium">Revision:</span> {bomData.bom?.revisionName}</div>
+                      <div><span className="font-medium">Effective Date:</span> {bomData.bom?.effectiveStartDate}</div>
+                      <div><span className="font-medium">Components:</span> {bomData.recipe?.length || 0}</div>
+                    </div>
+                  </div>
+
+                  {/* Components with Enhanced Mapping Status - FIXED LAYOUT */}
+                  {mappingResults && mappingResults.length > 0 && (
+                    <div className="space-y-4">
+                      <h4 className="font-medium text-lg">Components to Import ({mappingResults.length})</h4>
+                      
+                      {/* Fixed height container for components - MUCH LARGER */}
+                      <div className="border rounded-lg bg-white" style={{ height: '600px' }}>
+                        <ScrollArea className="h-full w-full">
+                          <div className="p-4 space-y-4">
+                            {mappingResults.map((result, index) => (
+                              <div key={index} className="p-4 bg-slate-50 border border-slate-200 rounded-lg shadow-sm">
+                                <div className="flex items-start justify-between mb-3">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="font-medium text-base truncate">{result.netsuiteComponent.ingredient}</span>
+                                      {result.mappedSuccessfully ? (
+                                        <Badge variant="default" className="bg-green-100 text-green-800 border-green-200 flex-shrink-0">
+                                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                                          {result.confidence >= 1.0 ? 'Exact' : 
+                                           result.confidence >= 0.8 ? 'High' : 
+                                           result.confidence >= 0.6 ? 'Medium' : 'Low'}
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200 flex-shrink-0">
+                                          <AlertTriangle className="h-3 w-3 mr-1" />
+                                          No Match
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    {result.confidence && result.confidence < 1.0 && result.confidence >= 0.6 && (
+                                      <div className="text-xs text-gray-500 mb-2">
+                                        {Math.round(result.confidence * 100)}% confidence match
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-right flex-shrink-0 ml-4">
+                                    <div className="font-semibold text-lg text-blue-600">
+                                      {result.netsuiteComponent.quantity} {mapNetSuiteUnit(result.netsuiteComponent.units)}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      BOM Qty: {result.netsuiteComponent.bomQuantity}
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <div className="space-y-3 text-sm">
+                                  <div className="text-muted-foreground bg-white p-2 rounded border">
+                                    <strong>NetSuite ID:</strong> {result.netsuiteComponent.itemId}
+                                  </div>
+                                  
+                                  {result.localChemical && (
+                                    <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                                      <div className="flex items-center gap-2 text-green-800 mb-2">
+                                        <CheckCircle2 className="h-4 w-4" />
+                                        <span className="font-medium">
+                                          Mapped to: {result.localChemical.displayName}
+                                        </span>
+                                      </div>
+                                      <div className="text-sm text-green-700 space-y-1">
+                                        <div><strong>SKU:</strong> {result.localChemical.sku}</div>
+                                        <div><strong>Type:</strong> {result.localChemical.itemCategory === 'chemical' ? 'Chemical' : 'Solution'}</div>
+                                        {result.localChemical.qtyOnHand !== undefined && (
+                                          <div><strong>Current Stock:</strong> {result.localChemical.qtyOnHand} {result.localChemical.uom}</div>
+                                        )}
+                                        {result.localChemical.netsuiteInternalId && (
+                                          <div><strong>Local NetSuite ID:</strong> {result.localChemical.netsuiteInternalId}</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {!result.localChemical && (
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                      <div className="flex items-center gap-2 text-amber-800">
+                                        <AlertTriangle className="h-4 w-4" />
+                                        <span className="font-medium">Will need manual mapping after import</span>
+                                      </div>
+                                      <div className="text-sm text-amber-700 mt-1">
+                                        This component wasn't found in your local chemicals or solutions database.
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {result.allMatches && result.allMatches.length > 1 && (
+                                    <div className="text-blue-600 text-sm bg-blue-50 p-2 rounded">
+                                      💡 {result.allMatches.length - 1} alternative match(es) available
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                      
+                      {/* Summary stats */}
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                        <div className="text-sm text-slate-700">
+                          <strong>Summary:</strong> {mappingResults.length} total components • 
+                          {' '}{mappingResults.filter(r => r.localChemical?.itemCategory === 'chemical').length} chemicals • 
+                          {' '}{mappingResults.filter(r => r.localChemical?.itemCategory === 'solution').length} solutions • 
+                          {' '}{mappingResults.filter(r => !r.localChemical).length} unmapped
+                        </div>
+                      </div>
+                    </div>
                   )}
-                </p>
-                <p className="text-xs text-blue-600 mt-2">
-                  Components are mapped using NetSuite Internal IDs for accuracy.
-                </p>
-              </div>
+
+                  {/* Ready to Import */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 text-blue-800">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span className="font-medium">Ready to Import</span>
+                    </div>
+                    <p className="text-sm text-blue-700 mt-1">
+                      {successfulMappings} of {totalComponents} components automatically mapped. 
+                      {totalComponents - successfulMappings > 0 && (
+                        <span className="text-amber-700">
+                          {' '}{totalComponents - successfulMappings} component(s) will need manual mapping after import.
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-blue-600 mt-2">
+                      Components are mapped using NetSuite Internal IDs for accuracy.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+          </ScrollArea>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-shrink-0 border-t pt-4">
           <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
