@@ -1,4 +1,4 @@
-// models/Batch.js - Updated with NetSuite Work Order support
+// models/Batch.js - Complete Enhanced Batch Model with NetSuite Work Order support
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
@@ -32,14 +32,15 @@ const snapshotSchema = new Schema({
   components  : [ componentSchema ]
 }, { _id: false });
 
-// ─── NetSuite work order data sub-schema ───────────────
+// ─── Enhanced NetSuite work order data sub-schema ───────────────
 const netsuiteWorkOrderSchema = new Schema({
-  workOrderId  : String,        // NetSuite internal work order ID
-  tranId       : String,        // NetSuite transaction ID (user-friendly)
+  workOrderId  : String,        // NetSuite internal work order ID (like "400957")
+  tranId       : String,        // NetSuite transaction ID/work order number (like "WO12817")
   bomId        : String,        // NetSuite BOM ID
   revisionId   : String,        // NetSuite BOM revision ID
   quantity     : Number,        // Quantity from work order
   status       : String,        // NetSuite work order status
+  orderStatus  : String,        // NetSuite order status (like "Released")
   createdAt    : Date,          // When work order was created
   completedAt  : Date,          // When work order was completed
   cancelledAt  : Date,          // When work order was cancelled (if applicable)
@@ -66,10 +67,12 @@ const batchSchema = new Schema({
   folderPath : String,
 
   // ─── Enhanced Work Order fields ───────────────────
-  workOrderId        : String,  // This can be NetSuite tranId or local ID
+  workOrderId        : String,  // This now stores the NetSuite tranId (like "WO12817")
   workOrderCreated   : { type: Boolean, default: false },
-  workOrderStatus    : String,  // 'in_progress', 'completed', 'cancelled'
+  workOrderStatus    : String,  // 'creating', 'created', 'completed', 'cancelled', 'failed'
   workOrderCreatedAt : Date,
+  workOrderError     : String,  // Error message if creation failed
+  workOrderFailedAt  : Date,    // When creation failed
   
   // ─── NetSuite-specific work order data ────────────
   netsuiteWorkOrderData: netsuiteWorkOrderSchema,
@@ -125,9 +128,9 @@ batchSchema.pre('validate', async function(next) {
   next();
 });
 
-// ─── Instance methods for NetSuite work order management ───
+// ─── Enhanced Instance methods for NetSuite work order management ───
 batchSchema.methods.hasNetSuiteWorkOrder = function() {
-  return this.netsuiteWorkOrderData && this.netsuiteWorkOrderData.workOrderId;
+  return this.netsuiteWorkOrderData && this.netsuiteWorkOrderData.tranId;
 };
 
 batchSchema.methods.isWorkOrderCompleted = function() {
@@ -136,19 +139,43 @@ batchSchema.methods.isWorkOrderCompleted = function() {
 };
 
 batchSchema.methods.getWorkOrderDisplayId = function() {
+  // Prioritize the tranId (user-friendly work order number)
   if (this.netsuiteWorkOrderData && this.netsuiteWorkOrderData.tranId) {
     return this.netsuiteWorkOrderData.tranId;
+  }
+  // Fallback to the main workOrderId field
+  if (this.workOrderId && !this.workOrderId.startsWith('PENDING-') && !this.workOrderId.startsWith('LOCAL-')) {
+    return this.workOrderId;
   }
   return this.workOrderId || 'No Work Order';
 };
 
-// ─── Static methods for NetSuite work order queries ───
-batchSchema.statics.findByNetSuiteWorkOrder = function(workOrderId) {
+batchSchema.methods.getNetSuiteWorkOrderId = function() {
+  // Returns the internal NetSuite ID for API calls
+  return this.netsuiteWorkOrderData?.workOrderId || null;
+};
+
+batchSchema.methods.getWorkOrderNumber = function() {
+  // Returns the user-friendly work order number (tranId)
+  return this.netsuiteWorkOrderData?.tranId || this.workOrderId || null;
+};
+
+// ─── Enhanced Static methods for NetSuite work order queries ───
+batchSchema.statics.findByNetSuiteWorkOrder = function(workOrderIdentifier) {
   return this.find({
     $or: [
-      { 'netsuiteWorkOrderData.workOrderId': workOrderId },
-      { 'netsuiteWorkOrderData.tranId': workOrderId },
-      { workOrderId: workOrderId }
+      { 'netsuiteWorkOrderData.workOrderId': workOrderIdentifier },
+      { 'netsuiteWorkOrderData.tranId': workOrderIdentifier },
+      { workOrderId: workOrderIdentifier }
+    ]
+  });
+};
+
+batchSchema.statics.findByWorkOrderNumber = function(tranId) {
+  return this.find({
+    $or: [
+      { 'netsuiteWorkOrderData.tranId': tranId },
+      { workOrderId: tranId }
     ]
   });
 };
@@ -157,14 +184,22 @@ batchSchema.statics.findPendingWorkOrders = function() {
   return this.find({
     workOrderCreated: true,
     status: { $in: ['In Progress', 'Review'] },
-    workOrderStatus: { $ne: 'completed' }
+    workOrderStatus: { $nin: ['completed', 'cancelled'] }
   });
 };
 
-// ─── Indexes for NetSuite work order queries ───
+batchSchema.statics.findFailedWorkOrders = function() {
+  return this.find({
+    workOrderStatus: 'failed',
+    workOrderError: { $exists: true }
+  });
+};
+
+// ─── Enhanced Indexes for NetSuite work order queries ───
 batchSchema.index({ 'netsuiteWorkOrderData.workOrderId': 1 });
 batchSchema.index({ 'netsuiteWorkOrderData.tranId': 1 });
 batchSchema.index({ workOrderId: 1 });
 batchSchema.index({ workOrderStatus: 1 });
+batchSchema.index({ workOrderCreated: 1, workOrderStatus: 1 });
 
 export default mongoose.models.Batch || mongoose.model('Batch', batchSchema);

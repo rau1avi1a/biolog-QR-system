@@ -1,7 +1,7 @@
-// app/files/components/PDFEditor.jsx - Enhanced with Properties Opening and Work Order Status
+// app/files/components/PDFEditor.jsx - Enhanced with Real-time Work Order Status and Notifications
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Menu, Pencil, Undo, Save, CheckCircle, Printer, Settings,
   ChevronLeft, ChevronRight, ArrowRightCircle, XCircle, Package,
@@ -18,6 +18,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+import { useWorkOrderStatus } from '@/hooks/useWorkOrderStatus';
+import { useWorkOrderToast } from '@/hooks/useWorkOrderToast'; // Updated import
 import usePdfEditorLogic from '../hooks/usePDFEditor';
 import FileMetaDrawer from './FileMetaDrawer';
 import SaveConfirmationDialog from './SaveConfirmationDialog';
@@ -41,16 +43,31 @@ export default function PDFEditor(props) {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveAction, setSaveAction] = useState('save');
 
-  /* Work order creation status */
+  /* Work order creation status - only show when user initiated */
   const [isCreatingWorkOrder, setIsCreatingWorkOrder] = useState(false);
+  const [lastWorkOrderNumber, setLastWorkOrderNumber] = useState(null);
+  const [userInitiatedCreation, setUserInitiatedCreation] = useState(false); // Track if user started creation
+
+  /* Toast notifications */
+  const { workOrderCreated, workOrderFailed, workOrderCreating } = useWorkOrderToast();
 
   /* logic hook */
   const {
     canvasRef, pageContainerRef,
     blobUri, pages, pageNo, isDraw, overlay, histIdx, isSaving,
     setIsDraw, down, move, up, pointerCancel, undo, save, gotoPage, print, initCanvas, setPages,
-    canDraw // Get the canDraw function from the hook
+    canDraw
   } = usePdfEditorLogic(props);
+
+  /* Real-time work order status polling */
+  const { 
+    status: workOrderStatus, 
+    loading: workOrderLoading, 
+    isCreating: workOrderIsCreating,
+    workOrderNumber,
+    hasWorkOrder,
+    error: workOrderError
+  } = useWorkOrderStatus(props.doc?._id, props.doc?.isBatch && props.doc?.workOrderCreated);
 
   if (!blobUri) return <div className="p-4">No PDF data.</div>;
   const { doc, onToggleDrawer, mobileModeActive, refreshFiles, setCurrentDoc } = props;
@@ -65,23 +82,36 @@ export default function PDFEditor(props) {
   const isCompleted = status === 'Completed';
   const isArchived = doc.isArchived;
 
-  /* Get work order display information */
+  /* Merge work order status with document data */
   const getWorkOrderInfo = () => {
     if (!doc.isBatch) return null;
     
-    if (doc.workOrderCreated) {
-      // Prioritize NetSuite work order ID over local ID
-      const displayId = doc.netsuiteWorkOrderData?.tranId || 
-                       doc.netsuiteWorkOrderData?.workOrderId || 
-                       doc.workOrderId || 'Unknown';
+    // Use real-time status if available, otherwise fall back to doc data
+    const currentStatus = workOrderStatus || {
+      created: doc.workOrderCreated,
+      status: doc.workOrderStatus,
+      workOrderId: doc.workOrderId,
+      workOrderNumber: doc.netsuiteWorkOrderData?.tranId
+    };
+    
+    if (currentStatus.created) {
+      const workOrderNumber = currentStatus.workOrderNumber || currentStatus.workOrderId;
+      const isNetSuite = !!(currentStatus.workOrderNumber && !currentStatus.workOrderNumber.startsWith('LOCAL-'));
+      const isPending = currentStatus.status === 'creating' || workOrderNumber?.startsWith('PENDING-');
+      const isLocal = workOrderNumber?.startsWith('LOCAL-WO-');
+      const isFailed = currentStatus.status === 'failed';
       
       return {
-        id: displayId,
-        status: doc.workOrderStatus || 'created',
-        createdAt: doc.workOrderCreatedAt,
-        netsuiteId: doc.netsuiteWorkOrderData?.tranId || doc.netsuiteWorkOrderData?.workOrderId,
-        isNetSuite: !!(doc.netsuiteWorkOrderData?.tranId || doc.netsuiteWorkOrderData?.workOrderId),
-        isLocal: displayId.startsWith('LOCAL-WO-') || displayId.startsWith('PENDING-')
+        id: workOrderNumber || 'Unknown',
+        workOrderNumber: currentStatus.workOrderNumber,
+        internalId: currentStatus.internalId,
+        status: currentStatus.status || 'created',
+        isNetSuite: isNetSuite,
+        isLocal: isLocal,
+        isPending: isPending,
+        isFailed: isFailed,
+        isUpdating: workOrderLoading,
+        error: currentStatus.error || workOrderError
       };
     }
     
@@ -90,14 +120,112 @@ export default function PDFEditor(props) {
 
   const workOrderInfo = getWorkOrderInfo();
 
+  /* Show notifications when work order status changes - only for user-initiated */
+  useEffect(() => {
+    // Only show notifications for user-initiated work order creation
+    if (!userInitiatedCreation) return;
+
+    // Check for successful completion
+    const currentWorkOrderNumber = workOrderNumber || workOrderInfo?.workOrderNumber;
+    
+    if (currentWorkOrderNumber && 
+        currentWorkOrderNumber !== lastWorkOrderNumber &&
+        !currentWorkOrderNumber.startsWith('LOCAL-') && 
+        !currentWorkOrderNumber.startsWith('PENDING-')) {
+      
+      console.log('Work order completed, showing success notification:', currentWorkOrderNumber);
+      workOrderCreated(currentWorkOrderNumber);
+      setLastWorkOrderNumber(currentWorkOrderNumber);
+      setUserInitiatedCreation(false); // Reset flag
+      setIsCreatingWorkOrder(false); // Stop showing loading
+    }
+  }, [workOrderNumber, workOrderInfo?.workOrderNumber, lastWorkOrderNumber, workOrderCreated, userInitiatedCreation]);
+
+  /* Show error notification for failed work orders - only for user-initiated */
+  useEffect(() => {
+    if (workOrderInfo?.isFailed && workOrderInfo.error && userInitiatedCreation) {
+      workOrderFailed(workOrderInfo.error);
+      setUserInitiatedCreation(false); // Reset flag
+      setIsCreatingWorkOrder(false); // Stop showing loading
+    }
+  }, [workOrderInfo?.isFailed, workOrderInfo?.error, workOrderFailed, userInitiatedCreation]);
+
+  /* Force refresh when work order status changes */
+  useEffect(() => {
+    // Refresh file data when work order status changes significantly
+    const currentWorkOrderNumber = workOrderNumber || workOrderInfo?.workOrderNumber;
+    
+    if (currentWorkOrderNumber && 
+        currentWorkOrderNumber !== lastWorkOrderNumber &&
+        !currentWorkOrderNumber.startsWith('LOCAL-') && 
+        !currentWorkOrderNumber.startsWith('PENDING-')) {
+      
+      console.log('Work order completed, refreshing file data...');
+      // Force a complete refresh of the document data
+      refreshFiles?.();
+      
+      // Also try to refresh the current document specifically
+      if (props.doc?._id) {
+        // You might need to add a prop or function to refresh the current document
+        console.log('Requesting document refresh for:', props.doc._id);
+      }
+    }
+  }, [workOrderNumber, workOrderInfo?.workOrderNumber, lastWorkOrderNumber, refreshFiles, props.doc?._id]);
+
+  /* Enhanced Work Order Badge component with real-time updates */
+  const WorkOrderBadge = ({ workOrderInfo, compact }) => {
+    if (!workOrderInfo) return null;
+
+    // Use real-time status from polling hook
+    const realTimeStatus = workOrderStatus?.status || workOrderInfo.status;
+    const realTimeNumber = workOrderStatus?.workOrderNumber || workOrderNumber || workOrderInfo.workOrderNumber;
+    const isRealTimeUpdating = workOrderLoading && workOrderIsCreating; // Updated variable name
+
+    const getBadgeColor = () => {
+      if (workOrderInfo.isFailed) return 'bg-red-50 text-red-700 border-red-200';
+      if (realTimeStatus === 'creating' || isRealTimeUpdating) return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+      if (realTimeStatus === 'completed') return 'bg-green-50 text-green-700 border-green-200';
+      if (realTimeNumber && !realTimeNumber.startsWith('LOCAL-')) return 'bg-blue-50 text-blue-700 border-blue-200';
+      return 'bg-gray-50 text-gray-700 border-gray-200';
+    };
+
+    const getDisplayText = () => {
+      if (workOrderInfo.isFailed) return compact ? 'WO Failed' : 'Work Order Failed';
+      if (realTimeStatus === 'creating' || isRealTimeUpdating) {
+        return compact ? 'Creating...' : 'Creating Work Order...';
+      }
+      if (realTimeNumber && !realTimeNumber.startsWith('PENDING-') && !realTimeNumber.startsWith('LOCAL-')) {
+        return compact ? realTimeNumber : `WO: ${realTimeNumber}`;
+      }
+      return compact ? 'WO' : 'Work Order';
+    };
+
+    const getIcon = () => {
+      if (workOrderInfo.isFailed) return '❌';
+      if (realTimeStatus === 'creating' || isRealTimeUpdating) return '⏳';
+      if (realTimeNumber && !realTimeNumber.startsWith('LOCAL-') && !realTimeNumber.startsWith('PENDING-')) return '🔗';
+      if (realTimeNumber?.startsWith('LOCAL-')) return '📝';
+      return '📋';
+    };
+
+    return (
+      <Badge 
+        variant="outline" 
+        className={`text-xs flex items-center gap-1 shrink-0 ${getBadgeColor()} transition-colors duration-200`}
+        title={workOrderInfo.error || `Work Order: ${realTimeNumber || workOrderInfo.id}`}
+      >
+        <span className={isRealTimeUpdating ? 'animate-pulse' : ''}>{getIcon()}</span>
+        <span>{getDisplayText()}</span>
+        {isRealTimeUpdating && (
+          <div className="w-2 h-2 bg-current rounded-full animate-ping"></div>
+        )}
+      </Badge>
+    );
+  };
+
   /* Handle save button clicks with NetSuite workflow */
   const handleSave = async (action = 'save') => {
     setSaveAction(action);
-    
-    // Special handling for work order creation to show loading state
-    if (action === 'create_work_order') {
-      setIsCreatingWorkOrder(true);
-    }
     
     // Determine if we need to show confirmation dialog
     const needsConfirmation = shouldShowConfirmation(action);
@@ -109,57 +237,56 @@ export default function PDFEditor(props) {
       try {
         await save(action);
       } finally {
-        setIsCreatingWorkOrder(false);
+        // Don't manage loading state here - let the confirmation dialog handle it
       }
     }
   };
 
   /* Determine if confirmation dialog is needed */
   const shouldShowConfirmation = (action) => {
-    if (action === 'create_work_order') {
-      // Always show confirmation for work order creation
-      return true;
-    }
-    if (action === 'submit_review') {
-      // Always show confirmation for review submission (chemical transaction)
-      return true;
-    }
-    if (action === 'complete') {
-      // Show confirmation for completion
-      return true;
-    }
-    if (action === 'reject') {
-      // Show confirmation for rejection
-      return true;
-    }
-    // Regular save doesn't need confirmation
+    if (action === 'create_work_order') return true;
+    if (action === 'submit_review') return true;
+    if (action === 'complete') return true;
+    if (action === 'reject') return true;
     return false;
   };
 
   /* Handle file deletion */
   const handleFileDeleted = () => {
-    // Clear the current document since it was deleted
     setCurrentDoc(null);
-    // Refresh the file list
     refreshFiles?.();
   };
 
   const handleSaveConfirm = async (confirmationData) => {
     try {
+      // Show loading and toast for work order creation when confirm button is clicked
+      if (saveAction === 'create_work_order') {
+        setIsCreatingWorkOrder(true);
+        setUserInitiatedCreation(true);
+        workOrderCreating(); // Show "Creating Work Order..." toast
+      }
+
       await save(saveAction, confirmationData);
       setShowSaveDialog(false);
       refreshFiles?.();
       
-      // Small delay to ensure state has updated, then refresh canvas
       setTimeout(() => {
         if (canvasRef.current) {
           initCanvas();
         }
       }, 200);
     } catch (error) {
-      // You might want to show an error toast here
+      // Error handling
+      if (saveAction === 'create_work_order') {
+        setUserInitiatedCreation(false);
+        setIsCreatingWorkOrder(false);
+        workOrderFailed('Failed to create work order');
+      }
     } finally {
-      setIsCreatingWorkOrder(false);
+      // Don't reset loading for work order creation - let polling detect completion
+      if (saveAction !== 'create_work_order') {
+        setIsCreatingWorkOrder(false);
+      }
     }
   };
 
@@ -228,7 +355,6 @@ export default function PDFEditor(props) {
       ];
     }
     
-    // Completed or archived - no actions
     return null;
   };
 
@@ -240,13 +366,11 @@ export default function PDFEditor(props) {
 
     const buttons = Array.isArray(buttonConfig) ? buttonConfig : [buttonConfig];
     
-    // On very small screens (phones), show first button + overflow menu
     if (compact && window.innerWidth < 480) {
       const [primaryButton, ...overflowButtons] = buttons;
       
       return (
         <div className="flex items-center gap-1">
-          {/* Primary action button */}
           <Button
             variant={primaryButton.variant}
             size="sm"
@@ -262,7 +386,6 @@ export default function PDFEditor(props) {
             <span className="hidden xs:inline">{primaryButton.text}</span>
           </Button>
           
-          {/* Overflow menu for additional buttons */}
           {overflowButtons.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -292,7 +415,6 @@ export default function PDFEditor(props) {
       );
     }
 
-    // Regular tablet/desktop rendering
     return (
       <>
         {buttons.map((config, index) => {
@@ -372,18 +494,9 @@ export default function PDFEditor(props) {
                compact ? status.slice(0, 8) : status}
             </Badge>
 
-            {/* Work Order Status - show for batches with work orders */}
+            {/* Enhanced Work Order Status with real-time updates */}
             {workOrderInfo && (
-              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 flex items-center gap-1 shrink-0">
-                <Package size={8} />
-                {compact ? 'WO' : 'Work Order'}
-                {!workOrderInfo.isLocal && (
-                  <span className="text-xs">({workOrderInfo.id})</span>
-                )}
-                {workOrderInfo.isLocal && (
-                  <span className="text-xs text-amber-600">(Local)</span>
-                )}
-              </Badge>
+              <WorkOrderBadge workOrderInfo={workOrderInfo} compact={compact} />
             )}
 
             {/* Workflow restrictions indicator for original files */}
@@ -438,7 +551,6 @@ export default function PDFEditor(props) {
           {renderMobileActions()}
 
           {(isCompleted || isArchived) && (
-            // Completed/archived batch - read only
             <Badge variant="outline" className="text-green-600 flex items-center gap-1 text-xs">
               <CheckCircle size={12} />
               {compact ? (isArchived ? 'Arc' : 'Done') : (isArchived ? 'Archived' : 'Completed')}
@@ -499,7 +611,7 @@ export default function PDFEditor(props) {
         onOpenChange={setMetaOpen}
         onSaved={refreshFiles}
         onFileDeleted={handleFileDeleted}
-        readOnly={doc.isBatch || isCompleted || isArchived} // Read-only for all batches, completed, and archived files
+        readOnly={doc.isBatch || isCompleted || isArchived}
       />
 
       {/* Save Confirmation Dialog */}
@@ -507,12 +619,15 @@ export default function PDFEditor(props) {
         open={showSaveDialog}
         onClose={() => {
           setShowSaveDialog(false);
+          if (saveAction === 'create_work_order') {
+            setUserInitiatedCreation(false);
+          }
           setIsCreatingWorkOrder(false);
         }}
         onConfirm={handleSaveConfirm}
         currentDoc={doc}
         action={saveAction}
-        onOpenProperties={handleOpenProperties} // Pass the function to open properties
+        onOpenProperties={handleOpenProperties}
       />
     </div>
   );
