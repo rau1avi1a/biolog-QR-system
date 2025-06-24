@@ -7,7 +7,7 @@ import {
   getFileById,
   createFileFromUpload,
   searchFiles
-} from '@/services/file.service';   // ← singular "service", not "services"
+} from '@/db/services/app/file.service';   // ← singular "service", not "services"
 
 export const dynamic = 'force-dynamic';
 

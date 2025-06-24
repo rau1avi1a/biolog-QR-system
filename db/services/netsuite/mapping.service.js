@@ -1,6 +1,6 @@
 // services/netsuite/mapping.service.js - Enhanced to search both chemicals and solutions
-import connectMongoDB from '@/lib/index';
-import { Item } from '@/models/Item';
+import connectMongoDB from '@/db/index';
+import { Item } from '@/db/schemas/Item';
 
 /**
  * Enhanced NetSuite Component Mapping Service

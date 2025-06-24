@@ -1,8 +1,8 @@
 // app/api/auth/me/route.js
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import connectMongoDB from '@/lib/index';
-import User from '@/models/User';
+import connectMongoDB from '@/db/index';
+import User from '@/db/schemas/User';
 
 export async function GET(request) {
   try {

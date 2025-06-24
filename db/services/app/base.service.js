@@ -1,6 +1,6 @@
 // services/base.service.js - Dynamic base service for CRUD operations
 import mongoose from 'mongoose';
-import connectMongoDB from '@/lib/index';
+import connectMongoDB from '@/db/index';
 
 /**
  * Dynamic base service that automatically handles model schema changes

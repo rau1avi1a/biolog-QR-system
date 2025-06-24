@@ -1,7 +1,7 @@
 // app/api/folders/route.js
 import { NextResponse } from "next/server";
-import connectMongoDB from "@/lib/index";
-import Folder from "@/models/Folder";
+import connectMongoDB from "@/db/index";
+import Folder from "@/db/schemas/Folder";
 
 export const dynamic = "force-dynamic";
 

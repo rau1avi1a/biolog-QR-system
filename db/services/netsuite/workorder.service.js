@@ -1,7 +1,7 @@
 // services/netsuite/workorder.service.js - Enhanced to capture tranId from Location header
 import { createNetSuiteAuth } from './auth.service.js';
 import { createBOMService } from './bom.service.js';
-import { Item } from '@/models/Item';
+import { Item } from '@/db/schemas/Item.js';
 
 /**
  * NetSuite Work Order Service

@@ -1,6 +1,6 @@
-import connectMongoDB   from "@/lib/index";
-import { PurchaseOrder } from "@/models/PurchaseOrder";
-import { Item }         from "@/models/Item";
+import connectMongoDB   from "@/db/index";
+import { PurchaseOrder } from "@/db/schemas/PurchaseOrder";
+import { Item }         from "@/db/schemas/Item";
 import { txnService } from "./txn.service";
 
 export const poService = {

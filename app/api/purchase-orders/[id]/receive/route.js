@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { poService }    from "@/services/purchaseOrder.service";
+import { poService }    from "@/db/services/app/purchaseOrder.service";
 
 export const dynamic = "force-dynamic";
 

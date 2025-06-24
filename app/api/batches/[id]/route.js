@@ -1,9 +1,9 @@
 // api/batches/[id]/route.js
 import { NextResponse } from 'next/server';
-import { getBatchById, updateBatch, deleteBatch } from '@/services/batch.service';
+import { getBatchById, updateBatch, deleteBatch } from '@/db/services/app/batch.service';
 import { jwtVerify } from 'jose';
-import User from '@/models/User';
-import connectMongoDB from '@/lib/index';
+import User from '@/db/schemas/User';
+import connectMongoDB from '@/db/index';
 
 // Helper function to get user from JWT token
 async function getUserFromRequest(request) {

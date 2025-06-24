@@ -5,7 +5,7 @@ import {
   updateFileMeta,
   updateFileStatus,
   deleteFile,          // if you expose DELETE
-} from '@/services/file.service';
+} from '@/db/services/app/file.service';
 
 /* ---------- GET (single file) ---------- */
 export async function GET(_req, { params }) {

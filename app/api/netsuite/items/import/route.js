@@ -1,9 +1,9 @@
 // app/api/netsuite/items/import/route.js - Import NetSuite items as local chemicals
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import connectMongoDB from '@/lib/index';
-import User from '@/models/User';
-import { Item } from '@/models/Item';
+import connectMongoDB from '@/db/index';
+import User from '@/db/schemas/User';
+import { Item } from '@/db/schemas/Item';
 
 // Helper function to get user from JWT token
 async function getUserFromRequest(request) {

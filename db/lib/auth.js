@@ -1,8 +1,8 @@
 //lib/auth.js
 import { cookies } from "next/headers";
 import { jwtVerify } from "jose";
-import connectMongoDB from "@lib/index";
-import User from "@/models/User";
+import connectMongoDB from '@/db/index';
+import User from "@/db/schemas/User";
 import { redirect } from "next/navigation";
 
 /**

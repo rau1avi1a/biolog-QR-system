@@ -1,8 +1,8 @@
 // app/api/upload/route.js - Simplified for NetSuite format only
 import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
-import connectMongoDB from '@/lib/index';
-import { Item, Chemical, Solution, Product } from '@/models/Item';
+import connectMongoDB from '@/db/index';
+import { Item, Chemical, Solution, Product } from '@/db/schemas/Item';
 
 /**
  * Read uploaded File object into UTF-8 string

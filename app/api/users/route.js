@@ -1,5 +1,5 @@
-import User from "@/models/User";
-import connectMongoDB from "@lib/index.js";
+import User from "@/db/schemas/User";
+import connectMongoDB from '@/db/index';
 import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 

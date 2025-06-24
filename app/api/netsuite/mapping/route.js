@@ -1,7 +1,7 @@
 // app/api/netsuite/mapping/route.js - Fixed export
 import { NextResponse } from 'next/server';
-import { withAuth } from '@/lib/api-auth';
-import { mapNetSuiteComponents } from '@/services/netsuite/mapping.service';
+import { withAuth } from '@/db/lib/api-auth';
+import { mapNetSuiteComponents } from '@/db/services/netsuite/mapping.service';
 
 /**
  * POST /api/netsuite/mapping

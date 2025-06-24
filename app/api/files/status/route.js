@@ -1,6 +1,6 @@
 // app/api/files/status/route.js
 import { NextResponse } from 'next/server'
-import { listFiles }   from '@/services/file.service'
+import { listFiles }   from '@/db/services/app/file.service'
 
 export const dynamic = 'force-dynamic'
 

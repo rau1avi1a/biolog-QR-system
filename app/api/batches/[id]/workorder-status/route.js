@@ -1,7 +1,7 @@
 // app/api/batches/[id]/workorder-status/route.js - Fixed for Next.js 15
 import { NextResponse } from 'next/server';
-import { withAuth } from '@/lib/api-auth';
-import { getWorkOrderStatus, retryWorkOrderCreation } from '@/services/batch.service';
+import { withAuth } from '@/db/lib/api-auth';
+import { getWorkOrderStatus, retryWorkOrderCreation } from '@/db/services/app/batch.service';
 
 /**
  * GET /api/batches/[id]/workorder-status

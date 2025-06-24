@@ -1,9 +1,9 @@
 // app/api/items/[id]/lots/[lotId]/route.js - Updated DELETE method
 import { NextResponse } from "next/server";
 import { jwtVerify } from 'jose';
-import connectMongoDB  from "@/lib/index";
-import { Item }        from "@/models/Item";
-import User from "@/models/User";
+import connectMongoDB  from "@/db/index";
+import { Item }        from "@/db/schemas/Item";
+import User from "@/db/schemas/User";
 
 export const dynamic = "force-dynamic";
 

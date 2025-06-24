@@ -1,10 +1,10 @@
 // services/batch.service.js - Updated with async work order creation
 import mongoose from 'mongoose';
-import connectMongoDB from '@/lib/index';
-import Batch    from '@/models/Batch.js';
-import File     from '@/models/File.js';
-import { Item } from '@/models/Item.js';
-import User from '@/models/User.js';
+import connectMongoDB from '@/db/index';
+import Batch    from '@/db/schemas/Batch.js';
+import File     from '@/db/schemas/File.js';
+import { Item } from '@/db/schemas/Item.js';
+import User from '@/db/schemas/User.js';
 import { txnService } from './txn.service.js';
 import { getFileById }       from './file.service.js';
 import { createArchiveCopy } from './archive.service.js';

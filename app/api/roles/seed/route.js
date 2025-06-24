@@ -1,7 +1,7 @@
 // app/api/roles/seed/route.js
 import { NextResponse } from 'next/server';
-import connectMongoDB from '@/lib/index';
-import Role from '@/models/Role';
+import connectMongoDB from '@/db/index';
+import Role from '@/db/schemas/Role';
 
 export const dynamic = 'force-dynamic';
 

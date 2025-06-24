@@ -1,6 +1,6 @@
 // app/api/files/batch-upload/route.js - App Router format
 
-import { createMultipleFilesFromUpload } from '@/services/file.service';
+import { createMultipleFilesFromUpload } from '@/db/services/app/file.service';
 import fs from 'fs';
 
 export async function POST(request) {

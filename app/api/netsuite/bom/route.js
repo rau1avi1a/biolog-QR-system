@@ -1,9 +1,9 @@
 // app/api/netsuite/bom/route.js - Updated with search support
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import connectMongoDB from '@/lib/index';
-import User from '@/models/User';
-import { createBOMService } from '@/services/netsuite/index.js';
+import connectMongoDB from '@/db/index';
+import User from '@/db/schemas/User';
+import { createBOMService } from '@/db/services/netsuite/index.js';
 
 export const dynamic = 'force-dynamic';
 

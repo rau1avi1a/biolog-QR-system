@@ -7,7 +7,7 @@ import * as itemService from './item.service.js';
 import * as purchaseOrderService from './purchaseOrder.service.js';
 import { txnService } from './txn.service.js';
 import { vendorService } from './vendor.service.js';
-import * as netsuiteService from './netsuite/index.js';
+import * as netsuiteService from '../netsuite/index.js';
 
 // Export base service for creating new dynamic services
 export { BaseService };
