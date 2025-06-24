@@ -1,6 +1,6 @@
 // app/api/archive/folders/route.js
 import { NextResponse } from 'next/server';
-import { getArchiveFolders } from '@/services/archive.service';
+import { getArchiveFolders } from '@/db/services/app/archive.service';
 
 export async function GET() {
   try {

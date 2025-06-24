@@ -1,9 +1,9 @@
 // api/transactions/[id]/reverse/route.js - Reverse a transaction with proper auth
 import { NextResponse } from "next/server";
-import { txnService } from "@/services/txn.service";
+import { txnService } from "@/db/services/app/txn.service";
 import { jwtVerify } from 'jose';
-import User from '@/models/User';
-import connectMongoDB from '@/lib/index';
+import User from '@/db/schemas/User';
+import connectMongoDB from '@/db/index';
 
 // Helper function to get user from JWT token
 async function getUserFromRequest(request) {

@@ -1,9 +1,9 @@
 // app/api/items/[id]/lots/[lotId]/transactions/route.js
 import { NextResponse } from "next/server";
-import connectMongoDB   from "@/lib/index";
-import { txnService }   from "@/services/txn.service";
-import { Item }         from "@/models/Item";
-import { basicAuth }    from "@/lib/auth";
+import connectMongoDB   from "@/db/index";
+import { txnService }   from "@/db/services/app/txn.service";
+import { Item }         from "@/db/schemas/Item";
+import { basicAuth }    from "@/db/lib/auth";
 
 export const dynamic = "force-dynamic";
 

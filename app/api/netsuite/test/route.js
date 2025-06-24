@@ -1,9 +1,9 @@
 // app/api/netsuite/test/route.js
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import connectMongoDB from '@/lib/index';
-import User from '@/models/User';
-import { createNetSuiteAuth } from '@/services/netsuite/index.js';
+import connectMongoDB from '@/db/index';
+import User from '@/db/schemas/User';
+import { createNetSuiteAuth } from '@/db/services/netsuite/index.js';
 
 export const dynamic = 'force-dynamic';
 

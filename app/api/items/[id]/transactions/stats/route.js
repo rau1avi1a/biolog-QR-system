@@ -1,7 +1,7 @@
 // app/api/items/[id]/transactions/stats/route.js
 import { NextResponse } from "next/server";
-import connectMongoDB  from "@/lib/index";
-import { txnService }  from "@/services/txn.service";
+import connectMongoDB  from "@/db/index";
+import { txnService }  from "@/db/services/app/txn.service";
 
 export const dynamic = "force-dynamic";
 

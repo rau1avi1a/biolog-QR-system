@@ -1,7 +1,7 @@
 // app/[id]/lib/api.js
-import { Item } from '@/models/Item';
-import connectMongoDB from '@/lib/index';
-import { txnService } from '@/services/txn.service';
+import { Item } from '@/db/schemas/Item';
+import connectMongoDB from '@/db/index';
+import { txnService } from '@/db/services/app/txn.service';
 import mongoose from 'mongoose';
 
 /**

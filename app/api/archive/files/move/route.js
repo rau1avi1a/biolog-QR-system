@@ -1,7 +1,7 @@
 // app/api/archive/files/move/route.js
 
 import { NextResponse } from 'next/server';
-import { moveArchivedFile } from '@/services/archive.service';
+import { moveArchivedFile } from '@/db/services/app/archive.service';
 
 export async function PUT(request) {
   try {

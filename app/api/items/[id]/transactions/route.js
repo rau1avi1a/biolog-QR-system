@@ -1,6 +1,6 @@
 // api/items/[id]/transactions/route.js - Fixed duplicate item property
 import { NextResponse } from "next/server";
-import { txnService } from "@/services/txn.service";
+import { txnService } from "@/db/services/app/txn.service";
 
 export const dynamic = "force-dynamic";
 

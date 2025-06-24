@@ -1,10 +1,10 @@
 // app/api/netsuite/workorder/route.js - NetSuite Work Order API
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import connectMongoDB from '@/lib/index';
-import User from '@/models/User';
-import Batch from '@/models/Batch';
-import { createWorkOrderService } from '@/services/netsuite/workorder.service.js';
+import connectMongoDB from '@/db/index';
+import User from '@/db/schemas/User';
+import Batch from '@/db/schemas/Batch';
+import { createWorkOrderService } from '@/db/services/netsuite/workorder.service.js';
 
 export const dynamic = 'force-dynamic';
 

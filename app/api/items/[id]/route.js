@@ -1,10 +1,10 @@
 // app/api/items/[id]/route.js - Fixed GET method and updated DELETE method for custom auth
 import { NextResponse } from "next/server";
 import { jwtVerify } from 'jose';
-import connectMongoDB  from "@/lib/index";
-import { Item }        from "@/models/Item";
-import User from "@/models/User";
-import { basicAuth }   from "@/lib/auth";
+import connectMongoDB  from "@/db/index";
+import { Item }        from "@/db/schemas/Item";
+import User from "@/db/schemas/User";
+import { basicAuth }   from "@/db/lib/auth";
 
 export const dynamic = "force-dynamic";
 

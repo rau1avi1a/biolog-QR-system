@@ -1,8 +1,8 @@
 // app/api/items/route.js - Enhanced with NetSuite ID search
 import { NextResponse } from 'next/server';
-import dbConnect        from '@/lib/index';
-import { Item }         from '@/models/Item';
-import { createItem }   from '@/services/item.service';
+import dbConnect        from '@/db/index';
+import { Item }         from '@/db/schemas/Item';
+import { createItem }   from '@/db/services/app/item.service';
 
 // simple regex‐escape helper
 const escapeRegExp = (str) =>

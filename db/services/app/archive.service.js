@@ -1,9 +1,9 @@
 // services/archive.service.js - Updated to work with Batch model
 
-import connectMongoDB from '@/lib/index';
-import Folder from '@/models/Folder';
-import File from '@/models/File';
-import Batch from '@/models/Batch';
+import connectMongoDB from '@/db/index';
+import Folder from '@/db/schemas/Folder';
+import File from '@/db/schemas/File';
+import Batch from '@/db/schemas/Batch';
 import { ObjectId } from 'mongoose';
 
 /**

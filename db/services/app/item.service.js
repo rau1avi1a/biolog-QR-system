@@ -4,8 +4,8 @@
    – NO external BomRow collection any more – BOM is embedded
 ------------------------------------------------------------------- */
 import mongoose from 'mongoose';
-import connectMongoDB from '@/lib/index';
-import { Item } from '@/models/Item';
+import connectMongoDB from '@/db/index';
+import { Item } from '@/db/schemas/Item';
 
 /**
  * Create a Chemical, Solution or Product.

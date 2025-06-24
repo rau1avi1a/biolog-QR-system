@@ -1,6 +1,6 @@
 // app/api/netsuite/units/route.js - NetSuite unit mapping reference
 import { NextResponse } from 'next/server';
-import { netsuiteUnits } from '@/lib/netsuite-units';
+import { netsuiteUnits } from '@/db/lib/netsuite-units';
 
 export const dynamic = 'force-dynamic';
 

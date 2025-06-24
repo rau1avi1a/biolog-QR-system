@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { vendorService } from "@/services/vendor.service";
+import { vendorService } from "@/db/services/app/vendor.service";
 
 export const dynamic = "force-dynamic";
 

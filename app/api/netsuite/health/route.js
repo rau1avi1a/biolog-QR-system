@@ -1,9 +1,9 @@
 // app/api/netsuite/health/route.js - Check NetSuite service health
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import connectMongoDB from '@/lib/index';
-import User from '@/models/User';
-import { createNetSuiteAuth } from '@/services/netsuite/index.js';
+import connectMongoDB from '@/db/index';
+import User from '@/db/schemas/User';
+import { createNetSuiteAuth } from '@/db/services/netsuite/index.js';
 
 export const dynamic = 'force-dynamic';
 

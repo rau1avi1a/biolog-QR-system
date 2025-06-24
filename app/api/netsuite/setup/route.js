@@ -1,8 +1,8 @@
 // app/api/netsuite/setup/route.js - Enhanced with configuration check
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import connectMongoDB from '@/lib/index';
-import User from '@/models/User';
+import connectMongoDB from '@/db/index';
+import User from '@/db/schemas/User';
 
 export const dynamic = 'force-dynamic';
 

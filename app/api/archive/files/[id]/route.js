@@ -1,6 +1,6 @@
 // app/api/archive/files/[id]/route.js
 import { NextResponse } from 'next/server';
-import { getArchivedFile } from '@/services/archive.service';
+import { getArchivedFile } from '@/db/services/app/archive.service';
 
 export async function GET(request, { params }) {
   try {

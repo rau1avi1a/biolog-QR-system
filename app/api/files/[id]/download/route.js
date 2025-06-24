@@ -1,7 +1,7 @@
 // app/api/files/[id]/download/route.js
 import { NextResponse } from 'next/server';
-import connectMongoDB from '@/lib/index';
-import Batch from '@/models/Batch';
+import connectMongoDB from '@/db/index';
+import Batch from '@/db/schemas/Batch';
 
 export async function GET(request, { params }) {
   try {

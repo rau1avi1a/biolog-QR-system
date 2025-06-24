@@ -1,7 +1,7 @@
 // app/home/layout.js
-import { basicAuth } from "@/lib/auth";
-import { Item } from '@/models/Item';
-import dbConnect from '@/lib/index';
+import { basicAuth } from "@/db/lib/auth";
+import { Item } from '@/db/schemas/Item';
+import dbConnect from '@/db/index';
 import NavBar from "@/components/NavBar";
 
 export default async function HomeLayout({ children }) {

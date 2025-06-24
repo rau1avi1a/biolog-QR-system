@@ -1,6 +1,6 @@
-import connectMongoDB from "@/lib/index";
-import { Vendor }     from "@/models/Vendor";
-import { VendorItem } from "@/models/VendorItem";
+import connectMongoDB from "@/db/index";
+import { Vendor }     from "@/db/schemas/Vendor";
+import { VendorItem } from "@/db/schemas/VendorItem";
 
 export const vendorService = {
   async list() {

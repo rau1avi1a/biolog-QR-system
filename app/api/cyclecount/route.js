@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import connectMongoDB from '@/lib/index';
-import { Item } from '@/models/Item';
+import connectMongoDB from '@/db/index';
+import { Item } from '@/db/schemas/Item';
 // Removed imports for Chemical and ChemicalAudit models since they don't exist
 // import { Chemical } from '@/models/Chemical';
 // import { ChemicalAudit } from '@/models/ChemicalAudit';

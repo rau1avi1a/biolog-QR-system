@@ -1,6 +1,6 @@
 // app/api/files/[id]/batches/route.js     (proxy)
 import { NextResponse } from 'next/server';
-import { createBatch, listBatches } from '@/services/batch.service';
+import { createBatch, listBatches } from '@/db/services/app/batch.service';
 
 export async function GET(_, { params }) {
   // Next.js 15 requires awaiting params

@@ -1,11 +1,11 @@
 // services/file.service.js - Fixed folder structure handling
 
 import mongoose       from 'mongoose';
-import connectMongoDB from '@/lib/index';
+import connectMongoDB from '@/db/index';
 
-import File   from '@/models/File';
-import Folder from '@/models/Folder';
-import '@/models/Item';   // registers Item discriminators
+import File   from '@/db/schemas/File';
+import Folder from '@/db/schemas/Folder';
+import '@/db/schemas/Item';   // registers Item discriminators
 
 /*───────────────────────────────────────────────────────────────────*/
 /* Helpers                                                           */

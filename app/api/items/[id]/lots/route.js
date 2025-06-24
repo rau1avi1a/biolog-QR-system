@@ -1,7 +1,7 @@
 // app/api/items/[id]/lots/route.js
 import { NextResponse } from "next/server";
-import connectMongoDB  from "@/lib/index";
-import { Item }        from "@/models/Item";
+import connectMongoDB  from "@/db/index";
+import { Item }        from "@/db/schemas/Item";
 
 export const dynamic = "force-dynamic";
 

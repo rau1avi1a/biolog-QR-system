@@ -1,10 +1,10 @@
 // services/txn.service.js - Updated to include batch snapshot data
 import mongoose from 'mongoose';
-import connectMongoDB from '@/lib/index';
-import { Item } from '@/models/Item';
-import { InventoryTxn } from '@/models/InventoryTxn';
-import Batch from '@/models/Batch';
-import File from '@/models/File';
+import connectMongoDB from '@/db/index';
+import { Item } from '@/db/schemas/Item';
+import { InventoryTxn } from '@/db/schemas/InventoryTxn';
+import Batch from '@/db/schemas/Batch';
+import File from '@/db/schemas/File';
 
 export const txnService = {
   /**

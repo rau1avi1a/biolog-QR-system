@@ -1,8 +1,8 @@
 // app/files/[id]/page.jsx
 import { notFound } from 'next/navigation';
-import connectMongoDB from '@/lib/index';
-import Batch from '@/models/Batch';
-import File from '@/models/File';
+import connectMongoDB from '@/db/index';
+import Batch from '@/db/schemas/Batch';
+import File from '@/db/schemas/File';
 import FilesDetailClient from './FilesDetailClient';
 
 async function getBatchWithFile(id) {

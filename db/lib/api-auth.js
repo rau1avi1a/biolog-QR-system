@@ -2,8 +2,8 @@
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
-import User from '@/models/User';
-import connectMongoDB from '@lib/index.js';
+import User from '@/db/schemas/User';
+import connectMongoDB from '@/db/index';
 
 /**
  * Higher-order function to enforce authentication.

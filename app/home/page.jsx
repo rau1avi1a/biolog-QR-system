@@ -1,6 +1,6 @@
 // app/home/page.jsx
-import { Item } from '@/models/Item';
-import dbConnect from '@/lib/index';
+import { Item } from '@/db/schemas/Item';
+import dbConnect from '@/db/index';
 import ClientHome from './clienthome';
 
 // Add metadata for better SEO and performance

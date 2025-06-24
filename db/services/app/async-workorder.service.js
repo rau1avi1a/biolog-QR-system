@@ -1,8 +1,8 @@
 // services/async-workorder.service.js - FIXED: Better database updates and error handling
-import connectMongoDB from '@/lib/index';
-import Batch from '@/models/Batch.js';
-import User from '@/models/User.js';
-import { createWorkOrderService } from './netsuite/workorder.service.js';
+import connectMongoDB from '@/db/index';
+import Batch from '@/db/schemas/Batch.js';
+import User from '@/db/schemas/User.js';
+import { createWorkOrderService } from '../netsuite/index.js';
 
 /**
  * Enhanced Background Work Order Creation Service

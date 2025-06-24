@@ -1,6 +1,6 @@
 // app/api/archive/files/route.js
 import { NextResponse } from 'next/server';
-import { getAllArchivedFiles, getArchivedFilesByPath } from '@/services/archive.service';
+import { getAllArchivedFiles, getArchivedFilesByPath } from '@/db/services/app/archive.service';
 
 export async function GET(request) {
   try {
