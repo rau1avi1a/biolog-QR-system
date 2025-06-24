@@ -440,12 +440,221 @@ export async function deleteBatch(id) {
 
 /** Get work order status for a batch */
 export async function getWorkOrderStatus(batchId) {
-  return AsyncWorkOrderService.getWorkOrderStatus(batchId);
+  try {
+    console.log('🔍 Getting work order status for batch:', batchId);
+    
+    // CRITICAL: Force fresh database connection and bypass any query caching
+    await connectMongoDB();
+    
+    // Use multiple query strategies to ensure we get fresh data
+    let batch = null;
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (!batch && attempts < maxAttempts) {
+      attempts++;
+      console.log(`📡 Database query attempt ${attempts}/${maxAttempts}`);
+      
+      try {
+        // Strategy 1: Direct findById with lean() to bypass Mongoose caching
+        batch = await Batch.findById(batchId)
+          .select('workOrderCreated workOrderStatus workOrderId workOrderError netsuiteWorkOrderData workOrderCreatedAt workOrderFailedAt')
+          .lean()
+          .read('primary') // Force read from primary MongoDB instance
+          .exec();
+        
+        if (!batch && attempts < maxAttempts) {
+          console.log(`⏳ Attempt ${attempts} returned null, waiting before retry...`);
+          await new Promise(resolve => setTimeout(resolve, 500 * attempts));
+        }
+      } catch (queryError) {
+        console.error(`❌ Query attempt ${attempts} failed:`, queryError);
+        if (attempts === maxAttempts) {
+          throw queryError;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+      }
+    }
+
+    if (!batch) {
+      console.log('❌ Batch not found after all attempts:', batchId);
+      return { error: 'Batch not found' };
+    }
+
+    // Enhanced logging for debugging
+    console.log('📊 Raw batch work order data from DB:', {
+      _id: batch._id.toString(),
+      workOrderCreated: batch.workOrderCreated,
+      workOrderStatus: batch.workOrderStatus,
+      workOrderId: batch.workOrderId,
+      workOrderError: batch.workOrderError,
+      hasNetsuiteData: !!batch.netsuiteWorkOrderData,
+      tranId: batch.netsuiteWorkOrderData?.tranId,
+      createdAt: batch.workOrderCreatedAt,
+      failedAt: batch.workOrderFailedAt,
+      queryAttempts: attempts,
+      fetchTime: new Date().toISOString()
+    });
+
+    // Build comprehensive result object
+    const result = {
+      created: batch.workOrderCreated || false,
+      status: batch.workOrderStatus || 'not_created',
+      workOrderId: batch.workOrderId || null,
+      workOrderNumber: batch.netsuiteWorkOrderData?.tranId || batch.workOrderId,
+      internalId: batch.netsuiteWorkOrderData?.workOrderId || null,
+      error: batch.workOrderError || null,
+      netsuiteData: batch.netsuiteWorkOrderData || null,
+      createdAt: batch.workOrderCreatedAt || null,
+      failedAt: batch.workOrderFailedAt || null,
+      // Add metadata for debugging
+      _meta: {
+        batchId: batch._id.toString(),
+        fetchTime: new Date().toISOString(),
+        queryAttempts: attempts,
+        hasNetsuiteIntegration: !!batch.netsuiteWorkOrderData,
+        isLocalWorkOrder: batch.workOrderId?.startsWith('LOCAL-') || false,
+        isPendingWorkOrder: batch.workOrderId?.startsWith('PENDING-') || false
+      }
+    };
+    
+    console.log('📤 Returning work order status:', {
+      batchId: batch._id.toString(),
+      status: result.status,
+      workOrderNumber: result.workOrderNumber,
+      workOrderId: result.workOrderId,
+      hasError: !!result.error,
+      isNetSuite: !!(result.workOrderNumber && !result.workOrderNumber.startsWith('LOCAL-') && !result.workOrderNumber.startsWith('PENDING-'))
+    });
+    
+    return result;
+  } catch (error) {
+    console.error('💥 Error getting work order status:', {
+      batchId,
+      error: error.message,
+      stack: error.stack
+    });
+    return { 
+      error: error.message,
+      _meta: {
+        batchId,
+        errorTime: new Date().toISOString(),
+        errorType: error.constructor.name
+      }
+    };
+  }
 }
 
 /** Retry work order creation */
 export async function retryWorkOrderCreation(batchId, quantity, userId = null) {
-  return AsyncWorkOrderService.retryWorkOrderCreation(batchId, quantity, userId);
+  await connectMongoDB();
+  
+  try {
+    console.log('🔄 Retrying work order creation:', {
+      batchId,
+      quantity,
+      userId
+    });
+
+    // First, reset the batch state completely
+    const resetResult = await Batch.updateOne(
+      { _id: batchId },
+      {
+        $set: {
+          workOrderStatus: 'creating',
+          workOrderError: null,
+          workOrderFailedAt: null,
+          workOrderId: `PENDING-RETRY-${Date.now()}`,
+          workOrderCreatedAt: new Date()
+        },
+        $unset: {
+          netsuiteWorkOrderData: ""
+        }
+      }
+    );
+
+    if (resetResult.matchedCount === 0) {
+      throw new Error('Batch not found for retry');
+    }
+
+    console.log('✅ Batch state reset for retry, queuing new work order creation');
+
+    // Queue the creation again using the async service
+    return AsyncWorkOrderService.queueWorkOrderCreation(batchId, quantity, userId);
+  } catch (error) {
+    console.error('💥 Error retrying work order creation:', error);
+    
+    // Ensure we record the failure
+    try {
+      await Batch.updateOne(
+        { _id: batchId },
+        {
+          $set: {
+            workOrderStatus: 'failed',
+            workOrderError: `Retry failed: ${error.message}`,
+            workOrderFailedAt: new Date()
+          }
+        }
+      );
+    } catch (updateError) {
+      console.error('💥 Failed to record retry failure:', updateError);
+    }
+    
+    throw error;
+  }
+}
+
+export async function forceRefreshWorkOrderStatus(batchId) {
+  console.log('🔄 Force refreshing work order status for batch:', batchId);
+  
+  try {
+    // Force a fresh database query with no caching
+    await connectMongoDB();
+    
+    const batch = await Batch.findById(batchId)
+      .select('workOrderCreated workOrderStatus workOrderId workOrderError netsuiteWorkOrderData')
+      .lean()
+      .read('primary')
+      .exec();
+    
+    if (!batch) {
+      throw new Error('Batch not found');
+    }
+    
+    // If work order is still in creating state, check if we need to retry
+    if (batch.workOrderStatus === 'creating') {
+      const createdAt = new Date(batch.workOrderCreatedAt || Date.now());
+      const now = new Date();
+      const minutesElapsed = (now - createdAt) / (1000 * 60);
+      
+      // If it's been creating for more than 5 minutes, mark as failed
+      if (minutesElapsed > 5) {
+        console.log('⚠️ Work order creation timed out, marking as failed');
+        
+        await Batch.updateOne(
+          { _id: batchId },
+          {
+            $set: {
+              workOrderStatus: 'failed',
+              workOrderError: 'Work order creation timed out',
+              workOrderFailedAt: new Date()
+            }
+          }
+        );
+        
+        return {
+          status: 'failed',
+          error: 'Work order creation timed out',
+          autoFixed: true
+        };
+      }
+    }
+    
+    return getWorkOrderStatus(batchId);
+  } catch (error) {
+    console.error('💥 Error force refreshing work order status:', error);
+    throw error;
+  }
 }
 
 /** Alias for single get */
