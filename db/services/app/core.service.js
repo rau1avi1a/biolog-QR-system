@@ -1,57 +1,79 @@
-// services/base.service.js - Dynamic base service for CRUD operations
-import mongoose from 'mongoose';
-import connectMongoDB from '@/db/index';
+// db/services/app/core.service.js - Enhanced with single db import pattern
+import db from '@/db/index.js';
 
 /**
- * Dynamic base service that automatically handles model schema changes
- * Provides common CRUD operations that work with any Mongoose model
+ * CoreService - Base class providing common CRUD operations
+ * Uses single db import for all database operations
  */
-export class BaseService {
+export class CoreService {
   constructor(model, options = {}) {
-    this.model = model;
-    this.modelName = model.modelName;
+    this._model = model; // Store the passed model (could be null for lazy loading)
     this.options = {
-      // Default options
-      defaultPopulate: [], // Fields to populate by default
-      searchFields: [], // Fields to search in when doing text search
-      defaultSort: { createdAt: -1 }, // Default sort order
-      defaultLimit: 50, // Default pagination limit
-      selectFields: null, // Fields to select by default (null = all)
-      excludeFields: [], // Fields to always exclude
+      defaultPopulate: [],
+      defaultSort: { createdAt: -1 },
+      defaultLimit: 50,
+      selectFields: null,
+      excludeFields: [],
       ...options
     };
   }
 
   /**
-   * Get model schema fields dynamically
+   * Smart model getter - handles both direct models and lazy resolution
    */
-  getSchemaFields() {
-    const schema = this.model.schema;
-    const fields = {};
+  get model() {
+    // If model was passed to constructor, use it
+    if (this._model) {
+      return this._model;
+    }
     
-    schema.eachPath((path, schemaType) => {
-      if (path === '_id' || path === '__v') return;
-      
-      fields[path] = {
-        type: schemaType.instance,
-        required: schemaType.isRequired,
-        default: schemaType.defaultValue,
-        ref: schemaType.options?.ref,
-        enum: schemaType.enumValues,
-        min: schemaType.options?.min,
-        max: schemaType.options?.max,
-        maxlength: schemaType.options?.maxlength,
-        minlength: schemaType.options?.minlength
-      };
-    });
+    // Check if subclass defines a lazy model getter
+    const prototype = Object.getPrototypeOf(this);
+    const descriptor = Object.getOwnPropertyDescriptor(prototype.constructor.prototype, 'model');
     
-    return fields;
+    if (descriptor && descriptor.get && descriptor.get !== this.constructor.prototype.model) {
+      return descriptor.get.call(this);
+    }
+    
+    throw new Error(`No model defined for ${this.constructor.name}. Either pass a model to constructor or define a lazy getter.`);
+  }
+
+  /**
+   * Get model name for error messages
+   */
+  get modelName() {
+    try {
+      return this.model?.modelName || this.constructor.name.replace('Service', '') || 'Unknown';
+    } catch {
+      return this.constructor.name.replace('Service', '') || 'Unknown';
+    }
+  }
+
+  /**
+   * Ensure database connection using single db import
+   */
+  async connect() {
+    await db.connect();
+  }
+
+  /**
+   * Access other services through db.services
+   */
+  get services() {
+    return db.services;
+  }
+
+  /**
+   * Access models through db.models
+   */
+  get models() {
+    return db.models;
   }
 
   /**
    * Build select string excluding sensitive fields
    */
-  buildSelectString(includeFields = [], excludeFields = []) {
+  buildSelect(includeFields = [], excludeFields = []) {
     const exclude = [...this.options.excludeFields, ...excludeFields];
     if (exclude.length > 0) {
       return exclude.map(field => `-${field}`).join(' ');
@@ -67,10 +89,7 @@ export class BaseService {
    */
   buildPopulate(populate = []) {
     const defaultPop = this.options.defaultPopulate;
-    const allPopulate = [...defaultPop, ...populate];
-    
-    // Remove duplicates and return
-    return allPopulate.filter((pop, index, self) => 
+    return [...defaultPop, ...populate].filter((pop, index, self) => 
       index === self.findIndex(p => 
         (typeof p === 'string' ? p : p.path) === (typeof pop === 'string' ? pop : pop.path)
       )
@@ -81,7 +100,7 @@ export class BaseService {
    * Create a new document
    */
   async create(data, options = {}) {
-    await connectMongoDB();
+    await this.connect();
     
     const { populate = [], session = null } = options;
     
@@ -102,7 +121,7 @@ export class BaseService {
    * Find document by ID
    */
   async findById(id, options = {}) {
-    await connectMongoDB();
+    await this.connect();
     
     const { 
       populate = [], 
@@ -114,17 +133,14 @@ export class BaseService {
     try {
       let query = this.model.findById(id);
       
-      // Apply select
-      const selectStr = this.buildSelectString(includeFields, excludeFields);
+      const selectStr = this.buildSelect(includeFields, excludeFields);
       if (selectStr) query = query.select(selectStr);
       
-      // Apply population
       const populateFields = this.buildPopulate(populate);
       populateFields.forEach(pop => {
         query = query.populate(pop);
       });
       
-      // Apply lean
       if (lean) query = query.lean();
       
       return await query.exec();
@@ -134,10 +150,10 @@ export class BaseService {
   }
 
   /**
-   * Find multiple documents with filtering, pagination, and search
+   * Find multiple documents with filtering and pagination
    */
   async find(options = {}) {
-    await connectMongoDB();
+    await this.connect();
     
     const {
       filter = {},
@@ -147,45 +163,23 @@ export class BaseService {
       sort = this.options.defaultSort,
       limit = this.options.defaultLimit,
       skip = 0,
-      page = null, // If provided, skip will be calculated as (page - 1) * limit
-      search = null, // Text search string
       lean = true
     } = options;
     
     try {
-      // Build the base filter
       let query = this.model.find(filter);
       
-      // Add text search if provided
-      if (search && this.options.searchFields.length > 0) {
-        const searchRegex = new RegExp(search, 'i');
-        const searchQuery = {
-          $or: this.options.searchFields.map(field => ({
-            [field]: searchRegex
-          }))
-        };
-        query = query.find(searchQuery);
-      }
-      
-      // Apply select
-      const selectStr = this.buildSelectString(includeFields, excludeFields);
+      const selectStr = this.buildSelect(includeFields, excludeFields);
       if (selectStr) query = query.select(selectStr);
       
-      // Apply population
       const populateFields = this.buildPopulate(populate);
       populateFields.forEach(pop => {
         query = query.populate(pop);
       });
       
-      // Apply sorting
       if (sort) query = query.sort(sort);
-      
-      // Apply pagination
-      const actualSkip = page ? (page - 1) * limit : skip;
       if (limit) query = query.limit(limit);
-      if (actualSkip) query = query.skip(actualSkip);
-      
-      // Apply lean
+      if (skip) query = query.skip(skip);
       if (lean) query = query.lean();
       
       return await query.exec();
@@ -198,7 +192,7 @@ export class BaseService {
    * Update document by ID
    */
   async updateById(id, updateData, options = {}) {
-    await connectMongoDB();
+    await this.connect();
     
     const { 
       populate = [], 
@@ -210,7 +204,6 @@ export class BaseService {
     } = options;
     
     try {
-      // Filter out undefined values and empty objects
       const cleanData = this.cleanUpdateData(updateData);
       
       let query = this.model.findByIdAndUpdate(
@@ -223,11 +216,9 @@ export class BaseService {
         }
       );
       
-      // Apply select
-      const selectStr = this.buildSelectString(includeFields, excludeFields);
+      const selectStr = this.buildSelect(includeFields, excludeFields);
       if (selectStr) query = query.select(selectStr);
       
-      // Apply population
       const populateFields = this.buildPopulate(populate);
       populateFields.forEach(pop => {
         query = query.populate(pop);
@@ -249,18 +240,12 @@ export class BaseService {
    * Delete document by ID
    */
   async deleteById(id, options = {}) {
-    await connectMongoDB();
+    await this.connect();
     
-    const { session = null, includeFields = [], excludeFields = [] } = options;
+    const { session = null } = options;
     
     try {
-      let query = this.model.findByIdAndDelete(id, session ? { session } : {});
-      
-      // Apply select to see what was deleted
-      const selectStr = this.buildSelectString(includeFields, excludeFields);
-      if (selectStr) query = query.select(selectStr);
-      
-      const result = await query.lean().exec();
+      const result = await this.model.findByIdAndDelete(id, session ? { session } : {}).lean();
       
       if (!result) {
         throw new Error(`${this.modelName} not found`);
@@ -276,7 +261,7 @@ export class BaseService {
    * Count documents matching filter
    */
   async count(filter = {}) {
-    await connectMongoDB();
+    await this.connect();
     
     try {
       return await this.model.countDocuments(filter);
@@ -289,7 +274,7 @@ export class BaseService {
    * Check if document exists
    */
   async exists(filter) {
-    await connectMongoDB();
+    await this.connect();
     
     try {
       const result = await this.model.exists(filter);
@@ -322,10 +307,10 @@ export class BaseService {
   }
 
   /**
-   * Get aggregation pipeline for complex queries
+   * Aggregate pipeline for complex queries
    */
   async aggregate(pipeline, options = {}) {
-    await connectMongoDB();
+    await this.connect();
     
     const { session = null } = options;
     
@@ -343,7 +328,7 @@ export class BaseService {
    * Bulk operations
    */
   async bulkWrite(operations, options = {}) {
-    await connectMongoDB();
+    await this.connect();
     
     const { session = null, ordered = false } = options;
     
@@ -359,6 +344,74 @@ export class BaseService {
       throw new Error(`Error in ${this.modelName} bulk write: ${error.message}`);
     }
   }
+
+  // =============================================================================
+  // CONVENIENCE METHODS
+  // =============================================================================
+
+  /**
+   * Convenience methods that map to the base CRUD operations
+   */
+  async update(id, data, options = {}) {
+    return this.updateById(id, data, options);
+  }
+
+  async delete(id, options = {}) {
+    return this.deleteById(id, options);
+  }
+
+  async list(options = {}) {
+    return this.find(options);
+  }
+
+  async get(id, options = {}) {
+    return this.findById(id, options);
+  }
+
+  // =============================================================================
+  // HELPER METHODS FOR ACCESSING OTHER SERVICES
+  // =============================================================================
+
+  /**
+   * Quick access to transaction service
+   */
+  get txnService() {
+    return this.services.txnService;
+  }
+
+  /**
+   * Quick access to item service
+   */
+  get itemService() {
+    return this.services.itemService;
+  }
+
+  /**
+   * Quick access to file service
+   */
+  get fileService() {
+    return this.services.fileService;
+  }
+
+  /**
+   * Quick access to async work order service
+   */
+  get asyncWorkOrderService() {
+    return this.services.AsyncWorkOrderService;
+  }
+
+  /**
+   * Quick access to workflow services
+   */
+  get workflowServices() {
+    return {
+      createArchiveCopy: this.services.createArchiveCopy,
+      archiveService: this.services.archiveService,
+      poService: this.services.poService,
+      vendorService: this.services.vendorService,
+      cycleCountService: this.services.cycleCountService
+    };
+  }
 }
 
-export default BaseService;
+export default CoreService;

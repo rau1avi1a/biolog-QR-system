@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva } from "class-variance-authority";
-import { cn } from "@/db/lib/utils";
+import { cn } from "@/components/utils/utils";
 
 const spinnerVariants = cva("relative block opacity-[0.65]", {
   variants: {

@@ -1,6 +1,5 @@
 // app/home/page.jsx
-import { Item } from '@/db/schemas/Item';
-import dbConnect from '@/db/index';
+import db from '@/db/index.js'; // ✅ Single import
 import ClientHome from './clienthome';
 
 // Add metadata for better SEO and performance
@@ -10,10 +9,10 @@ export const metadata = {
 };
 
 export default async function HomePage() {
-  await dbConnect();
+  await db.connect(); // ✅ Use db.connect()
 
   // Pull and flatten to plain JSON - PROPERLY serialize everything
-  const raw = await Item.find().lean();
+  const raw = await db.models.Item.find().lean(); // ✅ Use db.models.Item
   const flat = raw.map(d => {
     // Convert all MongoDB objects to plain JavaScript objects
     const plainItem = {

@@ -1,29 +1,27 @@
 {
   "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "moduleResolution": "node",            // <-- switch here
     "jsx": "preserve",
     "baseUrl": ".",
     "paths": {
+      "@/*": ["./*"],
       "@/components/*": ["components/*"],
       "@/lib/*": ["lib/*"],
-      "@/*": ["./*"],
       "@/services/*": ["services/*"],
       "@/models/*": ["models/*"],
-      "@/db/*": ["./db/*"],
-      "@/db": ["./db/index.js"]
+      "@/db/*": ["db/*"]
     },
-    "target": "es5",
-    "module": "esnext",
-    "moduleResolution": "node",
-    "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["**/*.js", "**/*.jsx", "app/api/files/[id]/versions/route.ts", "app/api/folders/route.ts", "hooks/useItemTransactions.ts"],
+  "include": ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", ".env"]
 }

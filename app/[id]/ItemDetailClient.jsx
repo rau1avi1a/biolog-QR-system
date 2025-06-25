@@ -67,7 +67,8 @@ const useAuth = () => {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch('/api/auth/me');
+        // Fixed URL: add ?action=me parameter
+        const response = await fetch('/api/auth?action=me');
         if (response.ok) {
           const userData = await response.json();
           setUser(userData.user);
@@ -206,23 +207,14 @@ export default function ItemDetailClient({ item, transactions, lots }) {
       alert('Unauthorized: Admin access required');
       return;
     }
-
+  
     setIsDeleting(true);
     
     try {
-      const response = await fetch(`/api/items/${item._id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          force: forceDelete
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
+      // Use the API function instead of direct fetch
+      const data = await api.deleteItem(item._id, forceDelete);
+  
+      if (data.success) {
         const message = forceDelete && item.qtyOnHand > 0 
           ? `Item "${item.displayName}" and all its stock (${item.qtyOnHand} ${item.uom}) has been deleted successfully.`
           : `Item "${item.displayName}" has been deleted successfully.`;

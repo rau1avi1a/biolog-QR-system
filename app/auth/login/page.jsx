@@ -24,7 +24,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth?action=login', { // ✅ Fixed URL
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
@@ -34,9 +34,9 @@ export default function LoginPage() {
 
       if (!res.ok) throw new Error(data.message || 'Failed to sign in');
 
-      // Successfully signed in
-      window.location.href = '/'; // Use window.location.href for full page reload
-      console.log('home')
+      // Successfully signed in - redirect to home
+      window.location.href = '/home'; // Changed from '/' to '/home'
+      console.log('Redirecting to home')
     } catch (err) {
       setError(err.message);
       setIsLoading(false);

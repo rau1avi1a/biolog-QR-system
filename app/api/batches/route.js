@@ -1,169 +1,123 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createBatch, listBatches } from '@/db/services/app/batch.service';
+// =============================================================================
+// app/api/batches/route.js - FIXED Clean batches operations
+// =============================================================================
+import { NextResponse } from 'next/server';
+import db from '@/db';
 import { jwtVerify } from 'jose';
-import User from '@/db/schemas/User';
-import connectMongoDB from '@/db/index';
 
-// Helper function to get user from JWT token
-async function getUserFromRequest(request) {
+// Helper to get authenticated user
+async function getAuthUser(request) {
   try {
     const token = request.cookies.get('auth_token')?.value;
-    
-    if (!token) {
-      return null; // No token, will use system user
-    }
-
-    // Verify the JWT token
-    const { payload } = await jwtVerify(
-      token,
-      new TextEncoder().encode(process.env.JWT_SECRET)
-    );
-
-    await connectMongoDB();
-
-    // Get fresh user data from database
-    const user = await User.findById(payload.userId).select('-password').lean();
-    
-    if (!user) {
-      return null; // User not found, will use system user
-    }
-
-    return {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role
-    };
-
-  } catch (error) {
-    console.warn('Failed to get user from token:', error.message);
-    return null; // Token invalid, will use system user
-  }
-}
-
-export async function POST(request) {
-  try {
-    const payload = await request.json();
-
-    // Get user information from the request
-    const user = await getUserFromRequest(request);
-
-    // Basic validation
-    const fileId = payload.originalFileId || payload.fileId;
-    if (!fileId) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Missing fileId' 
-        },
-        { status: 400 }
-      );
-    }
-
-    // Add user to payload
-    payload.user = user;
-
-    // Handle different types of batch creation
-    if (payload.originalFileId && payload.editorData) {
-      // This is a save from the editor with confirmation data
-      const { originalFileId, editorData, action, confirmationData } = payload;
-      
-      const batchPayload = {
-        originalFileId,
-        editorData,
-        action,
-        confirmationData,
-        user, // Pass user to service
-        status: getStatusFromAction(action),
-        // Set flags based on action
-        chemicalsTransacted: shouldTransactChemicals(action),
-        solutionCreated: shouldCreateSolution(action),
-        workOrderCreated: shouldCreateWorkOrder(action)
-      };
-
-      const batch = await createBatch(batchPayload);
-      
-      return NextResponse.json({
-        success: true,
-        data: batch
-      }, { status: 201 });
-    } else {
-      // Regular batch creation
-      const batch = await createBatch(payload);
-      return NextResponse.json({
-        success: true,
-        data: batch
-      }, { status: 201 });
-    }
-  } catch (error) {    
-    console.error('Batch creation error:', error);
-    
-    if (error.message === 'File not found') {
-      return NextResponse.json(
-        { success: false, error: 'File not found' },
-        { status: 404 }
-      );
-    }
-    
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Failed to create batch',
-        message: error.message 
-      },
-      { status: 500 }
-    );
+    if (!token) return null;
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
+    const user = await db.auth.findById(payload.userId);
+    return user ? { _id: user._id, name: user.name, email: user.email, role: user.role } : null;
+  } catch {
+    return null;
   }
 }
 
 export async function GET(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const fileId = searchParams.get('fileId');
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  const action = searchParams.get('action');
 
-    const filter = {};
-    if (status) filter.status = status;
-    if (fileId) filter.fileId = fileId;
+  if (id) {
+    if (action === 'workorder-status') {
+      // GET /api/batches?id=123&action=workorder-status
+      const status = await db.batches.getWorkOrderStatus(id);
+      
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...status,
+          displayId: status.workOrderNumber || status.workOrderId,
+          description: status.workOrderNumber ? 
+            `NetSuite Work Order ${status.workOrderNumber}` : 
+            'Work Order'
+        }
+      }, {
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+    }
+    
+    // GET /api/batches?id=123 - FIXED METHOD NAME
+    const batch = await db.batches.getBatchById(id);
+    if (!batch) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+    return NextResponse.json({ success: true, data: batch });
+  }
 
-    const batches = await listBatches({ filter });
+  // GET /api/batches?status=Review&fileId=123 - FIXED METHOD NAME
+  const filter = {};
+  const status = searchParams.get('status');
+  const fileId = searchParams.get('fileId');
+  if (status) filter.status = status;
+  if (fileId) filter.fileId = fileId;
 
+  const batches = await db.batches.listBatches({ filter });
+  return NextResponse.json({ success: true, data: batches });
+}
+
+export async function POST(request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  const action = searchParams.get('action');
+
+  if (id && action === 'workorder-retry') {
+    // POST /api/batches?id=123&action=workorder-retry - FIXED METHOD NAME
+    const user = await getAuthUser(request);
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    
+    const { quantity } = await request.json();
+    if (!quantity || quantity <= 0) {
+      return NextResponse.json({ error: 'Valid quantity required' }, { status: 400 });
+    }
+
+    const result = await db.batches.retryWorkOrderCreation(id, quantity, user._id);
     return NextResponse.json({
       success: true,
-      data: batches
+      data: result,
+      message: 'Work order creation retry initiated'
     });
-  } catch (error) {
-    console.error('Batch list error:', error);
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: error.message || 'Failed to fetch batches' 
-      },
-      { status: 500 }
-    );
   }
-}
 
-// Helper functions to determine what should happen based on action
-function getStatusFromAction(action) {
-  switch (action) {
-    case 'save': return 'In Progress';
-    case 'create_work_order': return 'In Progress';
-    case 'submit_review': return 'Review';
-    case 'complete': return 'Completed';
-    case 'reject': return 'In Progress';
-    default: return 'In Progress';
+  // POST /api/batches - FIXED METHOD NAME
+  const payload = await request.json();
+  const user = await getAuthUser(request);
+  payload.user = user;
+
+  const fileId = payload.originalFileId || payload.fileId;
+  if (!fileId) {
+    return NextResponse.json({ success: false, error: 'Missing fileId' }, { status: 400 });
   }
+
+  const batch = await db.batches.createBatch(payload);
+  return NextResponse.json({ success: true, data: batch }, { status: 201 });
 }
 
-function shouldTransactChemicals(action) {
-  return action === 'submit_review'; // Only transact chemicals when submitting for review
+export async function PATCH(request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
+
+  const payload = await request.json();
+  const user = await getAuthUser(request);
+  payload.user = user;
+
+  // FIXED METHOD NAME
+  const batch = await db.batches.updateBatch(id, payload);
+  if (!batch) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+  return NextResponse.json({ success: true, data: batch });
 }
 
-function shouldCreateSolution(action) {
-  return action === 'submit_review'; // Only create solution when submitting for review
-}
+export async function DELETE(request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
 
-function shouldCreateWorkOrder(action) {
-  return action === 'create_work_order'; // Only create work order when specifically requested
+  // FIXED METHOD NAME
+  const batch = await db.batches.deleteBatch(id);
+  if (!batch) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+  return NextResponse.json({ success: true, data: batch });
 }

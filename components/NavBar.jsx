@@ -211,14 +211,18 @@ export default function NavBar({ user, notifications = [], allItems = [] }) {
 
   const handleLogout = async () => {
     try {
-      const res = await fetch('/api/auth/logout', {
+      const res = await fetch('/api/auth?action=logout', {
         method: 'POST',
       });
-
+  
       if (!res.ok) throw new Error('Failed to logout');
-      router.push('/');
+      
+      // Redirect to login page or home page
+      router.push('/auth/login'); // or '/' if you prefer
     } catch (error) {
       console.error('Logout failed:', error);
+      // Optionally show user-friendly error message
+      alert('Failed to logout. Please try again.');
     }
   };
 

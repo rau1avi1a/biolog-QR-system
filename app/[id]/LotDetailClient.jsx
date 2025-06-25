@@ -53,7 +53,8 @@ const useAuth = () => {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch('/api/auth/me');
+        // Fixed URL: add ?action=me parameter
+        const response = await fetch('/api/auth?action=me');
         if (response.ok) {
           const userData = await response.json();
           setUser(userData.user);
@@ -183,20 +184,14 @@ export default function LotDetailClient({ lot, item, transactions }) {
       alert('Unauthorized: Admin access required');
       return;
     }
-
+  
     setIsDeleting(true);
     
     try {
-      const response = await fetch(`/api/items/${item._id}/lots/${lot._id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
+      // Use the API function instead of direct fetch
+      const data = await api.deleteLot(item._id, lot._id);
+  
+      if (data.success) {
         alert(`Lot "${lot.lotNumber}" has been deleted successfully.`);
         router.push(`/${item._id}`); // Redirect to item page
       } else {
@@ -210,7 +205,7 @@ export default function LotDetailClient({ lot, item, transactions }) {
       setShowDeleteDialog(false);
     }
   };
-
+  
   // Enhanced Lot Transaction History Component
   const LotTransactionHistory = () => {
     if (lotTransactionData.loading) {

@@ -33,7 +33,7 @@ export const api = {
                        return fetch('/api/files',{method:'POST',body:fd});
                      },
 
-  /* ── NEW: Batch upload with folder structure - ChatGPT's clean approach ─── */
+  /* ── NEW: Batch upload with folder structure ─── */
   uploadBatch: async (fileDataArray, baseFolderId = null) => {
     console.log('API uploadBatch called with:', fileDataArray.length, 'files');
     
@@ -45,7 +45,7 @@ export const api = {
       console.log('Using base folder ID:', baseFolderId);
     }
     
-    // Add each file with its relative path - keep it simple
+    // Add each file with its relative path
     fileDataArray.forEach((fileData, index) => {
       const { file, relativePath } = fileData;
       
@@ -110,7 +110,6 @@ export const api = {
     }
   },
     
-  // FIXED: Match your API response format { success: true, data: {...} }
   newBatch: async (fileId, extra = {}) => {
     try {
       const payload = { fileId, ...extra };
@@ -128,7 +127,6 @@ export const api = {
       
       const data = await response.json();
       
-      // FIXED: Return in the format your frontend expects
       return {
         success: data.success || true,
         data: data.success ? data.data : data,
@@ -140,7 +138,6 @@ export const api = {
     }
   },
       
-  // FIXED: Match your API response format
   getBatch: async (id) => {
     try {
       const response = await fetch(`/api/batches/${id}`);
@@ -152,7 +149,6 @@ export const api = {
       
       const data = await response.json();
       
-      // FIXED: Return in the format your frontend expects
       return {
         success: data.success || true,
         data: data.success ? data.data : data,
@@ -163,7 +159,6 @@ export const api = {
     }
   },
 
-  // FIXED: Match your API response format
   updateBatch: async (id, payload) => {
     try {
       const response = await fetch(`/api/batches/${id}`, {
@@ -179,7 +174,6 @@ export const api = {
       
       const data = await response.json();
       
-      // FIXED: Return in the format your frontend expects
       return {
         success: data.success || true,
         data: data.success ? data.data : data,
@@ -193,51 +187,49 @@ export const api = {
   deleteBatch: (id) => fetch(`/api/batches/${id}`, { method:'DELETE' })
                        .then(r=>r.json()),
 
-  /* ── NEW: Save with different actions ─── */
-/* ── Updated Save with confirmation data ─── */
-/* ── NEW: Save with different actions and confirmation data ─── */
-saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirmationData = null) => {
-  try {
-    const payload = { 
-      originalFileId, 
-      editorData,
-      action,
-      confirmationData, // Pass confirmation data to backend
-      status: action === 'save' ? 'In Progress' : 
-              action === 'submit_review' ? 'Review' :
-              action === 'submit_final' ? 'Completed' :
-              action === 'reject' ? 'In Progress' : 
-              action === 'create_work_order' ? 'In Progress' : 
-              action === 'complete' ? 'Completed' : 'In Progress'
-    };
+  /* ── Save with different actions and confirmation data ─── */
+  saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirmationData = null) => {
+    try {
+      const payload = { 
+        originalFileId, 
+        editorData,
+        action,
+        confirmationData,
+        status: action === 'save' ? 'In Progress' : 
+                action === 'submit_review' ? 'Review' :
+                action === 'submit_final' ? 'Completed' :
+                action === 'reject' ? 'In Progress' : 
+                action === 'create_work_order' ? 'In Progress' : 
+                action === 'complete' ? 'Completed' : 'In Progress'
+      };
 
-    const response = await fetch('/api/batches', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+      const response = await fetch('/api/batches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json();
+
+      return {
+        success: data.success || true,
+        data: data.success ? data.data : data,
+        batch: data.success ? data.data : data
+      };
+
+    } catch (error) {
+      throw error;
     }
+  },
 
-    const data = await response.json();
-
-    return {
-      success: data.success || true,
-      data: data.success ? data.data : data,
-      batch: data.success ? data.data : data
-    };
-
-  } catch (error) {
-    throw error;
-  }
-},
-
-  /* ── NetSuite integration methods ─── */
+  /* ── NetSuite integration methods (UPDATED for consolidated route) ─── */
   getAvailableLots: (itemId) =>
-    fetch(`/api/items/${itemId}/lots`)
+    fetch(`/api/items?id=${itemId}&action=lots`)
       .then(r => {
         if (!r.ok) throw new Error('Failed to fetch available lots');
         return r.json();
@@ -246,18 +238,175 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
         lots: response.success ? response.lots : []
       })),
 
-  createWorkOrder: (batchId, components) =>
-    fetch('/api/netsuite/workorder', {
+  // Get NetSuite BOM for an assembly item
+  getNetsuiteBOM: (assemblyItemId) =>
+    fetch(`/api/netsuite?action=getBOM&assemblyItemId=${assemblyItemId}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to fetch NetSuite BOM');
+        return r.json();
+      }),
+
+  // Search for NetSuite assembly items
+  searchNetsuiteAssemblyItems: (query) =>
+    fetch(`/api/netsuite?action=search&q=${encodeURIComponent(query)}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to search NetSuite assembly items');
+        return r.json();
+      }),
+
+  // Test NetSuite connection
+  testNetsuiteConnection: () =>
+    fetch('/api/netsuite?action=test')
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to test NetSuite connection');
+        return r.json();
+      }),
+
+  // Get NetSuite setup status
+  getNetsuiteSetup: () =>
+    fetch('/api/netsuite?action=setup')
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to get NetSuite setup status');
+        return r.json();
+      }),
+
+  // Configure NetSuite credentials
+  setupNetsuite: (credentials) =>
+    fetch('/api/netsuite?action=setup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchId, components })
+      body: JSON.stringify(credentials)
+    }).then(r => {
+      if (!r.ok) throw new Error('Failed to setup NetSuite credentials');
+      return r.json();
+    }),
+
+  // Create work order from batch
+  createWorkOrder: (batchId, quantity, options = {}) =>
+    fetch('/api/netsuite?action=workorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ batchId, quantity, ...options })
     }).then(r => {
       if (!r.ok) throw new Error('Failed to create work order');
       return r.json();
     }),
 
+  // Create work order from assembly item ID
+  createWorkOrderFromAssembly: (assemblyItemId, quantity, options = {}) =>
+    fetch('/api/netsuite?action=workorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assemblyItemId, quantity, ...options })
+    }).then(r => {
+      if (!r.ok) throw new Error('Failed to create work order');
+      return r.json();
+    }),
+
+  // Get work order status
+  getWorkOrderStatus: (workOrderId) =>
+    fetch(`/api/netsuite?action=workorder&id=${workOrderId}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to get work order status');
+        return r.json();
+      }),
+
+  // List work orders with filters
+  listWorkOrders: (filters = {}) => {
+    const params = new URLSearchParams({ action: 'workorder' });
+    if (filters.status) params.append('status', filters.status);
+    if (filters.assemblyItem) params.append('assemblyItem', filters.assemblyItem);
+    if (filters.limit) params.append('limit', filters.limit.toString());
+    
+    return fetch(`/api/netsuite?${params}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to list work orders');
+        return r.json();
+      });
+  },
+
+  // Complete work order
+  completeWorkOrder: (workOrderId, quantityCompleted) =>
+    fetch('/api/netsuite?action=workorder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        workOrderId, 
+        action: 'complete', 
+        quantityCompleted 
+      })
+    }).then(r => {
+      if (!r.ok) throw new Error('Failed to complete work order');
+      return r.json();
+    }),
+
+  // Cancel work order
+  cancelWorkOrder: (workOrderId) =>
+    fetch('/api/netsuite?action=workorder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        workOrderId, 
+        action: 'cancel'
+      })
+    }).then(r => {
+      if (!r.ok) throw new Error('Failed to cancel work order');
+      return r.json();
+    }),
+
+  // Map NetSuite components to local chemicals
+  mapNetsuiteComponents: (components) =>
+    fetch('/api/netsuite?action=mapping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ components })
+    }).then(r => {
+      if (!r.ok) throw new Error('Failed to map NetSuite components');
+      return r.json();
+    }),
+
+  // Import NetSuite items as local chemicals
+  importNetsuiteItems: (netsuiteComponents, createMissing = false) =>
+    fetch('/api/netsuite?action=import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ netsuiteComponents, createMissing })
+    }).then(r => {
+      if (!r.ok) throw new Error('Failed to import NetSuite items');
+      return r.json();
+    }),
+
+  // Get NetSuite units
+  getNetsuiteUnits: (type = null) => {
+    const params = new URLSearchParams({ action: 'units' });
+    if (type) params.append('type', type);
+    
+    return fetch(`/api/netsuite?${params}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to get NetSuite units');
+        return r.json();
+      });
+  },
+
+  // Get specific NetSuite unit by ID
+  getNetsuiteUnit: (unitId) =>
+    fetch(`/api/netsuite?action=units&id=${unitId}`)
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to get NetSuite unit');
+        return r.json();
+      }),
+
+  // Check NetSuite health
+  getNetsuiteHealth: () =>
+    fetch('/api/netsuite?action=health')
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to check NetSuite health');
+        return r.json();
+      }),
+
+  // Legacy methods for backward compatibility
   transactChemicals: (batchId, confirmedComponents) =>
-    fetch('/api/netsuite/transaction', {
+    fetch('/api/netsuite?action=transaction', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ batchId, components: confirmedComponents })
@@ -267,7 +416,7 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
     }),
 
   createSolution: (batchId, solutionData) =>
-    fetch('/api/netsuite/solution', {
+    fetch('/api/netsuite?action=solution', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ batchId, ...solutionData })
@@ -276,26 +425,22 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
       return r.json();
     }),
 
-  completeWorkOrder: (workOrderId) =>
-    fetch(`/api/netsuite/workorder/${workOrderId}/complete`, {
-      method: 'POST'
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to complete work order');
-      return r.json();
-    }),
-
   /* ── Enhanced Transaction Methods ─── */
   
   // Get transactions for an item with enhanced filtering
   getItemTransactions: async (itemId, options = {}) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({
+      id: itemId,
+      action: 'transactions'
+    });
+    
     if (options.txnType) params.append('type', options.txnType);
     if (options.startDate) params.append('startDate', options.startDate);
     if (options.endDate) params.append('endDate', options.endDate);
     if (options.limit) params.append('limit', options.limit.toString());
     if (options.page) params.append('page', options.page.toString());
     
-    const response = await fetch(`/api/items/${itemId}/transactions?${params}`, {
+    const response = await fetch(`/api/items?${params}`, {
       headers: { 'Content-Type': 'application/json' }
     });
     
@@ -307,12 +452,17 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
   },
 
   // Get lot-specific transaction history
-  getLotTransactions: async (itemId, lotNumber, options = {}) => {
-    const params = new URLSearchParams({ lotNumber });
+  getLotTransactions: async (itemId, lotId, options = {}) => {
+    const params = new URLSearchParams({
+      id: itemId,
+      action: 'transactions',
+      lotId: lotId
+    });
+    
     if (options.startDate) params.append('startDate', options.startDate);
     if (options.endDate) params.append('endDate', options.endDate);
     
-    const response = await fetch(`/api/items/${itemId}/lots/transactions?${params}`, {
+    const response = await fetch(`/api/items?${params}`, {
       headers: { 'Content-Type': 'application/json' }
     });
     
@@ -325,11 +475,15 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
 
   // Get transaction statistics for an item
   getItemTransactionStats: async (itemId, startDate, endDate) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({
+      id: itemId,
+      action: 'stats'
+    });
+    
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
     
-    const response = await fetch(`/api/items/${itemId}/transactions/stats?${params}`, {
+    const response = await fetch(`/api/items?${params}`, {
       headers: { 'Content-Type': 'application/json' }
     });
     
@@ -342,7 +496,7 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
 
   // Get detailed transaction by ID
   getTransactionDetails: async (txnId) => {
-    const response = await fetch(`/api/transactions/${txnId}`, {
+    const response = await fetch(`/api/transactions?id=${txnId}`, {
       headers: { 'Content-Type': 'application/json' }
     });
     
@@ -355,7 +509,7 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
 
   // Reverse a transaction (admin only)
   reverseTransaction: async (txnId, reason) => {
-    const response = await fetch(`/api/transactions/${txnId}/reverse`, {
+    const response = await fetch(`/api/transactions?id=${txnId}&action=reverse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason })
@@ -370,7 +524,7 @@ saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirm
 
   // Create inventory adjustment transaction
   createInventoryAdjustment: async (itemId, adjustments) => {
-    const response = await fetch('/api/transactions/adjustment', {
+    const response = await fetch('/api/transactions?action=adjustment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

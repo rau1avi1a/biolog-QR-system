@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { cn } from "@/db/lib/utils"
+import { cn } from "@/components/utils/utils"
 
 const Input = React.forwardRef(({ className, type, ...props }, ref) => {
   return (

@@ -1,7 +1,5 @@
 // app/[id]/lib/api.js
-import { Item } from '@/db/schemas/Item';
-import connectMongoDB from '@/db/index';
-import { txnService } from '@/db/services/app/txn.service';
+import db from '@/db';
 import mongoose from 'mongoose';
 
 /**
@@ -10,7 +8,7 @@ import mongoose from 'mongoose';
  * @returns {Promise<{type: 'item'|'lot'|null, data: object|null}>}
  */
 export async function getItemOrLot(id) {
-  await connectMongoDB();
+  await db.connect();
   
   // Validate MongoDB ObjectId format
   if (!id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -18,7 +16,7 @@ export async function getItemOrLot(id) {
   }
   
   // Try to find it as an Item first
-  const item = await Item.findById(id).lean();
+  const item = await db.models.Item.findById(id).lean();
   
   if (item) {
     return {
@@ -30,7 +28,7 @@ export async function getItemOrLot(id) {
   // If not found as an Item, search for it as a Lot within Items
   try {
     // Use mongoose.Types.ObjectId for the query
-    const itemWithLot = await Item.findOne({ 
+    const itemWithLot = await db.models.Item.findOne({ 
       "Lots._id": new mongoose.Types.ObjectId(id) 
     }).lean();
     
@@ -120,11 +118,13 @@ function formatLotData(lot, parentItem) {
  */
 export async function getItemTransactionHistory(itemId) {
   try {    
-    if (!txnService?.listByItem) {
+    await db.connect();
+    
+    if (!db.transactions?.listByItem) {
       return [];
     }
     
-    const transactions = await txnService.listByItem(itemId);
+    const transactions = await db.transactions.listByItem(itemId);
     
     if (!transactions || !Array.isArray(transactions)) {
       return [];
@@ -170,11 +170,13 @@ export async function getItemTransactionHistory(itemId) {
  */
 export async function getLotTransactionHistory(itemId, lotNumber) {
   try {    
-    if (!txnService?.listByItem) {
+    await db.connect();
+    
+    if (!db.transactions?.listByItem) {
       return [];
     }
     
-    const transactions = await txnService.listByItem(itemId);
+    const transactions = await db.transactions.listByItem(itemId);
     
     if (!transactions || !Array.isArray(transactions)) {
       return [];
