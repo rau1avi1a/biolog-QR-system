@@ -1,153 +1,481 @@
 // =============================================================================
-// app/api/items/route.js - Complete item operations
+// app/api/items/route.js - Complete item operations (FIXED)
 // =============================================================================
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
 
+// Helper to get authenticated user
 async function getAuthUser(request) {
   try {
     const token = request.cookies.get('auth_token')?.value;
     if (!token) return null;
+    
     const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
-    const user = await db.auth.findById(payload.userId);
-    return user ? { _id: user._id, name: user.name, email: user.email, role: user.role } : null;
-  } catch {
+    
+    await db.connect();
+    const user = await db.models.User.findById(payload.userId).select('-password');
+    
+    return user ? { 
+      _id: user._id, 
+      name: user.name, 
+      email: user.email, 
+      role: user.role 
+    } : null;
+  } catch (error) {
+    console.error('Auth error in items route:', error);
     return null;
   }
 }
 
 export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-  const action = searchParams.get('action');
-  const lotId = searchParams.get('lotId');
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    const action = searchParams.get('action');
+    const lotId = searchParams.get('lotId');
 
-  if (id) {
-    if (action === 'lots') {
-      // GET /api/items?id=123&action=lots&lotId=456 (optional)
-      const lots = await db.items.getLots(id, lotId);
-      return NextResponse.json({ success: true, lots });
-    }
-    
-    if (action === 'transactions') {
-      // GET /api/items?id=123&action=transactions
-      const options = {
-        txnType: searchParams.get('type'),
-        startDate: searchParams.get('startDate'),
-        endDate: searchParams.get('endDate'),
-        limit: parseInt(searchParams.get('limit')) || 100,
-        page: parseInt(searchParams.get('page')) || 1
-      };
+    // Ensure connection
+    await db.connect();
+
+    if (id) {
+      if (action === 'lots') {
+        // GET /api/items?id=123&action=lots&lotId=456 (optional)
+        const lots = await db.services.itemService.getLots(id, lotId);
+        
+        return NextResponse.json({ 
+          success: true, 
+          lots,
+          count: lots.length,
+          itemId: id
+        });
+      }
       
-      const transactions = await db.transactions.listByItem(id, options);
-      return NextResponse.json({ success: true, transactions });
+      if (action === 'transactions') {
+        // GET /api/items?id=123&action=transactions
+        const options = {
+          txnType: searchParams.get('type'),
+          startDate: searchParams.get('startDate'),
+          endDate: searchParams.get('endDate'),
+          status: searchParams.get('status') || 'posted',
+          limit: parseInt(searchParams.get('limit')) || 100,
+          page: parseInt(searchParams.get('page')) || 1
+        };
+        
+        const transactions = await db.services.txnService.listByItem(id, options);
+        
+        return NextResponse.json({ 
+          success: true, 
+          transactions,
+          count: transactions.length,
+          itemId: id,
+          options
+        });
+      }
+      
+      if (action === 'stats') {
+        // GET /api/items?id=123&action=stats
+        const startDate = searchParams.get('startDate');
+        const endDate = searchParams.get('endDate');
+        
+        const stats = await db.services.txnService.getItemStats(id, startDate, endDate);
+        
+        return NextResponse.json({ 
+          success: true, 
+          stats,
+          itemId: id,
+          period: {
+            startDate,
+            endDate
+          }
+        });
+      }
+
+      if (action === 'with-lots') {
+        // GET /api/items?id=123&action=with-lots
+        const item = await db.services.itemService.getWithLots(id);
+        if (!item) {
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Item not found' 
+          }, { status: 404 });
+        }
+        
+        return NextResponse.json({ 
+          success: true, 
+          item
+        });
+      }
+
+      if (action === 'vendors') {
+        // GET /api/items?id=123&action=vendors
+        const vendors = await db.services.vendorService.getVendorSourcesForItem(id);
+        
+        return NextResponse.json({ 
+          success: true, 
+          vendors,
+          count: vendors.length,
+          itemId: id
+        });
+      }
+      
+      // GET /api/items?id=123 - Get single item
+      const item = await db.services.itemService.getById(id);
+      if (!item) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Item not found' 
+        }, { status: 404 });
+      }
+      
+      return NextResponse.json({ 
+        success: true, 
+        item
+      });
     }
-    
-    if (action === 'stats') {
-      // GET /api/items?id=123&action=stats
-      const startDate = searchParams.get('startDate');
-      const endDate = searchParams.get('endDate');
-      const stats = await db.transactions.getItemStats(id, startDate, endDate);
-      return NextResponse.json({ stats });
+
+    // GET /api/items?type=chemical&search=water&netsuiteId=123
+    const query = {
+      type: searchParams.get('type'),
+      search: searchParams.get('search') || '',
+      netsuiteId: searchParams.get('netsuiteId')
+    };
+
+    // If no search parameters, list by type with pagination
+    if (!query.search && !query.netsuiteId && query.type) {
+      const limit = parseInt(searchParams.get('limit')) || 50;
+      const skip = parseInt(searchParams.get('skip')) || 0;
+      
+      const items = await db.services.itemService.listByType(query.type, {
+        search: query.search,
+        limit,
+        skip
+      });
+      
+      return NextResponse.json({ 
+        success: true, 
+        items,
+        count: items.length,
+        query,
+        pagination: { limit, skip }
+      });
     }
+
+    // Search items
+    const items = await db.services.itemService.search(query);
     
-    // GET /api/items?id=123
-    const item = await db.items.getById(id);
-    if (!item) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
-    return NextResponse.json({ success: true, item });
+    return NextResponse.json({ 
+      success: true, 
+      items,
+      count: items.length,
+      query
+    });
+    
+  } catch (error) {
+    console.error('GET items error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: error.message 
+    }, { status: 500 });
   }
-
-  // GET /api/items?type=chemical&search=water
-  const query = {
-    type: searchParams.get('type'),
-    search: searchParams.get('search') || '',
-    netsuiteId: searchParams.get('netsuiteId')
-  };
-
-  const items = await db.items.search(query);
-  return NextResponse.json({ items });
 }
 
 export async function POST(request) {
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-  const action = searchParams.get('action');
-  const lotId = searchParams.get('lotId');
-  
-  if (id && action === 'transactions') {
-    // POST /api/items?id=123&action=transactions&lotId=456
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    const action = searchParams.get('action');
+    const lotId = searchParams.get('lotId');
+    
+    // Get authenticated user
     const user = await getAuthUser(request);
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    await db.connect();
     
-    const { qty, memo, project, department, batchId, workOrderId } = await request.json();
-    const delta = Number(qty);
-    
-    if (!delta || isNaN(delta)) {
-      return NextResponse.json({ error: 'qty must be a non-zero number' }, { status: 400 });
+    if (id && action === 'transactions') {
+      // POST /api/items?id=123&action=transactions&lotId=456
+      const { qty, memo, project, department, batchId, workOrderId, unitCost, notes, expiryDate, vendorLotNumber, location } = await request.json();
+      
+      const delta = Number(qty);
+      
+      if (!delta || isNaN(delta)) {
+        return NextResponse.json({ 
+          error: 'qty must be a non-zero number' 
+        }, { status: 400 });
+      }
+
+      // Validate item exists
+      const item = await db.services.itemService.getById(id);
+      if (!item) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Item not found' 
+        }, { status: 404 });
+      }
+
+      // Validate lot exists if specified and delta is negative (issue)
+      if (lotId && delta < 0) {
+        const lots = await db.services.itemService.getLots(id, lotId);
+        if (lots.length === 0) {
+          return NextResponse.json({ 
+            error: 'Lot not found' 
+          }, { status: 404 });
+        }
+
+        const lot = lots[0];
+        if (lot.availableQty < Math.abs(delta)) {
+          return NextResponse.json({ 
+            error: `Insufficient quantity. Available: ${lot.availableQty}, Requested: ${Math.abs(delta)}` 
+          }, { status: 400 });
+        }
+      }
+      
+      const txnData = {
+        txnType: delta > 0 ? (action === 'adjustment' ? 'adjustment' : 'receipt') : 'issue',
+        lines: [{
+          item: id,
+          lot: lotId,
+          qty: delta,
+          unitCost,
+          notes,
+          expiryDate,
+          vendorLotNumber,
+          location
+        }],
+        actor: { 
+          _id: user._id, 
+          name: user.name, 
+          email: user.email 
+        },
+        memo,
+        project,
+        department: department || user.department || 'Production',
+        batchId,
+        workOrderId,
+        reason: memo || `${delta > 0 ? 'Receipt' : 'Issue'} via API`
+      };
+      
+      const txn = await db.services.txnService.post(txnData);
+      const updatedItem = await db.services.itemService.getById(id);
+      
+      return NextResponse.json({ 
+        success: true, 
+        item: updatedItem, 
+        transaction: txn,
+        message: `Transaction posted: ${delta > 0 ? 'Added' : 'Removed'} ${Math.abs(delta)} ${item.uom || 'units'}`
+      });
+    }
+
+    if (id && action === 'vendor') {
+      // POST /api/items?id=123&action=vendor - Link item to vendor
+      const { vendorId, vendorSKU, lastPrice, preferred, leadTime, minimumOrderQty } = await request.json();
+      
+      if (!vendorId) {
+        return NextResponse.json({ 
+          error: 'Vendor ID required' 
+        }, { status: 400 });
+      }
+
+      const vendorItem = await db.services.vendorService.linkVendorItem(vendorId, id, {
+        vendorSKU,
+        lastPrice,
+        preferred,
+        leadTime,
+        minimumOrderQty
+      });
+      
+      return NextResponse.json({ 
+        success: true, 
+        vendorItem,
+        message: 'Item linked to vendor successfully'
+      });
     }
     
-    const txnData = {
-      txnType: delta > 0 ? 'adjustment' : 'issue',
-      lines: [{ item: id, lot: lotId, qty: delta }],
-      actor: { _id: user._id, name: user.name, email: user.email },
-      memo,
-      project,
-      department: department || user.department || 'Production',
-      batchId,
-      workOrderId
-    };
+    // POST /api/items - Create new item
+    const body = await request.json();
     
-    const txn = await db.transactions.post(txnData);
-    const fresh = await db.items.getById(id);
-    return NextResponse.json({ item: fresh, transaction: txn });
+    // Validate required fields
+    const { itemType, sku, displayName } = body;
+    if (!itemType || !sku || !displayName) {
+      return NextResponse.json({ 
+        error: 'itemType, sku, and displayName are required' 
+      }, { status: 400 });
+    }
+
+    // Check for duplicate SKU
+    const existingItem = await db.models.Item.findOne({ sku });
+    if (existingItem) {
+      return NextResponse.json({ 
+        error: 'An item with this SKU already exists' 
+      }, { status: 409 });
+    }
+
+    // Add creator info
+    body.createdBy = user._id;
+    
+    const item = await db.services.itemService.create(body);
+    
+    return NextResponse.json({ 
+      success: true, 
+      item,
+      message: `${itemType} "${displayName}" created successfully`
+    }, { status: 201 });
+    
+  } catch (error) {
+    console.error('POST items error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: error.message 
+    }, { status: 500 });
   }
-  
-  // POST /api/items
-  const body = await request.json();
-  const item = await db.items.create(body);
-  return NextResponse.json({ item }, { status: 201 });
 }
 
 export async function PATCH(request) {
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-  if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
-  
-  const data = await request.json();
-  const updated = await db.items.update(id, data);
-  if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ success: true, item: updated });
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    
+    if (!id) {
+      return NextResponse.json({ error: 'Item ID required' }, { status: 400 });
+    }
+
+    // Get authenticated user
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    await db.connect();
+
+    // Check if item exists
+    const existingItem = await db.services.itemService.getById(id);
+    if (!existingItem) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Item not found' 
+      }, { status: 404 });
+    }
+    
+    const data = await request.json();
+    
+    // Add updater info
+    data.updatedBy = user._id;
+    
+    const updated = await db.services.itemService.update(id, data);
+    
+    return NextResponse.json({ 
+      success: true, 
+      item: updated,
+      message: 'Item updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('PATCH items error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: error.message 
+    }, { status: 500 });
+  }
 }
 
 export async function DELETE(request) {
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-  const lotId = searchParams.get('lotId');
-  const action = searchParams.get('action');
-  
-  const user = await getAuthUser(request);
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    const lotId = searchParams.get('lotId');
+    const action = searchParams.get('action');
+    
+    // Get authenticated user and check permissions
+    const user = await getAuthUser(request);
+    if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
+      return NextResponse.json({ 
+        error: 'Admin or manager access required for deletions' 
+      }, { status: 403 });
+    }
+
+    await db.connect();
+
+    if (id && lotId && action === 'lot') {
+      // DELETE /api/items?id=123&lotId=456&action=lot
+      const item = await db.services.itemService.getById(id);
+      if (!item) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Item not found' 
+        }, { status: 404 });
+      }
+
+      const deleted = await db.services.itemService.deleteLot(id, lotId);
+      
+      return NextResponse.json({
+        success: true,
+        message: `Lot ${deleted.lotNumber} deleted successfully`,
+        deletedLot: deleted
+      });
+    }
+
+    if (id) {
+      // DELETE /api/items?id=123
+      const item = await db.services.itemService.getById(id);
+      if (!item) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Item not found' 
+        }, { status: 404 });
+      }
+
+      const body = await request.json().catch(() => ({}));
+      const forceDelete = body.force === true;
+
+      // Check for active inventory
+      if (item.qtyOnHand > 0 && !forceDelete) {
+        return NextResponse.json({ 
+          error: `Cannot delete item with ${item.qtyOnHand} units on hand. Use force=true to override or adjust quantity to zero first.` 
+        }, { status: 400 });
+      }
+
+      // Check for recent transactions
+      const recentTransactions = await db.services.txnService.listByItem(id, { 
+        limit: 1,
+        startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
+      });
+
+      if (recentTransactions.length > 0 && !forceDelete) {
+        return NextResponse.json({ 
+          error: 'Item has recent transaction history. Use force=true to override.' 
+        }, { status: 400 });
+      }
+
+      await db.services.itemService.delete(id, forceDelete);
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: `Item "${item.displayName}" deleted successfully`,
+        deletedItem: {
+          _id: item._id,
+          sku: item.sku,
+          displayName: item.displayName,
+          itemType: item.itemType
+        }
+      });
+    }
+
+    return NextResponse.json({ 
+      error: 'Invalid delete request' 
+    }, { status: 400 });
+    
+  } catch (error) {
+    console.error('DELETE items error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: 'Internal server error',
+      message: error.message 
+    }, { status: 500 });
   }
-
-  if (id && lotId && action === 'lot') {
-    // DELETE /api/items?id=123&lotId=456&action=lot
-    const deleted = await db.items.deleteLot(id, lotId);
-    return NextResponse.json({
-      success: true,
-      message: `Lot ${deleted.lotNumber} deleted successfully`
-    });
-  }
-
-  if (id) {
-    // DELETE /api/items?id=123
-    const body = await request.json().catch(() => ({}));
-    const forceDelete = body.force === true;
-
-    await db.items.delete(id, forceDelete);
-    return NextResponse.json({ success: true, message: 'Item deleted successfully' });
-  }
-
-  return NextResponse.json({ error: 'Invalid delete request' }, { status: 400 });
 }
