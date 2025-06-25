@@ -167,45 +167,59 @@ const models = Object.entries(schemas).reduce((acc, [schemaKey, schema]) => {
 }, {});
 
 // =============================================================================
-// ITEM DISCRIMINATORS
+// ITEM DISCRIMINATORS - HOT RELOAD SAFE
 // =============================================================================
 if (models.Item) {
-  if (process.env.NODE_ENV !== 'production' && models.Item.discriminators) {
-    delete models.Item.discriminators.chemical;
-    delete models.Item.discriminators.solution;
-    delete models.Item.discriminators.product;
-  }
-
-  models.Chemical = models.Item.discriminator(
-    'chemical',
-    new mongoose.Schema({
-      casNumber: { type: String },
-      location: { type: String },
-      safetyData: { type: mongoose.Schema.Types.Mixed }
-    })
-  );
-
-  models.Solution = models.Item.discriminator(
-    'solution',
-    new mongoose.Schema({
-      bom: [{
-        itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
-        qty: { type: Number },
-        uom: { type: String }
-      }]
-    })
-  );
-
-  models.Product = models.Item.discriminator(
-    'product',
-    new mongoose.Schema({
-      bom: [{
-        itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
-        qty: { type: Number },
-        uom: { type: String }
-      }]
-    })
-  );
+    // More thorough cleanup for development hot reloads
+    if (process.env.NODE_ENV !== 'production') {
+        ['Chemical', 'Solution', 'Product'].forEach(modelName => {
+          if (mongoose.models[modelName]) {
+            delete mongoose.models[modelName];
+          }
+        });
+        if (models.Item.discriminators) {
+          Object.keys(models.Item.discriminators).forEach(key => {
+            delete models.Item.discriminators[key];
+          });
+          models.Item.discriminators = {};
+        }
+      }
+  
+    // Wrap in try-catch for extra safety
+    try {
+      models.Chemical = models.Item.discriminator(
+        'chemical',
+        new mongoose.Schema({
+          casNumber: { type: String },
+          location: { type: String },
+          safetyData: { type: mongoose.Schema.Types.Mixed }
+        })
+      );
+  
+      models.Solution = models.Item.discriminator(
+        'solution',
+        new mongoose.Schema({
+          bom: [{
+            itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
+            qty: { type: Number },
+            uom: { type: String }
+          }]
+        })
+      );
+  
+      models.Product = models.Item.discriminator(
+        'product',
+        new mongoose.Schema({
+          bom: [{
+            itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
+            qty: { type: Number },
+            uom: { type: String }
+          }]
+        })
+      );
+    } catch (error) {
+      console.warn('Discriminator creation warning (hot reload):', error.message);
+    }
 }
 
 // =============================================================================

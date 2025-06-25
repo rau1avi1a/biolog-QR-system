@@ -1,7 +1,7 @@
-// db/services/app/inventory.service.js - Items + Transactions unified service
+// db/services/app/inventory.service.js - Items + Transactions unified service (FIXED)
 import mongoose from 'mongoose';
 import { CoreService } from './core.service.js';
-import db from '@/db/index.js';
+import db from '../../index.js';
 
 // =============================================================================
 // ITEM SERVICE - Consolidated item management (Chemical, Solution, Product)
@@ -96,26 +96,14 @@ class ItemService extends CoreService {
   }
 
   /**
-   * List items by type with search
+   * Get item by ID - matches the interface your route expects
    */
-  async listByType(itemType, options = {}) {
-    const { search, limit = 50, skip = 0 } = options;
-    
-    const filter = { itemType };
-    
-    if (search) {
-      filter.$or = [
-        { displayName: { $regex: search, $options: 'i' } },
-        { sku: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    return this.find({
-      filter,
-      limit,
-      skip,
-      sort: { displayName: 1 }
-    });
+  async getById(id) {
+    await this.connect();
+    const item = await this.Item.findById(id)
+      .populate('bom.itemId', 'displayName sku')
+      .lean();
+    return item;
   }
 
   /**
@@ -145,6 +133,29 @@ class ItemService extends CoreService {
   }
 
   /**
+   * List items by type with search
+   */
+  async listByType(itemType, options = {}) {
+    const { search, limit = 50, skip = 0 } = options;
+    
+    const filter = { itemType };
+    
+    if (search) {
+      filter.$or = [
+        { displayName: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    return this.find({
+      filter,
+      limit,
+      skip,
+      sort: { displayName: 1 }
+    });
+  }
+
+  /**
    * Get item with lot details
    */
   async getWithLots(id) {
@@ -171,17 +182,6 @@ class ItemService extends CoreService {
       };
     }
 
-    return item;
-  }
-
-  /**
-   * Get item by ID - matches the interface your route expects
-   */
-  async getById(id) {
-    await this.connect();
-    const item = await this.Item.findById(id)
-      .populate('bom.itemId', 'displayName sku')
-      .lean();
     return item;
   }
 
@@ -574,7 +574,7 @@ class TransactionService {
   }
 
   /**
-   * Get item stats for a specific item
+   * Get item stats for a specific item - ADDED MISSING METHOD
    */
   async getItemStats(itemId, startDate, endDate) {
     await this.connect();

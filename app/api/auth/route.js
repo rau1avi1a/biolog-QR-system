@@ -1,5 +1,5 @@
 // =============================================================================
-// app/api/auth/route.js - Complete auth operations
+// app/api/auth/route.js
 // =============================================================================
 import { NextResponse } from 'next/server';
 import db from '@/db';
@@ -12,7 +12,8 @@ export async function POST(request) {
   if (action === 'login') {
     const { email, password } = await request.json();
 
-    const user = await db.auth.findByEmail(email);
+    await db.connect();
+    const user = await db.models.User.findOne({ email });
     if (!user || !(await user.matchPassword(password))) {
       return NextResponse.json({ message: 'Invalid credentials' }, { status: 401 });
     }
@@ -54,18 +55,29 @@ export async function POST(request) {
       return NextResponse.json({ message: 'Missing required fields' }, { status: 400 });
     }
 
-    const existingUser = await db.auth.findByEmail(email);
+    await db.connect();
+    const existingUser = await db.models.User.findOne({ email });
     if (existingUser) {
       return NextResponse.json({ message: 'User already exists' }, { status: 400 });
     }
 
-    const userData = { name, email, password, role: role || 'operator' };
-    const newUser = await db.auth.createUser(userData);
+    // Hash password before storing
+    const bcrypt = await import('bcryptjs');
+    const hashedPassword = await bcrypt.hash(password, 12);
 
+    const userData = { 
+      name, 
+      email, 
+      password: hashedPassword, 
+      role: role || 'operator' 
+    };
+    
+    const newUser = await db.models.User.create(userData);
+
+    // Handle NetSuite credentials if provided
     if (netsuiteCredentials) {
-      const user = await db.models.User.findById(newUser._id);
       if (netsuiteCredentials.useEnvVars) {
-        user.setNetSuiteCredentials({
+        newUser.setNetSuiteCredentials({
           accountId: process.env.NETSUITE_ACCOUNT_ID,
           consumerKey: process.env.NETSUITE_CONSUMER_KEY,
           consumerSecret: process.env.NETSUITE_CONSUMER_SECRET,
@@ -75,13 +87,28 @@ export async function POST(request) {
       } else {
         const { accountId, consumerKey, consumerSecret, tokenId, tokenSecret } = netsuiteCredentials;
         if (accountId && consumerKey && consumerSecret && tokenId && tokenSecret) {
-          user.setNetSuiteCredentials({ accountId, consumerKey, consumerSecret, tokenId, tokenSecret });
+          newUser.setNetSuiteCredentials({ 
+            accountId, 
+            consumerKey, 
+            consumerSecret, 
+            tokenId, 
+            tokenSecret 
+          });
         }
       }
-      await user.save();
+      await newUser.save();
     }
 
-    return NextResponse.json(newUser, { status: 201 });
+    // Return user without password
+    const userResponse = {
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      hasNetSuiteAccess: newUser.hasNetSuiteAccess()
+    };
+
+    return NextResponse.json(userResponse, { status: 201 });
   }
 
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
@@ -97,22 +124,52 @@ export async function GET(request) {
       if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 });
 
       const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
-      const user = await db.auth.findById(payload.userId);
+      
+      await db.connect();
+      const user = await db.models.User.findById(payload.userId).select('-password');
       
       if (!user) return NextResponse.json({ error: 'User not found' }, { status: 401 });
 
       return NextResponse.json({
         success: true,
-        user: { _id: user._id, name: user.name, email: user.email, role: user.role }
+        user: { 
+          _id: user._id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role,
+          hasNetSuiteAccess: user.hasNetSuiteAccess()
+        }
       });
-    } catch {
+    } catch (error) {
+      console.error('Auth verification error:', error);
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
   }
 
   if (action === 'users') {
-    const users = await db.auth.listUsers();
-    return NextResponse.json(users);
+    try {
+      // Verify user has permission to list users (admin only)
+      const token = request.cookies.get('auth_token')?.value;
+      if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 });
+
+      const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
+      
+      await db.connect();
+      const requestingUser = await db.models.User.findById(payload.userId);
+      
+      if (!requestingUser || requestingUser.role !== 'admin') {
+        return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+      }
+
+      const users = await db.models.User.find()
+        .select('-password -netsuiteCredentials.consumerSecret -netsuiteCredentials.tokenSecret')
+        .lean();
+
+      return NextResponse.json({ success: true, users });
+    } catch (error) {
+      console.error('List users error:', error);
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
   }
 
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

@@ -1,4 +1,6 @@
-// app/api/netsuite/route.js - Consolidated NetSuite operations
+// =============================================================================
+// app/api/netsuite/route.js - Consolidated NetSuite operations (FIXED)
+// =============================================================================
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 import db from '@/db';
@@ -7,247 +9,298 @@ export const dynamic = 'force-dynamic';
 
 // Helper function to get user from JWT token
 async function getUserFromRequest(request) {
-    try {
-      const token = request.cookies.get('auth_token')?.value;
-      
-      if (!token) {
-        throw new Error('No authentication token provided');
-      }
-  
-      const { payload } = await jwtVerify(
-        token,
-        new TextEncoder().encode(process.env.JWT_SECRET)
-      );
-  
-      await db.connect();
-      const user = await db.models.User.findById(payload.userId);
-      
-      if (!user) {
-        throw new Error('User not found');
-      }
-  
-      if (!user.hasNetSuiteAccess()) {
-        throw new Error('NetSuite access not configured');
-      }
-  
-      return user;
-  
-    } catch (error) {
-      throw new Error(`Authentication failed: ${error.message}`);
+  try {
+    const token = request.cookies.get('auth_token')?.value;
+    
+    if (!token) {
+      throw new Error('No authentication token provided');
     }
+
+    const { payload } = await jwtVerify(
+      token,
+      new TextEncoder().encode(process.env.JWT_SECRET)
+    );
+
+    await db.connect();
+    const user = await db.models.User.findById(payload.userId);
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    if (!user.hasNetSuiteAccess()) {
+      throw new Error('NetSuite access not configured');
+    }
+
+    return user;
+
+  } catch (error) {
+    throw new Error(`Authentication failed: ${error.message}`);
   }
-  
-  export async function GET(request) {
-    try {
-      const user = await getUserFromRequest(request);
-      const { searchParams } = new URL(request.url);
-      const action = searchParams.get('action');
-  
-      switch (action) {
-        case 'health': {
-          const healthCheck = {
-            timestamp: new Date().toISOString(),
-            user: {
-              id: user._id,
-              email: user.email,
-              hasNetSuiteAccess: user.hasNetSuiteAccess()
-            },
-            netsuite: {
-              configured: true,
-              connectionTest: null,
-              error: null
-            }
-          };
-          
-          try {
-            const testResult = await db.netsuite.testConnection(user);
-            healthCheck.netsuite.connectionTest = {
-              success: testResult.success,
-              message: testResult.message,
-              testedAt: new Date().toISOString()
-            };
-          } catch (error) {
-            healthCheck.netsuite.connectionTest = {
-              success: false,
-              message: error.message,
-              testedAt: new Date().toISOString()
-            };
+}
+
+export async function GET(request) {
+  try {
+    const user = await getUserFromRequest(request);
+    const { searchParams } = new URL(request.url);
+    const action = searchParams.get('action');
+
+    await db.connect();
+
+    switch (action) {
+      case 'health': {
+        const healthCheck = {
+          timestamp: new Date().toISOString(),
+          user: {
+            id: user._id,
+            email: user.email,
+            hasNetSuiteAccess: user.hasNetSuiteAccess()
+          },
+          netsuite: {
+            configured: true,
+            connectionTest: null,
+            error: null
           }
+        };
+        
+        try {
+          const auth = await db.netsuite.createNetSuiteAuth(user);
+          const testResult = await auth.testConnection();
           
-          return NextResponse.json(healthCheck);
-        }
-  
-        case 'test': {
-          const testResult = await db.netsuite.testConnection(user);
-          return NextResponse.json({
+          healthCheck.netsuite.connectionTest = {
             success: testResult.success,
             message: testResult.message,
-            configured: true
-          });
+            testedAt: new Date().toISOString()
+          };
+        } catch (error) {
+          healthCheck.netsuite.connectionTest = {
+            success: false,
+            message: error.message,
+            testedAt: new Date().toISOString()
+          };
         }
-  
-        case 'search': {
-          const searchQuery = searchParams.get('q');
-          if (!searchQuery || searchQuery.trim().length < 2) {
-            return NextResponse.json({
-              success: true,
-              items: [],
-              message: 'Search query too short'
-            });
-          }
-  
-          const assemblyItems = await db.netsuite.searchAssemblyItems(user, searchQuery.trim());
-          
+        
+        return NextResponse.json(healthCheck);
+      }
+
+      case 'test': {
+        const auth = await db.netsuite.createNetSuiteAuth(user);
+        const testResult = await auth.testConnection();
+        
+        return NextResponse.json({
+          success: testResult.success,
+          message: testResult.message,
+          configured: true,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      case 'search': {
+        const searchQuery = searchParams.get('q');
+        if (!searchQuery || searchQuery.trim().length < 2) {
           return NextResponse.json({
             success: true,
-            items: assemblyItems || [],
-            query: searchQuery,
-            count: assemblyItems?.length || 0
+            items: [],
+            message: 'Search query too short (minimum 2 characters)',
+            query: searchQuery
           });
         }
-  
-        case 'getBOM': {
-          const assemblyItemId = searchParams.get('assemblyItemId');
-          if (!assemblyItemId) {
-            return NextResponse.json({
-              success: false,
-              message: 'Assembly Item ID is required for getBOM action'
-            }, { status: 400 });
-          }
-  
-          const bomData = await db.netsuite.getBOM(user, assemblyItemId);
-          
-          // FIXED - Return normalized recipe data instead of raw components
-          return NextResponse.json({
-            success: true,
-            bom: {
-              bomId: bomData.bomId,
-              bomName: bomData.bomName,
-              revisionId: bomData.revisionId,
-              revisionName: bomData.revisionName,
-              effectiveStartDate: bomData.effectiveStartDate,
-              effectiveEndDate: bomData.effectiveEndDate
-            },
-            recipe: bomData.recipe || bomData.normalizedComponents || [], // Use normalized/formatted data
-            components: bomData.components, // Raw NetSuite data for debugging
-            mappedComponents: bomData.mappedComponents,
-            assemblyItemId: assemblyItemId,
-            debug: {
-              rawComponentsCount: bomData.components?.length || 0,
-              normalizedComponentsCount: bomData.normalizedComponents?.length || 0,
-              recipeComponentsCount: bomData.recipe?.length || 0
-            }
-          });
-        }
-  
-        case 'units': {
-          const unitId = searchParams.get('id');
-          const type = searchParams.get('type');
-          
-          if (unitId) {
-            const unit = db.netsuite.units[unitId];
-            if (!unit) {
-              return NextResponse.json({
-                success: false,
-                error: `Unit ID ${unitId} not found`
-              }, { status: 404 });
-            }
-            
-            return NextResponse.json({
-              success: true,
-              unit: { id: unitId, ...unit }
-            });
-          }
-          
-          let units = Object.entries(db.netsuite.units).map(([id, unit]) => ({
-            id,
-            ...unit
-          }));
-          
-          if (type) {
-            units = units.filter(unit => unit.type === type);
-          }
-          
-          return NextResponse.json({
-            success: true,
-            units
-          });
-        }
-  
-        case 'workorder': {
-          const workOrderId = searchParams.get('id');
-          const status = searchParams.get('status');
-          const assemblyItem = searchParams.get('assemblyItem');
-          const limit = searchParams.get('limit');
-          
-          const workOrderService = await db.netsuite.createWorkOrderService(user);
-  
-          if (workOrderId) {
-            const workOrder = await workOrderService.getWorkOrderStatus(workOrderId);
-            return NextResponse.json({
-              success: true,
-              data: workOrder
-            });
-          } else {
-            const filters = {};
-            if (status) filters.status = status;
-            if (assemblyItem) filters.assemblyItem = assemblyItem;
-            if (limit) filters.limit = parseInt(limit);
-            
-            const workOrders = await workOrderService.listWorkOrders(filters);
-            return NextResponse.json({
-              success: true,
-              data: workOrders
-            });
-          }
-        }
-  
-        case 'setup': {
-          const hasAccess = user.hasNetSuiteAccess();
-          const envConfigured = !!(
-            process.env.NETSUITE_ACCOUNT_ID &&
-            process.env.NETSUITE_CONSUMER_KEY &&
-            process.env.NETSUITE_CONSUMER_SECRET &&
-            process.env.NETSUITE_TOKEN_ID &&
-            process.env.NETSUITE_TOKEN_SECRET
-          );
-          
-          return NextResponse.json({
-            success: true,
-            configured: hasAccess || envConfigured,
-            userConfigured: hasAccess,
-            envConfigured: envConfigured,
-            user: {
-              name: user.name,
-              email: user.email,
-              role: user.role
-            }
-          });
-        }
-  
-        default:
+
+        const bomService = await db.netsuite.createBOMService(user);
+        const assemblyItems = await bomService.searchAssemblyItems(searchQuery.trim());
+        
+        return NextResponse.json({
+          success: true,
+          items: assemblyItems || [],
+          query: searchQuery,
+          count: assemblyItems?.length || 0
+        });
+      }
+
+      case 'getBOM': {
+        const assemblyItemId = searchParams.get('assemblyItemId');
+        if (!assemblyItemId) {
           return NextResponse.json({
             success: false,
-            message: 'Invalid action. Available actions: health, test, search, getBOM, units, workorder, setup'
+            message: 'Assembly Item ID is required for getBOM action'
           }, { status: 400 });
+        }
+
+        const bomService = await db.netsuite.createBOMService(user);
+        const bomData = await bomService.getAssemblyBOM(assemblyItemId);
+        
+        return NextResponse.json({
+          success: true,
+          bom: {
+            bomId: bomData.bomId,
+            bomName: bomData.bomName,
+            revisionId: bomData.revisionId,
+            revisionName: bomData.revisionName,
+            effectiveStartDate: bomData.effectiveStartDate,
+            effectiveEndDate: bomData.effectiveEndDate
+          },
+          recipe: bomData.recipe || bomData.normalizedComponents || [],
+          components: bomData.components,
+          mappedComponents: bomData.mappedComponents,
+          assemblyItemId: assemblyItemId,
+          debug: {
+            rawComponentsCount: bomData.components?.length || 0,
+            normalizedComponentsCount: bomData.normalizedComponents?.length || 0,
+            recipeComponentsCount: bomData.recipe?.length || 0
+          }
+        });
       }
-  
-    } catch (error) {
-      console.error('NetSuite API Error:', error);
-      return NextResponse.json({ 
-        success: false,
-        message: 'Authentication or configuration error',
-        error: error.message 
-      }, { status: 500 });
+
+      case 'units': {
+        const unitId = searchParams.get('id');
+        const type = searchParams.get('type');
+        
+        // Import units from netsuite-units.js
+        const { netsuiteUnits } = await import('@/db/lib/netsuite-units.js');
+        
+        if (unitId) {
+          const unit = netsuiteUnits[unitId];
+          if (!unit) {
+            return NextResponse.json({
+              success: false,
+              error: `Unit ID ${unitId} not found`
+            }, { status: 404 });
+          }
+          
+          return NextResponse.json({
+            success: true,
+            unit: { id: unitId, ...unit }
+          });
+        }
+        
+        let units = Object.entries(netsuiteUnits).map(([id, unit]) => ({
+          id,
+          ...unit
+        }));
+        
+        if (type) {
+          units = units.filter(unit => unit.type === type);
+        }
+        
+        return NextResponse.json({
+          success: true,
+          units,
+          count: units.length
+        });
+      }
+
+      case 'workorder': {
+        const workOrderId = searchParams.get('id');
+        const status = searchParams.get('status');
+        const assemblyItem = searchParams.get('assemblyItem');
+        const limit = searchParams.get('limit');
+        
+        const workOrderService = await db.netsuite.createWorkOrderService(user);
+
+        if (workOrderId) {
+          const workOrder = await workOrderService.getWorkOrderStatus(workOrderId);
+          return NextResponse.json({
+            success: true,
+            data: workOrder
+          });
+        } else {
+          const filters = {};
+          if (status) filters.status = status;
+          if (assemblyItem) filters.assemblyItem = assemblyItem;
+          if (limit) filters.limit = parseInt(limit);
+          
+          const workOrders = await workOrderService.listWorkOrders(filters);
+          return NextResponse.json({
+            success: true,
+            data: workOrders,
+            count: workOrders.length,
+            filters
+          });
+        }
+      }
+
+      case 'setup': {
+        const hasAccess = user.hasNetSuiteAccess();
+        const envConfigured = !!(
+          process.env.NETSUITE_ACCOUNT_ID &&
+          process.env.NETSUITE_CONSUMER_KEY &&
+          process.env.NETSUITE_CONSUMER_SECRET &&
+          process.env.NETSUITE_TOKEN_ID &&
+          process.env.NETSUITE_TOKEN_SECRET
+        );
+        
+        return NextResponse.json({
+          success: true,
+          configured: hasAccess || envConfigured,
+          userConfigured: hasAccess,
+          envConfigured: envConfigured,
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role
+          }
+        });
+      }
+
+      case 'mapping': {
+        const itemId = searchParams.get('itemId');
+        const netsuiteId = searchParams.get('netsuiteId');
+        
+        if (itemId && netsuiteId) {
+          // Get mapping for specific item
+          const localItem = await db.services.itemService.getById(itemId);
+          const netsuiteItem = await db.services.itemService.search({ netsuiteId });
+          
+          return NextResponse.json({
+            success: true,
+            mapping: {
+              localItem,
+              netsuiteItem: netsuiteItem[0] || null,
+              mapped: !!netsuiteItem[0]
+            }
+          });
+        }
+        
+        // List all mapped items
+        const mappedItems = await db.models.Item.find({ 
+          netsuiteInternalId: { $exists: true, $ne: null } 
+        })
+        .select('_id displayName sku netsuiteInternalId itemType')
+        .lean();
+        
+        return NextResponse.json({
+          success: true,
+          mappedItems,
+          count: mappedItems.length
+        });
+      }
+
+      default:
+        return NextResponse.json({
+          success: false,
+          message: 'Invalid action. Available actions: health, test, search, getBOM, units, workorder, setup, mapping'
+        }, { status: 400 });
     }
+
+  } catch (error) {
+    console.error('NetSuite GET API Error:', error);
+    return NextResponse.json({ 
+      success: false,
+      message: 'Authentication or configuration error',
+      error: error.message 
+    }, { status: 500 });
   }
-  
+}
+
 export async function POST(request) {
   try {
     const user = await getUserFromRequest(request);
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
     const body = await request.json();
+
+    await db.connect();
 
     switch (action) {
       case 'setup': {
@@ -287,11 +340,25 @@ export async function POST(request) {
 
         await user.save();
 
-        return NextResponse.json({
-          success: true,
-          message: 'NetSuite credentials configured successfully',
-          configured: user.hasNetSuiteAccess()
-        });
+        // Test the connection
+        try {
+          const auth = await db.netsuite.createNetSuiteAuth(user);
+          const testResult = await auth.testConnection();
+          
+          return NextResponse.json({
+            success: true,
+            message: 'NetSuite credentials configured successfully',
+            configured: user.hasNetSuiteAccess(),
+            connectionTest: testResult
+          });
+        } catch (testError) {
+          return NextResponse.json({
+            success: true,
+            message: 'NetSuite credentials saved but connection test failed',
+            configured: user.hasNetSuiteAccess(),
+            connectionTest: { success: false, message: testError.message }
+          });
+        }
       }
 
       case 'workorder': {
@@ -302,7 +369,8 @@ export async function POST(request) {
           startDate, 
           endDate,
           location,
-          subsidiary 
+          subsidiary,
+          department 
         } = body;
 
         if (!quantity || quantity <= 0) {
@@ -316,12 +384,7 @@ export async function POST(request) {
         let result;
 
         if (batchId) {
-          await db.connect();
-          const batch = await db.models.Batch.findById(batchId)
-            .populate('fileId', 'fileName')
-            .populate('snapshot.solutionRef', 'displayName sku netsuiteInternalId')
-            .lean();
-            
+          const batch = await db.services.batchService.getBatchById(batchId);
           if (!batch) {
             return NextResponse.json({
               success: false,
@@ -333,13 +396,16 @@ export async function POST(request) {
             startDate,
             endDate,
             location,
-            subsidiary
+            subsidiary,
+            department
           });
 
-          await db.models.Batch.findByIdAndUpdate(batchId, {
+          // Update batch with work order info
+          await db.services.batchService.updateBatch(batchId, {
             workOrderId: result.workOrder.tranId || result.workOrder.id,
             workOrderCreated: true,
             workOrderCreatedAt: new Date(),
+            workOrderStatus: 'created',
             netsuiteWorkOrderData: {
               workOrderId: result.workOrder.id,
               tranId: result.workOrder.tranId,
@@ -347,7 +413,8 @@ export async function POST(request) {
               revisionId: result.workOrder.revisionId,
               quantity: quantity,
               status: result.workOrder.status,
-              createdAt: new Date()
+              createdAt: new Date(),
+              lastSyncAt: new Date()
             }
           });
 
@@ -358,7 +425,8 @@ export async function POST(request) {
             startDate,
             endDate,
             location,
-            subsidiary
+            subsidiary,
+            department
           });
         } else {
           return NextResponse.json({
@@ -384,7 +452,7 @@ export async function POST(request) {
           }, { status: 400 });
         }
 
-        const mappingResults = await db.netsuite.mapComponents(components);
+        const mappingResults = await db.netsuite.mapNetSuiteComponents(components);
 
         const summary = {
           totalComponents: mappingResults.length,
@@ -404,30 +472,98 @@ export async function POST(request) {
       }
 
       case 'import': {
-        const { netsuiteComponents, createMissing = false } = body;
+        const { bomData, fileId, overwriteExisting = false } = body;
         
-        if (!netsuiteComponents || !Array.isArray(netsuiteComponents)) {
+        if (!bomData || !fileId) {
           return NextResponse.json({
             success: false,
-            message: 'NetSuite components array required'
+            message: 'BOM data and file ID are required'
           }, { status: 400 });
         }
 
-        // Implementation for importing NetSuite items
-        // You can implement this later if needed
-        const results = [];
+        // Map NetSuite components to local format
+        const mappingResults = await db.netsuite.mapNetSuiteComponents(bomData.components || []);
+        
+        const components = mappingResults.map(result => {
+          const comp = result.netsuiteComponent;
+          const match = result.bestMatch;
+          
+          return {
+            itemId: match?.chemical?._id || null,
+            amount: comp.quantity || comp.bomQuantity || 0,
+            unit: comp.units || 'ea',
+            netsuiteData: {
+              itemId: comp.itemId,
+              itemRefName: comp.itemRefName || comp.ingredient,
+              ingredient: comp.ingredient,
+              bomQuantity: comp.bomQuantity || comp.quantity,
+              componentYield: comp.componentYield || 100,
+              units: comp.units,
+              lineId: comp.lineId,
+              bomComponentId: comp.bomComponentId,
+              itemSource: comp.itemSource,
+              type: 'netsuite'
+            }
+          };
+        });
+
+        // Update file with BOM data
+        const updateData = {
+          components,
+          netsuiteImportData: {
+            bomId: bomData.bomId,
+            bomName: bomData.bomName,
+            revisionId: bomData.revisionId,
+            revisionName: bomData.revisionName,
+            importedAt: new Date(),
+            solutionNetsuiteId: bomData.assemblyItemId,
+            lastSyncAt: new Date()
+          }
+        };
+
+        const updatedFile = await db.services.fileService.updateFileMeta(fileId, updateData);
         
         return NextResponse.json({
           success: true,
-          results,
-          message: 'Import functionality not yet implemented'
+          file: updatedFile,
+          mappingResults,
+          summary: {
+            totalComponents: components.length,
+            mappedComponents: components.filter(c => c.itemId).length,
+            unmappedComponents: components.filter(c => !c.itemId).length
+          },
+          message: 'BOM imported successfully'
+        });
+      }
+
+      case 'sync': {
+        const { itemId, netsuiteItemId } = body;
+        
+        if (!itemId || !netsuiteItemId) {
+          return NextResponse.json({
+            success: false,
+            message: 'Both itemId and netsuiteItemId are required'
+          }, { status: 400 });
+        }
+
+        // Update local item with NetSuite ID
+        const updatedItem = await db.services.itemService.update(itemId, {
+          netsuiteInternalId: netsuiteItemId,
+          netsuiteLastSync: new Date(),
+          netsuiteSyncStatus: 'synced'
+        });
+
+        return NextResponse.json({
+          success: true,
+          item: updatedItem,
+          message: 'Item synced with NetSuite successfully'
         });
       }
 
       default:
         return NextResponse.json({
           success: false,
-          message: 'Invalid action. Available actions: setup, workorder, mapping, import'
+          message: 'Invalid action. Available actions: setup, workorder, mapping, import, sync'
         }, { status: 400 });
     }
 
@@ -447,6 +583,8 @@ export async function PATCH(request) {
     const action = searchParams.get('action');
     const body = await request.json();
 
+    await db.connect();
+
     if (action === 'workorder') {
       const { workOrderId, action: woAction, quantityCompleted } = body;
 
@@ -464,7 +602,7 @@ export async function PATCH(request) {
         case 'complete':
           result = await workOrderService.completeWorkOrder(workOrderId, quantityCompleted);
           
-          await db.connect();
+          // Update associated batches
           await db.models.Batch.updateMany(
             { 'netsuiteWorkOrderData.workOrderId': workOrderId },
             { 
@@ -478,7 +616,7 @@ export async function PATCH(request) {
         case 'cancel':
           result = await workOrderService.cancelWorkOrder(workOrderId);
           
-          await db.connect();
+          // Update associated batches
           await db.models.Batch.updateMany(
             { 'netsuiteWorkOrderData.workOrderId': workOrderId },
             { 
@@ -488,17 +626,21 @@ export async function PATCH(request) {
             }
           );
           break;
+
+        case 'sync':
+          result = await workOrderService.syncWorkOrderStatusWithBatch(workOrderId);
+          break;
           
         default:
           return NextResponse.json({
             success: false,
-            message: 'Invalid action. Supported actions: complete, cancel'
+            message: 'Invalid action. Supported actions: complete, cancel, sync'
           }, { status: 400 });
       }
 
       return NextResponse.json({
         success: true,
-        message: `Work order ${woAction}d successfully`,
+        message: `Work order ${woAction}${woAction.endsWith('e') ? 'd' : 'ed'} successfully`,
         data: result
       });
     }
