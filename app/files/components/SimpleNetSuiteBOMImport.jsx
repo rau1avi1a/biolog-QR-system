@@ -1,4 +1,4 @@
-// app/files/components/SimpleNetSuiteBOMImport.jsx - Fixed scrolling for components
+// app/files/components/SimpleNetSuiteBOMImport.jsx - Fixed NetSuite API calls
 'use client';
 
 import React, { useState } from 'react';
@@ -63,9 +63,9 @@ export default function SimpleNetSuiteBOMImport({ open, onClose, onImport, solut
     setMappingResults(null);
     
     try {
-      // Step 1: Fetch BOM from NetSuite
+      // Step 1: Fetch BOM from NetSuite - FIXED URL
       console.log('Fetching BOM for NetSuite ID:', solution.netsuiteInternalId);
-      const response = await fetch(`/api/netsuite/bom?action=getBOM&assemblyItemId=${solution.netsuiteInternalId}`);
+      const response = await fetch(`/api/netsuite?action=getBOM&assemblyItemId=${solution.netsuiteInternalId}`);
       const data = await response.json();
       
       if (!data.success) {
@@ -93,8 +93,8 @@ export default function SimpleNetSuiteBOMImport({ open, onClose, onImport, solut
     try {
       console.log('Auto-mapping components using enhanced service...');
       
-      // Use the enhanced mapping API endpoint
-      const response = await fetch('/api/netsuite/mapping', {
+      // Use the enhanced mapping API endpoint - FIXED URL
+      const response = await fetch('/api/netsuite?action=mapping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ components: netsuiteComponents })
@@ -140,7 +140,7 @@ export default function SimpleNetSuiteBOMImport({ open, onClose, onImport, solut
       for (const component of netsuiteComponents) {
         console.log('Mapping component:', component.ingredient, 'NetSuite ID:', component.itemId);
         
-        // Search for local chemical by NetSuite Internal ID
+        // Search for local chemical by NetSuite Internal ID - FIXED URL
         const response = await fetch(`/api/items?type=chemical&netsuiteId=${component.itemId}`);
         const searchData = await response.json();
         
@@ -180,58 +180,89 @@ export default function SimpleNetSuiteBOMImport({ open, onClose, onImport, solut
     }
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!bomData?.recipe || !mappingResults) return;
-
-    // Convert mapped components to your File model format
-    const importedComponents = mappingResults.map(result => ({
-      item: result.localChemical, // Full chemical object with _id
-      qty: result.netsuiteComponent.quantity.toString(),
-      unit: mapNetSuiteUnit(result.netsuiteComponent.units),
-      // Store NetSuite data for reference
-      netsuiteData: {
-        itemId: result.netsuiteComponent.itemId,
-        itemRefName: result.netsuiteComponent.itemRefName,
-        ingredient: result.netsuiteComponent.ingredient,
-        bomQuantity: result.netsuiteComponent.bomQuantity,
-        componentYield: result.netsuiteComponent.componentYield,
-        units: result.netsuiteComponent.units,
-        lineId: result.netsuiteComponent.lineId,
-        bomComponentId: result.netsuiteComponent.bomComponentId,
-        itemSource: result.netsuiteComponent.itemSource,
-        mappedSuccessfully: result.mappedSuccessfully,
-        mappingType: result.mappingType
+  
+    try {
+      setLoading(true);
+  
+      // Convert mapped components to your File model format
+      const importedComponents = mappingResults.map(result => ({
+        item: result.localChemical, // Full chemical object with _id
+        qty: result.netsuiteComponent.quantity.toString(),
+        unit: mapNetSuiteUnit(result.netsuiteComponent.units),
+        // Store NetSuite data for reference
+        netsuiteData: {
+          itemId: result.netsuiteComponent.itemId,
+          itemRefName: result.netsuiteComponent.itemRefName,
+          ingredient: result.netsuiteComponent.ingredient,
+          bomQuantity: result.netsuiteComponent.bomQuantity,
+          componentYield: result.netsuiteComponent.componentYield,
+          units: result.netsuiteComponent.units,
+          lineId: result.netsuiteComponent.lineId,
+          bomComponentId: result.netsuiteComponent.bomComponentId,
+          itemSource: result.netsuiteComponent.itemSource,
+          mappedSuccessfully: result.mappedSuccessfully,
+          mappingType: result.mappingType
+        }
+      }));
+  
+      // Import data that matches your File model structure
+      const importData = {
+        solution: solution,
+        solutionRef: solution._id,
+        components: importedComponents,
+        bom: bomData.bom,
+        // Set recipe quantity to 1 since BOM quantities are per unit produced
+        recipeQty: 1,
+        recipeUnit: 'ea',
+        // Additional metadata
+        netsuiteImportData: {
+          bomId: bomData.bom?.bomId,
+          bomName: bomData.bom?.bomName,
+          revisionId: bomData.bom?.revisionId,
+          revisionName: bomData.bom?.revisionName,
+          importedAt: new Date().toISOString(),
+          solutionNetsuiteId: solution.netsuiteInternalId,
+          totalComponents: importedComponents.length,
+          mappedComponents: importedComponents.filter(c => c.item).length,
+          unmappedComponents: importedComponents.filter(c => !c.item).length
+        }
+      };
+  
+      console.log('Importing data to file:', solution.fileId, 'with data:', importData);
+  
+      // FIXED: Use query parameter format instead of path parameter
+      const response = await fetch(`/api/files?id=${solution.fileId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(importData)
+      });
+  
+      const result = await response.json();
+  
+      if (!response.ok) {
+        throw new Error(result.message || `HTTP ${response.status}: ${response.statusText}`);
       }
-    }));
-
-    // Import data that matches your File model structure
-    const importData = {
-      solution: solution,
-      solutionRef: solution._id,
-      components: importedComponents,
-      bom: bomData.bom,
-      // Set recipe quantity to 1 since BOM quantities are per unit produced
-      recipeQty: 1,
-      recipeUnit: 'ea',
-      // Additional metadata
-      netsuiteImportData: {
-        bomId: bomData.bom?.bomId,
-        bomName: bomData.bom?.bomName,
-        revisionId: bomData.bom?.revisionId,
-        revisionName: bomData.bom?.revisionName,
-        importedAt: new Date().toISOString(),
-        solutionNetsuiteId: solution.netsuiteInternalId,
-        totalComponents: importedComponents.length,
-        mappedComponents: importedComponents.filter(c => c.item).length,
-        unmappedComponents: importedComponents.filter(c => !c.item).length
+  
+      if (!result.success) {
+        throw new Error(result.message || 'Import failed');
       }
-    };
-
-    console.log('Importing data:', importData);
-    onImport(importData);
-    onClose();
+  
+      console.log('Import successful:', result);
+      
+      // Call the onImport callback with the result
+      onImport(result);
+      onClose();
+  
+    } catch (error) {
+      console.error('Error importing NetSuite BOM:', error);
+      setError('Failed to import BOM: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
-
+  
   const handleClose = () => {
     setBomData(null);
     setMappingResults(null);

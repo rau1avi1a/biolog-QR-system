@@ -17,7 +17,7 @@ export function SignInDialog({ open, onClose }) {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth?action=login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -27,7 +27,8 @@ export function SignInDialog({ open, onClose }) {
 
       if (!res.ok) throw new Error(data.message || 'Failed to sign in');
 
-      // Successfully signed in
+      // Successfully signed in - close dialog and reload
+      onClose();
       window.location.reload(); // Reload to update auth state
     } catch (err) {
       setError(err.message);

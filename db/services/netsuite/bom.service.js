@@ -1,181 +1,254 @@
-// services/netsuite/bom.service.js - Updated with enhanced search
+// services/netsuite/bom.service.js
 import { createNetSuiteAuth } from './auth.service.js';
+import db from '@/db/index.js';
 
 /**
  * NetSuite BOM (Bill of Materials) Service
  * Handles fetching BOMs and components from NetSuite Assembly Items
+ * Uses single db import for database operations
  */
 export class NetSuiteBOMService {
   constructor(user) {
-    this.auth = createNetSuiteAuth(user);
+    this.user = user;
+    this.auth = null; // Initialized in init()
+  }
+
+  /**
+   * Initialize the auth service (must be called before using the service)
+   */
+  async init() {
+    if (!this.auth) {
+      this.auth = await createNetSuiteAuth(this.user);
+    }
+    return this;
+  }
+
+  /**
+   * Ensure auth is initialized before making requests
+   */
+  async ensureAuth() {
+    if (!this.auth) {
+      await this.init();
+    }
+  }
+
+  /**
+   * Access to database models through db
+   */
+  get models() {
+    return db.models;
+  }
+
+  /**
+   * Access to other services through db
+   */
+  get services() {
+    return db.services;
+  }
+
+  /**
+   * Ensure database connection
+   */
+  async connect() {
+    return db.connect();
   }
 
   /**
    * Search for Solutions/Assembly Items by name or internal ID
-   * Enhanced search with better error handling
+   * Enhanced search with better error handling and local caching
    */
   async searchAssemblyItems(searchTerm = '') {
     try {
-      console.log('Searching for assembly items:', searchTerm);
-      
-      if (!searchTerm || searchTerm.trim().length < 2) {
-        return [];
-      }
+      await this.ensureAuth();
+      if (!searchTerm || searchTerm.trim().length < 2) return [];
 
-      // Try different search approaches
+      // Try local cache first
+      await this.connect();
+      const localItem = await this.models.Item.findOne({
+        $or: [
+          { netsuiteInternalId: searchTerm.trim() },
+          { displayName: { $regex: searchTerm, $options: 'i' } },
+          { sku: { $regex: searchTerm, $options: 'i' } }
+        ],
+        itemType: { $in: ['solution', 'product'] }
+      }).lean();
+
+      // Construct endpoint
       let endpoint = '/assemblyItem';
-      
-      // If search term is numeric, assume it's an internal ID
       if (/^\d+$/.test(searchTerm.trim())) {
         endpoint += `?q=internalid:${encodeURIComponent(searchTerm.trim())}`;
       } else {
-        // Text search - search in item ID/name fields
         endpoint += `?q=${encodeURIComponent(searchTerm.trim())}`;
       }
-      
-      console.log('Search endpoint:', endpoint);
-      
+
       const results = await this.auth.makeRequest(endpoint);
-      
-      // Handle different response formats
-      if (results && results.items) {
-        return results.items;
-      } else if (Array.isArray(results)) {
-        return results;
-      } else if (results && results.links) {
-        // Single item returned
-        return [results];
-      } else {
-        console.log('Unexpected search result format:', results);
-        return [];
-      }
-      
+      let netsuiteResults = [];
+      if (results && results.items) netsuiteResults = results.items;
+      else if (Array.isArray(results)) netsuiteResults = results;
+      else if (results && results.links) netsuiteResults = [results];
+
+      return await this.enhanceWithLocalData(netsuiteResults);
     } catch (error) {
       console.error('Error searching assembly items:', error);
-      
-      // Try a simpler search as fallback
+      // Fallback simple search
       try {
-        console.log('Trying fallback search...');
-        const fallbackEndpoint = `/assemblyItem?limit=10`;
-        const fallbackResults = await this.auth.makeRequest(fallbackEndpoint);
-        
-        if (fallbackResults && fallbackResults.items) {
-          // Filter results client-side
-          const filtered = fallbackResults.items.filter(item => {
-            const itemId = item.itemid || item.id || '';
-            const displayName = item.displayName || item.itemid || '';
-            const searchLower = searchTerm.toLowerCase();
-            
-            return itemId.toLowerCase().includes(searchLower) || 
-                   displayName.toLowerCase().includes(searchLower);
-          });
-          
-          return filtered;
-        }
-      } catch (fallbackError) {
-        console.error('Fallback search also failed:', fallbackError);
+        const fallback = await this.auth.makeRequest('/assemblyItem?limit=10');
+        const items = fallback.items || [];
+        const filtered = items.filter(item => {
+          const id = item.itemid || item.id || '';
+          const name = item.displayName || id;
+          const term = searchTerm.toLowerCase();
+          return id.toLowerCase().includes(term) || name.toLowerCase().includes(term);
+        });
+        return await this.enhanceWithLocalData(filtered);
+      } catch (e) {
+        console.error('Fallback search failed:', e);
+        return [];
       }
-      
-      // Return empty array instead of throwing to prevent UI errors
-      return [];
     }
+  }
+
+  /**
+   * Enhance NetSuite results with local database information
+   */
+  async enhanceWithLocalData(netsuiteResults) {
+    const enhanced = [];
+    for (const item of netsuiteResults) {
+      const itemId = item.id || item.itemid;
+      const local = await this.models.Item.findOne({ netsuiteInternalId: itemId }).lean();
+      enhanced.push({
+        ...item,
+        localItem: local,
+        hasLocalData: !!local,
+        localQtyOnHand: local?.qtyOnHand || 0,
+        localDisplayName: local?.displayName,
+        localSku: local?.sku
+      });
+    }
+    return enhanced;
   }
 
   /**
    * Get Assembly Item BOM and its components
-   * Based on your Postman testing:
-   * 1. Get BOM list with expandSubResources=true
-   * 2. Extract current revision ID  
-   * 3. Get revision components
    */
   async getAssemblyBOM(assemblyItemId) {
-    try {
-      console.log('Getting BOM for assembly item:', assemblyItemId);
-      
-      // Step 1: Get BOMs for this assembly item with expanded details
-      const endpoint = `/assemblyItem/${assemblyItemId}/billOfMaterials?expandSubResources=true`;
-      const bomsResponse = await this.auth.makeRequest(endpoint);
-      
-      if (!bomsResponse.items || bomsResponse.items.length === 0) {
-        throw new Error('No BOMs found for this assembly item');
-      }
+    await this.ensureAuth();
+    await this.connect();
 
-      // Get the first BOM (you could add logic to pick a specific one)
-      const bomData = bomsResponse.items[0];
-      
-      // Step 2: Get the current revision ID
-      if (!bomData.currentRevision || !bomData.currentRevision.id) {
-        throw new Error('No current revision found for this BOM');
-      }
-      
-      const revisionId = bomData.currentRevision.id;
-      
-      // Step 3: Get the revision components
-      const components = await this.getBOMRevisionComponents(revisionId);
-      
-      return {
-        bomId: bomData.billOfMaterials?.id,
-        bomName: bomData.billOfMaterials?.refName,
-        revisionId: revisionId,
-        revisionName: bomData.currentRevision.refName,
-        effectiveStartDate: bomData.effectiveStartDate,
-        effectiveEndDate: bomData.effectiveEndDate,
-        components: components
-      };
-    } catch (error) {
-      console.error('Error fetching Assembly BOM:', error);
-      throw error;
-    }
+    // Optionally use local cache
+    const localItem = await this.models.Item.findOne({
+      netsuiteInternalId: assemblyItemId,
+      bom: { $exists: true, $ne: [] }
+    }).lean();
+    // Always fetch fresh for now
+
+    // Fetch BOM list
+    const listResp = await this.auth.makeRequest(
+      `/assemblyItem/${assemblyItemId}/billOfMaterials?expandSubResources=true`
+    );
+    if (!listResp.items?.length) throw new Error('No BOMs found');
+    const bomData = listResp.items[0];
+    const revisionId = bomData.currentRevision?.id;
+    if (!revisionId) throw new Error('No current BOM revision');
+
+    // Fetch revision components
+    const rawComps = await this.getBOMRevisionComponents(revisionId);
+    const normalized = this.normalizeComponentData(rawComps);
+    const mapped = await this.mapComponentsToLocal(normalized);
+    const recipe = this.formatBOMAsRecipe(normalized);
+
+    const result = {
+      bomId: bomData.billOfMaterials?.id,
+      revisionId,
+      components: rawComps,
+      normalizedComponents: normalized,
+      mappedComponents: mapped,
+      recipe,
+      assemblyItemId
+    };
+
+    // Cache locally
+    await this.cacheBOMDataLocally(assemblyItemId, result);
+    return result;
   }
 
-  /**
-   * Get BOM Revision Components
-   * This gets the actual ingredient list with quantities
-   */
   async getBOMRevisionComponents(revisionId) {
+    const resp = await this.auth.makeRequest(
+      `/bomrevision/${revisionId}?expandSubResources=true`
+    );
+    return resp.component?.items || [];
+  }
+
+  normalizeComponentData(rawComponents) {
+    return rawComponents.map((c, i) => {
+      const item = c.item || {};
+      const id = item.id || item.internalId || c.itemId;
+      const name = item.refName || item.itemid || 'Unknown';
+      const qty = parseFloat(c.quantity || c.bomQuantity || 0);
+      const units = c.units || c.unit || item.units || 'ea';
+      return {
+        ingredient: name,
+        itemId: id,
+        quantity: qty,
+        bomQuantity: qty,
+        units,
+        componentYield: c.componentYield || 100,
+        lineId: c.lineId,
+        bomComponentId: c.id,
+        itemSource: c.itemSource?.refName,
+        _original: c
+      };
+    });
+  }
+
+  async mapComponentsToLocal(components) {
     try {
-      const endpoint = `/bomrevision/${revisionId}?expandSubResources=true`;
-      const revisionData = await this.auth.makeRequest(endpoint);
-      
-      if (!revisionData.component || !revisionData.component.items) {
-        return [];
-      }
-      
-      return revisionData.component.items;
-    } catch (error) {
-      console.error('Error fetching BOM revision components:', error);
-      throw error;
+      return await db.netsuite.mapComponents(components);
+    } catch {
+      return components.map(comp => ({
+        netsuiteComponent: comp,
+        matches: [],
+        bestMatch: null,
+        mappedSuccessfully: false
+      }));
     }
   }
 
-  /**
-   * Convert BOM data to recipe format for your app
-   * Maps NetSuite BOM structure to your internal recipe format
-   */
-  formatBOMAsRecipe(bomData) {
-    if (!bomData || !bomData.components) {
-      return [];
+  async cacheBOMDataLocally(assemblyItemId, bomData) {
+    try {
+      const forStorage = (bomData.normalizedComponents).map(c => ({
+        itemId: c.itemId,
+        ingredient: c.ingredient,
+        qty: c.quantity,
+        uom: c.units,
+        netsuiteData: c
+      }));
+      await this.models.Item.updateOne(
+        { netsuiteInternalId: assemblyItemId },
+        { $set: { bom: forStorage, lastBOMSync: new Date() } },
+        { upsert: true }
+      );
+    } catch (e) {
+      console.error('Error caching BOM data:', e);
     }
+  }
 
-    return bomData.components.map(component => ({
-      // Map NetSuite component fields to your recipe format
-      ingredient: component.displayName || component.item?.refName || 'Unknown',
-      itemId: component.item?.id,
-      itemRefName: component.item?.refName,
-      quantity: parseFloat(component.quantity) || 0,
-      bomQuantity: parseFloat(component.bomQuantity) || 0,
-      units: component.units, // This is likely a unit ID - you may need to map this
-      componentYield: component.componentYield || 100,
-      lineId: component.lineId,
-      bomComponentId: component.id,
-      itemSource: component.itemSource?.refName
+  formatBOMAsRecipe(components) {
+    return components.map(c => ({
+      ingredient: c.ingredient,
+      itemId: c.itemId,
+      quantity: c.quantity,
+      units: c.units,
+      componentYield: c.componentYield
     }));
   }
 }
 
 /**
- * Factory function to create BOM service
+ * Factory function to create BOM service - async
  */
-export const createBOMService = (user) => {
-  return new NetSuiteBOMService(user);
+export const createBOMService = async (user) => {
+  const svc = new NetSuiteBOMService(user);
+  await svc.init();
+  return svc;
 };

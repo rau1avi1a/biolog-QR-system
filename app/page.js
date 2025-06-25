@@ -17,15 +17,35 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
+  // Check if user is already logged in
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth?action=me', {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          // User is already logged in, redirect to home
+          router.push('/home');
+        }
+      } catch (err) {
+        // User is not logged in, stay on login page
+      }
+    };
+    checkAuth();
+  }, [router]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      // Updated to match your API structure: POST /api/auth?action=login
+      const res = await fetch('/api/auth?action=login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Important for cookies
         body: JSON.stringify(formData),
       });
 
@@ -33,9 +53,8 @@ export default function LoginPage() {
 
       if (!res.ok) throw new Error(data.message || 'Failed to sign in');
 
-      // Successfully signed in
-      window.location.href = '/home'; // Use window.location.href for full page reload
-      console.log('home')
+      // Successfully signed in - use window.location for full page reload
+      window.location.href = '/home';
     } catch (err) {
       setError(err.message);
       setIsLoading(false);
@@ -44,7 +63,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center">
-      
       <Card className="p-8 w-full max-w-md space-y-6 bg-white/90 backdrop-blur-sm">
         <div className="text-center">
           <h1 className="text-2xl font-bold">Biolog MFG</h1>
@@ -91,6 +109,7 @@ export default function LoginPage() {
           </Button>
         </form>
 
+        {/* Uncomment if you want a registration link */}
         {/* <div className="text-center text-sm text-gray-600">
           Don't have an account?{' '}
           <button

@@ -1,70 +1,276 @@
-// services/file.service.js - Fixed folder structure handling
+// db/services/app/file.service.js - Consolidated file operations
+import mongoose from 'mongoose';
+import { CoreService } from './core.service.js';
+import db from '@/db/index.js';
 
-import mongoose       from 'mongoose';
-import connectMongoDB from '@/db/index';
-
-import File   from '@/db/schemas/File';
-import Folder from '@/db/schemas/Folder';
-import '@/db/schemas/Item';   // registers Item discriminators
-
-/*───────────────────────────────────────────────────────────────────*/
-/* Helpers                                                           */
-/*───────────────────────────────────────────────────────────────────*/
-const toDataURL = (bin, ctype = 'application/pdf') =>
-  bin ? `data:${ctype};base64,${bin.toString('base64')}` : null;
-
-const isId = (v) => mongoose.Types.ObjectId.isValid(v);
-
-function asId(id) {
-  if (!isId(id)) throw new Error('Invalid ObjectId');
-  return new mongoose.Types.ObjectId(id);
-}
-
-/*───────────────────────────────────────────────────────────────────*/
-/* Enhanced folder creation that reuses existing folders             */
-/*───────────────────────────────────────────────────────────────────*/
-async function ensureFolderStructure(relativePath, baseFolderId = null) {
-  if (!relativePath || typeof relativePath !== 'string') {
-    return baseFolderId;
+/**
+ * File Service - Handles all file operations with proper folder structure
+ * Uses single db import for all dependencies
+ */
+class FileService extends CoreService {
+  constructor() {
+    super(null); // Pass null for lazy model resolution
   }
 
-  // Split the path and remove empty parts and the filename
-  const pathParts = relativePath.split('/').filter(part => part.trim() !== '');
-  
-  // If no folders in the path, return the base folder
-  if (pathParts.length <= 1) {
-    return baseFolderId;
+  async connect() {
+    return db.connect();
   }
 
-  // Remove the filename (last part) to get only folder parts
-  const folderParts = pathParts.slice(0, -1);
-  
-  let currentParentId = baseFolderId;
-  
-  // Create or find each folder in the hierarchy
-  for (const folderName of folderParts) {
-    try {
-      // First, try to find existing folder with this name and parent
-      let existingFolder = await Folder.findOne({ 
-        name: folderName, 
-        parentId: currentParentId 
-      }).lean();
-      
-      if (existingFolder) {
-        // Use existing folder
-        currentParentId = existingFolder._id;
-      } else {
-        // Create new folder since it doesn't exist
-        const newFolder = await Folder.create({
-          name: folderName,
-          parentId: currentParentId
-        });
-        currentParentId = newFolder._id;
+  // Lazy model getters
+  get model() {
+    return db.models.File;
+  }
+
+  get File() {
+    return db.models.File;
+  }
+
+  get Folder() {
+    return db.models.Folder;
+  }
+
+  // =============================================================================
+  // FILE RETRIEVAL
+  // =============================================================================
+
+  async getFileById(id, { includePdf = false } = {}) {
+    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+
+    await this.connect();
+
+    const sel = includePdf ? '+pdf' : '-pdf';
+    const doc = await this.File.findById(id)
+      .select(sel)
+      .populate('productRef', 'displayName sku netsuiteInternalId')
+      .populate('solutionRef', 'displayName sku netsuiteInternalId')
+      .populate('components.itemId', 'displayName sku netsuiteInternalId')
+      .lean();
+
+    if (!doc) return null;
+    
+    if (includePdf && doc.pdf?.data) {
+      doc.pdf = `data:${doc.pdf.contentType || 'application/pdf'};base64,${doc.pdf.data.toString('base64')}`;
+    } else {
+      delete doc.pdf;
+    }
+    
+    return doc;
+  }
+
+  async searchFiles(query) {
+    await this.connect();
+
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) return [];
+
+    const searchTerms = trimmedQuery.split(/\s+/).filter(term => term.length > 0);
+    if (searchTerms.length === 0) return [];
+
+    const searchConditions = searchTerms.map(term => ({
+      fileName: { 
+        $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        $options: 'i'
       }
-    } catch (error) {
-      // If there's a duplicate key error, try to find the existing folder again
-      if (error.code === 11000) {
-        const existingFolder = await Folder.findOne({ 
+    }));
+
+    return this.File.find({ $and: searchConditions })
+      .select('-pdf')
+      .sort({ fileName: 1 })
+      .limit(50)
+      .lean();
+  }
+
+  async listFiles({ folderId = null, onlyOriginals = true } = {}) {
+    await this.connect();
+
+    const query = { folderId: folderId ?? null };
+    
+    return this.File.find(query)
+      .select('-pdf')
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+
+  // =============================================================================
+  // FILE CREATION
+  // =============================================================================
+
+  async createFileFromUpload({
+    buffer,
+    fileName,
+    description = '',
+    folderId = null,
+    relativePath = '',
+    isOriginal = true
+  }) {
+    await this.connect();
+
+    let finalFolderId = folderId;
+    
+    if (relativePath && relativePath.trim() !== '') {
+      try {
+        finalFolderId = await this.ensureFolderStructure(relativePath, folderId);
+      } catch (error) {
+        console.error('Error creating folder structure:', error);
+        finalFolderId = folderId;
+      }
+    }
+
+    const doc = await this.File.create({
+      fileName,
+      description,
+      folderId: finalFolderId,
+      pdf: { data: buffer, contentType: 'application/pdf' },
+    });
+
+    const obj = doc.toObject();
+    delete obj.pdf;
+    return obj;
+  }
+
+  async createMultipleFilesFromUpload(files, baseFolderId = null) {
+    await this.connect();
+    
+    const results = [];
+    const folderCache = new Map();
+    
+    for (const fileData of files) {
+      try {
+        const { buffer, fileName, relativePath = '', description = '' } = fileData;
+        
+        let finalFolderId = baseFolderId;
+        
+        if (relativePath && relativePath.trim() !== '') {
+          const cacheKey = `${baseFolderId || 'root'}:${relativePath}`;
+          
+          if (folderCache.has(cacheKey)) {
+            finalFolderId = folderCache.get(cacheKey);
+          } else {
+            try {
+              finalFolderId = await this.ensureFolderStructure(relativePath, baseFolderId);
+              folderCache.set(cacheKey, finalFolderId);
+            } catch (error) {
+              console.error(`Error creating folder structure for ${relativePath}:`, error);
+              finalFolderId = baseFolderId;
+            }
+          }
+        }
+
+        const doc = await this.File.create({
+          fileName,
+          description,
+          folderId: finalFolderId,
+          pdf: { data: buffer, contentType: 'application/pdf' },
+        });
+
+        const obj = doc.toObject();
+        delete obj.pdf;
+        results.push(obj);
+        
+      } catch (error) {
+        console.error(`Error creating file ${fileData.fileName}:`, error);
+        results.push({ 
+          error: error.message, 
+          fileName: fileData.fileName 
+        });
+      }
+    }
+    
+    return results;
+  }
+
+  // =============================================================================
+  // FILE UPDATES
+  // =============================================================================
+
+  async updateFileMeta(id, payload = {}) {
+    await this.connect();
+
+    const $set = {
+      description: payload.description ?? '',
+      productRef: payload.productRef ?? null,
+      solutionRef: payload.solutionRef ?? null,
+      recipeQty: payload.recipeQty ?? null,
+      recipeUnit: payload.recipeUnit ?? null,
+    };
+
+    // Handle components with NetSuite data
+    if (Array.isArray(payload.components)) {
+      $set.components = payload.components.map(c => {
+        const component = {
+          itemId: c.itemId,
+          amount: Number(c.amount),
+          unit: c.unit || 'g'
+        };
+        
+        if (c.netsuiteData) {
+          component.netsuiteData = {
+            itemId: c.netsuiteData.itemId,
+            itemRefName: c.netsuiteData.itemRefName,
+            ingredient: c.netsuiteData.ingredient,
+            bomQuantity: c.netsuiteData.bomQuantity,
+            componentYield: c.netsuiteData.componentYield,
+            units: c.netsuiteData.units,
+            lineId: c.netsuiteData.lineId,
+            bomComponentId: c.netsuiteData.bomComponentId,
+            itemSource: c.netsuiteData.itemSource,
+            type: 'netsuite'
+          };
+        }
+        
+        return component;
+      });
+    }
+
+    // Handle NetSuite import metadata
+    if (payload.netsuiteImportData) {
+      $set.netsuiteImportData = {
+        bomId: payload.netsuiteImportData.bomId,
+        bomName: payload.netsuiteImportData.bomName,
+        revisionId: payload.netsuiteImportData.revisionId,
+        revisionName: payload.netsuiteImportData.revisionName,
+        importedAt: new Date(payload.netsuiteImportData.importedAt),
+        solutionNetsuiteId: payload.netsuiteImportData.solutionNetsuiteId,
+        lastSyncAt: new Date()
+      };
+    }
+
+    await this.File.findByIdAndUpdate(id, $set, { runValidators: true });
+    return this.getFileById(id);
+  }
+
+  async updateFileStatus(id, status) {
+    // Files don't have status in your model - only Batches do
+    console.warn('updateFileStatus called on File - Files do not have status. Use Batch status instead.');
+    return this.getFileById(id);
+  }
+
+  async deleteFile(id) {
+    await this.connect();
+    await this.File.findByIdAndDelete(id);
+  }
+
+  // =============================================================================
+  // FOLDER MANAGEMENT
+  // =============================================================================
+
+  async ensureFolderStructure(relativePath, baseFolderId = null) {
+    if (!relativePath || typeof relativePath !== 'string') {
+      return baseFolderId;
+    }
+
+    const pathParts = relativePath.split('/').filter(part => part.trim() !== '');
+    
+    if (pathParts.length <= 1) {
+      return baseFolderId;
+    }
+
+    const folderParts = pathParts.slice(0, -1);
+    let currentParentId = baseFolderId;
+    
+    for (const folderName of folderParts) {
+      try {
+        let existingFolder = await this.Folder.findOne({ 
           name: folderName, 
           parentId: currentParentId 
         }).lean();
@@ -72,273 +278,101 @@ async function ensureFolderStructure(relativePath, baseFolderId = null) {
         if (existingFolder) {
           currentParentId = existingFolder._id;
         } else {
+          const newFolder = await this.Folder.create({
+            name: folderName,
+            parentId: currentParentId
+          });
+          currentParentId = newFolder._id;
+        }
+      } catch (error) {
+        if (error.code === 11000) {
+          const existingFolder = await this.Folder.findOne({ 
+            name: folderName, 
+            parentId: currentParentId 
+          }).lean();
+          
+          if (existingFolder) {
+            currentParentId = existingFolder._id;
+          } else {
+            throw error;
+          }
+        } else {
           throw error;
         }
-      } else {
-        throw error;
       }
     }
-  }
-  
-  return currentParentId;
-}
-
-/*───────────────────────────────────────────────────────────────────*/
-/* R: Get a file by ID (optionally include PDF data)                */
-/* FIXED: Include netsuiteInternalId in populated references        */
-/*───────────────────────────────────────────────────────────────────*/
-export async function getFileById(id, { includePdf = false } = {}) {
-  if (!isId(id)) return null;
-
-  await connectMongoDB();
-
-  const sel = includePdf ? '+pdf' : '-pdf';
-  const doc = await File.findById(asId(id))
-    .select(sel)
-    .populate('productRef', 'displayName sku netsuiteInternalId')  // FIXED: Added netsuiteInternalId
-    .populate('solutionRef', 'displayName sku netsuiteInternalId') // FIXED: Added netsuiteInternalId
-    .populate('components.itemId', 'displayName sku netsuiteInternalId') // FIXED: Added netsuiteInternalId
-    .lean();
-
-  if (!doc) return null;
-  if (includePdf) {
-    doc.pdf = toDataURL(doc.pdf?.data, doc.pdf?.contentType);
-  } else {
-    delete doc.pdf;
-  }
-  return doc;
-}
-
-export async function searchFiles(query) {
-  await connectMongoDB();
-
-  const trimmedQuery = query.trim();
-  if (!trimmedQuery) {
-    return [];
+    
+    return currentParentId;
   }
 
-  // Split the query into individual terms and filter out empty ones
-  const searchTerms = trimmedQuery.split(/\s+/).filter(term => term.length > 0);
-  
-  if (searchTerms.length === 0) {
-    return [];
-  }
+  // =============================================================================
+  // ENHANCED METHODS USING DB.SERVICES
+  // =============================================================================
 
-  // Create a MongoDB query that requires ALL terms to be found in the filename
-  // This allows "eco a1" to match "EcoPlate A1-A5-A9"
-  const searchConditions = searchTerms.map(term => ({
-    fileName: { 
-      $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), // Escape special regex chars
-      $options: 'i' // Case insensitive
-    }
-  }));
+  /**
+   * Get file with related batches using db.services
+   */
+  async getFileWithBatches(id) {
+    const file = await this.getFileById(id);
+    if (!file) return null;
 
-  const files = await File.find({
-    $and: searchConditions // ALL terms must be found
-  })
-  .select('-pdf') // Don't include PDF data in search results
-  .sort({ fileName: 1 }) // Sort alphabetically
-  .limit(50) // Limit results to prevent overwhelming the UI
-  .lean();
-
-  return files;
-}
-
-/*───────────────────────────────────────────────────────────────────*/
-/* L: List all files (optionally scoped to a folder)               */
-/*───────────────────────────────────────────────────────────────────*/
-export async function listFiles({ 
-  folderId = null, 
-  onlyOriginals = true  // Default to only show original files
-} = {}) {
-  await connectMongoDB();
-
-  const q = { folderId: folderId ?? null };
-  
-  // Add filter to only show original files (files are always originals in this model)
-  // This parameter is here for consistency with the API expectations
-  // In your model, all File documents are originals, batches are separate
-  
-  return File.find(q)
-    .select('-pdf')
-    .sort({ createdAt: -1 })
-    .lean();
-}
-
-/*───────────────────────────────────────────────────────────────────*/
-/* C: Upload & create a new File with proper folder structure       */
-/*───────────────────────────────────────────────────────────────────*/
-export async function createFileFromUpload({
-  buffer,
-  fileName,
-  description = '',
-  folderId = null,
-  relativePath = '',
-  isOriginal = true
-}) {
-  await connectMongoDB();
-
-  // Ensure proper folder structure from relativePath
-  let finalFolderId = folderId;
-  
-  if (relativePath && relativePath.trim() !== '') {
-    try {
-      finalFolderId = await ensureFolderStructure(relativePath, folderId);
-    } catch (error) {
-      console.error('Error creating folder structure:', error);
-      // Fall back to the original folder if there's an error
-      finalFolderId = folderId;
-    }
-  }
-
-  // Create the file
-  const doc = await File.create({
-    fileName,
-    description,
-    folderId: finalFolderId,
-    pdf: { data: buffer, contentType: 'application/pdf' },
-  });
-
-  const obj = doc.toObject();
-  delete obj.pdf;
-  return obj;
-}
-
-/*───────────────────────────────────────────────────────────────────*/
-/* Batch upload helper for multiple files with structure            */
-/*───────────────────────────────────────────────────────────────────*/
-export async function createMultipleFilesFromUpload(files, baseFolderId = null) {
-  await connectMongoDB();
-  
-  const results = [];
-  const folderCache = new Map(); // Cache created folders to avoid duplicates
-  
-  for (const fileData of files) {
-    try {
-      const { buffer, fileName, relativePath = '', description = '' } = fileData;
-      
-      let finalFolderId = baseFolderId;
-      
-      if (relativePath && relativePath.trim() !== '') {
-        // Check cache first
-        const cacheKey = `${baseFolderId || 'root'}:${relativePath}`;
-        
-        if (folderCache.has(cacheKey)) {
-          finalFolderId = folderCache.get(cacheKey);
-        } else {
-          // Create folder structure and cache the result
-          try {
-            finalFolderId = await ensureFolderStructure(relativePath, baseFolderId);
-            folderCache.set(cacheKey, finalFolderId);
-          } catch (error) {
-            console.error(`Error creating folder structure for ${relativePath}:`, error);
-            finalFolderId = baseFolderId;
-          }
-        }
-      }
-
-      // Create the file
-      const doc = await File.create({
-        fileName,
-        description,
-        folderId: finalFolderId,
-        pdf: { data: buffer, contentType: 'application/pdf' },
-      });
-
-      const obj = doc.toObject();
-      delete obj.pdf;
-      results.push(obj);
-      
-    } catch (error) {
-      console.error(`Error creating file ${fileData.fileName}:`, error);
-      // Continue with other files even if one fails
-      results.push({ 
-        error: error.message, 
-        fileName: fileData.fileName 
-      });
-    }
-  }
-  
-  return results;
-}
-
-// services/file.service.js - Updated updateFileMeta to handle NetSuite data
-
-/* ───────────────────────────────────────────────────────────────────*/
-/* U: Update file metadata (description, recipe fields, components) */
-/*   ENHANCED: Now supports NetSuite import data                     */
-/* ───────────────────────────────────────────────────────────────────*/
-export async function updateFileMeta(id, payload = {}) {
-  await connectMongoDB();
-
-  const $set = {
-    description : payload.description  ?? '',
-    productRef  : payload.productRef   ?? null,
-    solutionRef : payload.solutionRef  ?? null,
-    recipeQty   : payload.recipeQty    ?? null,
-    recipeUnit  : payload.recipeUnit   ?? null,
-  };
-
-  // Handle components with NetSuite data
-  if (Array.isArray(payload.components)) {
-    $set.components = payload.components.map(c => {
-      const component = {
-        itemId : c.itemId,
-        amount : Number(c.amount),
-        unit   : c.unit || 'g'
-      };
-      
-      // Include NetSuite data if available
-      if (c.netsuiteData) {
-        component.netsuiteData = {
-          itemId: c.netsuiteData.itemId,
-          itemRefName: c.netsuiteData.itemRefName,
-          ingredient: c.netsuiteData.ingredient,
-          bomQuantity: c.netsuiteData.bomQuantity,
-          componentYield: c.netsuiteData.componentYield,
-          units: c.netsuiteData.units,
-          lineId: c.netsuiteData.lineId,
-          bomComponentId: c.netsuiteData.bomComponentId,
-          itemSource: c.netsuiteData.itemSource,
-          type: 'netsuite'
-        };
-      }
-      
-      return component;
+    // Get related batches using db.services
+    const batches = await this.services.batchService.listBatches({
+      filter: { fileId: id }
     });
-  }
 
-  // Handle NetSuite import metadata
-  if (payload.netsuiteImportData) {
-    $set.netsuiteImportData = {
-      bomId: payload.netsuiteImportData.bomId,
-      bomName: payload.netsuiteImportData.bomName,
-      revisionId: payload.netsuiteImportData.revisionId,
-      revisionName: payload.netsuiteImportData.revisionName,
-      importedAt: new Date(payload.netsuiteImportData.importedAt),
-      solutionNetsuiteId: payload.netsuiteImportData.solutionNetsuiteId,
-      lastSyncAt: new Date()
+    return {
+      ...file,
+      relatedBatches: batches
     };
   }
 
-  await File.findByIdAndUpdate(asId(id), $set, { runValidators: true });
-  return getFileById(id);
+  /**
+   * Archive file when batch is completed using db.services
+   */
+  async archiveFile(fileId, batchId) {
+    const batch = await this.services.batchService.getBatchById(batchId);
+    if (!batch) throw new Error('Batch not found');
+
+    if (batch.status === 'Completed') {
+      await this.services.createArchiveCopy(batch);
+      return { archived: true, batchId };
+    }
+
+    return { archived: false, reason: 'Batch not completed' };
+  }
+
+  /**
+   * Get file statistics including transaction data using db.services
+   */
+  async getFileStats(id) {
+    const file = await this.getFileById(id);
+    if (!file) return null;
+
+    // Get related batches
+    const batches = await this.services.batchService.listBatches({
+      filter: { fileId: id }
+    });
+
+    // Get transaction stats for related items if available
+    let transactionStats = null;
+    if (file.solutionRef) {
+      transactionStats = await this.services.txnService.getItemStats(file.solutionRef);
+    }
+
+    return {
+      file,
+      batchCount: batches.length,
+      completedBatches: batches.filter(b => b.status === 'Completed').length,
+      transactionStats
+    };
+  }
 }
 
-/*───────────────────────────────────────────────────────────────────*/
-/* U: Update file status (not used for Files, only for Batches)     */
-/*───────────────────────────────────────────────────────────────────*/
-export async function updateFileStatus(id, status) {
-  // Files don't have status in your model - only Batches do
-  // This is here for API compatibility but doesn't do anything
-  console.warn('updateFileStatus called on File - Files do not have status. Use Batch status instead.');
-  return getFileById(id);
-}
+// Create singleton instance
+const fileService = new FileService();
 
-/*───────────────────────────────────────────────────────────────────*/
-/* D: Delete a file by ID                                           */
-/*───────────────────────────────────────────────────────────────────*/
-export async function deleteFile(id) {
-  await connectMongoDB();
-  await File.findByIdAndDelete(asId(id));
-}
+// Export service and methods
+export { FileService };
+
+export default fileService;

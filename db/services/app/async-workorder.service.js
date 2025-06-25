@@ -1,24 +1,39 @@
-// services/async-workorder.service.js - FIXED: Better database updates and error handling
-import connectMongoDB from '@/db/index';
-import Batch from '@/db/schemas/Batch.js';
-import User from '@/db/schemas/User.js';
-import { createWorkOrderService } from '../netsuite/index.js';
+// services/async-workorder.service.js - Enhanced with single db import pattern
+import db from '@/db/index.js';
 
 /**
  * Enhanced Background Work Order Creation Service
- * FIXED: Better database updates and status management
+ * Uses single db import for all database operations and service dependencies
  */
 export class AsyncWorkOrderService {
+  
+  // Lazy model getters
+  static get User() {
+    return db.models.User;
+  }
+
+  static get Batch() {
+    return db.models.Batch;
+  }
+
+  static async connect() {
+    return db.connect();
+  }
+
+  // Access to other services through db.services
+  static get services() {
+    return db.services;
+  }
   
   /**
    * Queue a work order creation job
    */
   static async queueWorkOrderCreation(batchId, quantity, userId = null) {
-    await connectMongoDB();
+    await this.connect();
     
     try {
       // CRITICAL: Use explicit database update with verification
-      const updateResult = await Batch.updateOne(
+      const updateResult = await this.Batch.updateOne(
         { _id: batchId },
         {
           $set: {
@@ -61,17 +76,17 @@ export class AsyncWorkOrderService {
   }
 
   /**
-   * FIXED: Create work order in background with guaranteed database updates
+   * Create work order in background with guaranteed database updates
    */
   static async createWorkOrderInBackground(batchId, quantity, userId = null) {
     try {
       console.log('🚀 Starting background work order creation for batch:', batchId);
       
       // CRITICAL: Always start with fresh connection
-      await connectMongoDB();
+      await this.connect();
       
       // Get the batch with a fresh query
-      const batch = await Batch.findById(batchId)
+      const batch = await this.Batch.findById(batchId)
         .populate('fileId', 'fileName')
         .populate('snapshot.solutionRef', 'displayName sku netsuiteInternalId')
         .lean();
@@ -88,7 +103,7 @@ export class AsyncWorkOrderService {
       // Get user if provided
       let user = null;
       if (userId) {
-        user = await User.findById(userId);
+        user = await this.User.findById(userId);
       }
   
       const fullUser = await this.getFullUser(user);
@@ -133,7 +148,7 @@ export class AsyncWorkOrderService {
         };
       }
 
-      // ATTEMPT 1: Direct update with retry logic
+      // ATTEMPT: Direct update with retry logic
       let updateSuccess = false;
       let attempts = 0;
       const maxAttempts = 3;
@@ -143,9 +158,9 @@ export class AsyncWorkOrderService {
         console.log(`🔄 Database update attempt ${attempts}/${maxAttempts}`);
 
         try {
-          await connectMongoDB(); // Ensure fresh connection each attempt
+          await this.connect(); // Ensure fresh connection each attempt
           
-          const updateResult = await Batch.updateOne(
+          const updateResult = await this.Batch.updateOne(
             { _id: batchId },
             { $set: updateData },
             { upsert: false }
@@ -180,7 +195,7 @@ export class AsyncWorkOrderService {
       // VERIFICATION: Confirm the update worked
       await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for DB consistency
       
-      const verificationBatch = await Batch.findById(batchId)
+      const verificationBatch = await this.Batch.findById(batchId)
         .select('workOrderStatus workOrderId netsuiteWorkOrderData')
         .lean();
       
@@ -220,7 +235,7 @@ export class AsyncWorkOrderService {
   }
 
   /**
-   * Enhanced NetSuite work order creation with timeout
+   * Enhanced NetSuite work order creation with timeout using db.services
    */
   static async createNetSuiteWorkOrder(batch, quantity, user) {
     try {
@@ -230,7 +245,8 @@ export class AsyncWorkOrderService {
       );
 
       const workOrderPromise = (async () => {
-        const workOrderService = createWorkOrderService(user);
+        // Use db.services for NetSuite work order service
+        const workOrderService = await db.netsuite.createWorkOrderService(user);
         const result = await workOrderService.createWorkOrderFromBatch(batch, quantity);
         
         console.log('✅ NetSuite work order created:', {
@@ -274,13 +290,13 @@ export class AsyncWorkOrderService {
   }
 
   /**
-   * ENHANCED: Handle work order creation failure with better error tracking
+   * Handle work order creation failure with better error tracking
    */
   static async handleWorkOrderFailure(batchId, errorMessage) {
     try {
-      await connectMongoDB();
+      await this.connect();
       
-      const updateResult = await Batch.updateOne(
+      const updateResult = await this.Batch.updateOne(
         { _id: batchId },
         {
           $set: {
@@ -302,17 +318,17 @@ export class AsyncWorkOrderService {
   }
 
   /**
-   * ENHANCED: Get work order status with better error handling
+   * Get work order status with better error handling
    */
   static async getWorkOrderStatus(batchId) {
     try {
       console.log('🔍 Getting work order status for batch:', batchId);
       
       // Force fresh connection and bypass any caching
-      await connectMongoDB();
+      await this.connect();
       
       // Use findOne with fresh query to avoid any caching issues
-      const batch = await Batch.findOne({ _id: batchId })
+      const batch = await this.Batch.findOne({ _id: batchId })
         .select('workOrderCreated workOrderStatus workOrderId workOrderError netsuiteWorkOrderData workOrderCreatedAt workOrderFailedAt')
         .lean()
         .exec();
@@ -352,7 +368,56 @@ export class AsyncWorkOrderService {
     }
   }
 
-  // Helper methods remain the same...
+  // =============================================================================
+  // ENHANCED HELPER METHODS USING DB.SERVICES
+  // =============================================================================
+
+  /**
+   * Get batch with work order status using db.services
+   */
+  static async getBatchWithWorkOrderStatus(batchId) {
+    const batch = await db.batches.getBatchById(batchId);    if (!batch) return null;
+
+    const workOrderStatus = await this.getWorkOrderStatus(batchId);
+    
+    return {
+      ...batch,
+      workOrderStatus
+    };
+  }
+
+  /**
+   * Retry work order creation with enhanced error handling using db.services
+   */
+  static async retryWorkOrderCreation(batchId, quantity, userId = null) {
+    // Use batch service to get current batch state
+    const batch = await db.batches.getBatchById(batchId);    if (!batch) {
+      throw new Error('Batch not found');
+    }
+
+    // Reset work order status and retry
+    const resetResult = await this.Batch.updateOne(
+      { _id: batchId },
+      {
+        $set: {
+          workOrderStatus: 'creating',
+          workOrderError: null,
+          workOrderFailedAt: null,
+          workOrderId: `PENDING-RETRY-${Date.now()}`,
+          workOrderCreatedAt: new Date()
+        },
+        $unset: { netsuiteWorkOrderData: "" }
+      }
+    );
+
+    if (resetResult.matchedCount === 0) {
+      throw new Error('Batch not found for retry');
+    }
+
+    return this.queueWorkOrderCreation(batchId, quantity, userId);
+  }
+
+  // Helper methods with lazy model access...
   static async getFullUser(user) {
     if (!user) return null;
     
@@ -362,7 +427,7 @@ export class AsyncWorkOrderService {
     
     if (user._id) {
       try {
-        const fullUser = await User.findById(user._id);
+        const fullUser = await this.User.findById(user._id);
         return fullUser;
       } catch (error) {
         console.error('Error fetching full user:', error);

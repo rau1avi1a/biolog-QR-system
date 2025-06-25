@@ -1,41 +1,57 @@
-// services/index.js - Consolidated export of all services
-import BaseService from './base.service.js';
-import * as archiveService from './archive.service.js';
-import * as batchService from './batch.service.js';
-import * as fileService from './file.service.js';
-import * as itemService from './item.service.js';
-import * as purchaseOrderService from './purchaseOrder.service.js';
-import { txnService } from './txn.service.js';
-import { vendorService } from './vendor.service.js';
+// db/services/app/index.js - Consolidated export of all services (clean version)
+import { CoreService } from './core.service.js';
+import batchService from './batch.service.js';
+import fileService from './file.service.js';
+import { itemService, txnService } from './inventory.service.js';
+import { archiveService, poService, vendorService, cycleCountService } from './workflow.service.js';
+import AsyncWorkOrderService from './async-workorder.service.js';
 import * as netsuiteService from '../netsuite/index.js';
 
-// Export base service for creating new dynamic services
-export { BaseService };
+// =============================================================================
+// CLEAN SERVICE EXPORTS - Only service instances
+// =============================================================================
 
-// Export all services as named exports
+// Core services
+export { CoreService };
+
+// Main workflow services - export the service instances directly
 export {
-  archiveService,
   batchService,
   fileService,
   itemService,
-  netsuiteService,
-  purchaseOrderService,
   txnService,
-  vendorService
+  archiveService,
+  poService,
+  vendorService,
+  cycleCountService,
+  AsyncWorkOrderService,
+  netsuiteService
 };
 
-// Also export as a grouped object for convenience
+// =============================================================================
+// COMPREHENSIVE SERVICES OBJECT
+// =============================================================================
+
 export const services = {
-  BaseService,
-  archive: archiveService,
+  // Core
+  core: CoreService,
+  
+  // Main operations - use the service instances directly
   batch: batchService,
   file: fileService,
   item: itemService,
-  netsuite: netsuiteService,
-  purchaseOrder: purchaseOrderService,
-  txn: txnService,
-  vendor: vendorService
+  transaction: txnService,
+  
+  // Workflow
+  archive: archiveService,
+  purchaseOrder: poService,
+  vendor: vendorService,
+  cycleCount: cycleCountService,
+  asyncWorkOrder: AsyncWorkOrderService,
+  
+  // Integrations
+  netsuite: netsuiteService
 };
 
-// Export default as the services object
+// Export default as the comprehensive services object
 export default services;

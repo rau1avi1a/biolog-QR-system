@@ -1,7 +1,6 @@
 // app/home/layout.js
 import { basicAuth } from "@/db/lib/auth";
-import { Item } from '@/db/schemas/Item';
-import dbConnect from '@/db/index';
+import db from '@/db/index.js'; // ✅ Single import
 import NavBar from "@/components/NavBar";
 
 export default async function HomeLayout({ children }) {
@@ -10,8 +9,8 @@ export default async function HomeLayout({ children }) {
   // Get items for QR scanner in navigation
   let allItems = [];
   try {
-    await dbConnect();
-    const raw = await Item.find().lean();
+    await db.connect(); // ✅ Use db.connect()
+    const raw = await db.models.Item.find().lean(); // ✅ Use db.models.Item
     allItems = raw.map(d => ({
       _id: d._id.toString(),
       displayName: d.displayName || '',
