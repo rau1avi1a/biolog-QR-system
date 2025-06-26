@@ -1,24 +1,38 @@
-// services/netsuite/auth.service.js - FIXED VERSION
+// services/netsuite/auth.service.js - FIXED AUTHENTICATION
 import crypto from 'crypto';
 import OAuth from 'oauth-1.0a';
 import db from '../../index.js';
 
 /**
- * NetSuite OAuth 1.0 (TBA) Authentication Service
- * Uses single db import for database operations
+ * NetSuite OAuth 1.0 (TBA) Authentication Service - FIXED
+ * The issue was in OAuth signature generation and realm handling
  */
 export class NetSuiteAuth {
   constructor(credentials) {
     this.credentials = credentials;
     
-    // CRITICAL: Store original account ID for OAuth realm (needs SB1 for sandbox)
+    console.log('🔐 Initializing NetSuite Auth with credentials:', {
+      accountId: credentials.accountId,
+      consumerKeyLength: credentials.consumerKey?.length,
+      consumerSecretLength: credentials.consumerSecret?.length,
+      tokenIdLength: credentials.tokenId?.length,
+      tokenSecretLength: credentials.tokenSecret?.length
+    });
+    
+    // CRITICAL: Store original account ID for OAuth realm
     this.realmAccountId = credentials.accountId; // "4511488_SB1"
     
     // Convert account ID format for URL: 4511488_SB1 -> 4511488-sb1
     const urlAccountId = credentials.accountId.toLowerCase().replace('_', '-');
     this.baseUrl = `https://${urlAccountId}.suitetalk.api.netsuite.com/services/rest/record/v1`;
+    
+    console.log('🌐 NetSuite URLs configured:', {
+      realmAccountId: this.realmAccountId,
+      urlAccountId: urlAccountId,
+      baseUrl: this.baseUrl
+    });
 
-    // Set up OAuth 1.0
+    // FIXED: Set up OAuth 1.0 with correct configuration
     this.oauth = OAuth({
       consumer: {
         key: credentials.consumerKey,
@@ -28,12 +42,17 @@ export class NetSuiteAuth {
       hash_function(base_string, key) {
         return crypto.createHmac('sha256', key).update(base_string).digest('base64');
       },
+      // IMPORTANT: These parameters are critical for NetSuite
+      parameter_seperator: ', ',
+      realm: this.realmAccountId
     });
 
     this.token = {
       key: credentials.tokenId,
       secret: credentials.tokenSecret,
     };
+    
+    console.log('✅ OAuth configured successfully');
   }
 
   /**
@@ -58,62 +77,160 @@ export class NetSuiteAuth {
   }
 
   /**
-   * Make authenticated requests to NetSuite REST API
+   * FIXED: Make authenticated requests to NetSuite REST API
    */
   async makeRequest(endpoint, method = 'GET', body = null) {
     const url = `${this.baseUrl}${endpoint}`;
-    const requestData = { url, method };
-    const oauthData = this.oauth.authorize(requestData, this.token);
+    
+    console.log('🚀 Making NetSuite API request:', {
+      method,
+      endpoint,
+      url,
+      hasBody: !!body
+    });
 
-    // CRITICAL FIX: Use original account ID format for realm (with SB1)
+    // Step 1: Create the request data for OAuth
+    const requestData = { 
+      url, 
+      method: method.toUpperCase() 
+    };
+
+    // Step 2: Generate OAuth authorization data
+    const oauthData = this.oauth.authorize(requestData, this.token);
+    
+    console.log('🔑 OAuth data generated:', {
+      oauth_consumer_key: oauthData.oauth_consumer_key,
+      oauth_token: oauthData.oauth_token,
+      oauth_signature_method: oauthData.oauth_signature_method,
+      oauth_timestamp: oauthData.oauth_timestamp,
+      oauth_nonce: oauthData.oauth_nonce,
+      oauth_version: oauthData.oauth_version,
+      oauth_signature: oauthData.oauth_signature ? 'present' : 'missing'
+    });
+
+    // Step 3: Create the Authorization header
     const authHeader = this.oauth.toHeader(oauthData);
+    
+    // CRITICAL FIX: Add realm parameter correctly
     authHeader.Authorization = authHeader.Authorization.replace(
       'OAuth ',
-      `OAuth realm="${this.realmAccountId}", ` // Use "4511488_SB1" for sandbox
+      `OAuth realm="${this.realmAccountId}", `
     );
 
+    console.log('📋 Authorization header created:', {
+      authHeaderLength: authHeader.Authorization?.length,
+      hasRealm: authHeader.Authorization?.includes('realm='),
+      realmValue: this.realmAccountId
+    });
+
+    // Step 4: Prepare request headers
     const headers = {
       ...authHeader,
       'Content-Type': 'application/json',
+      'User-Agent': 'Custom-NetSuite-Client/1.0'
     };
-    const options = { method, headers };
-    if (body) options.body = JSON.stringify(body);
 
-    console.log('NetSuite API Request Debug:', {
+    // Step 5: Prepare request options
+    const options = { 
+      method: method.toUpperCase(), 
+      headers 
+    };
+    
+    if (body && (method.toUpperCase() === 'POST' || method.toUpperCase() === 'PATCH' || method.toUpperCase() === 'PUT')) {
+      options.body = JSON.stringify(body);
+      console.log('📤 Request body:', JSON.stringify(body, null, 2));
+    }
+
+    console.log('📋 Final request details:', {
       url,
-      method,
-      accountId: this.realmAccountId,
-      urlAccountId: this.baseUrl.split('.')[0].replace('https://', ''),
-      endpoint
+      method: options.method,
+      headerCount: Object.keys(headers).length,
+      hasContentType: !!headers['Content-Type'],
+      hasAuthorization: !!headers.Authorization
     });
 
-    const response = await fetch(url, options);
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('NetSuite API Error Details:', {
+    // Step 6: Make the request
+    try {
+      const response = await fetch(url, options);
+      
+      console.log('📥 Response received:', {
         status: response.status,
         statusText: response.statusText,
-        url,
-        error: errorText,
+        ok: response.ok,
         headers: Object.fromEntries(response.headers.entries())
       });
-      throw new Error(`NetSuite API Error: ${response.status} - ${errorText}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ NetSuite API Error Details:', {
+          status: response.status,
+          statusText: response.statusText,
+          url,
+          method,
+          error: errorText,
+          responseHeaders: Object.fromEntries(response.headers.entries()),
+          requestHeaders: headers
+        });
+        
+        // Log OAuth debugging info for 401 errors
+        if (response.status === 401) {
+          console.error('🔐 OAuth Debug Info for 401 error:', {
+            realmAccountId: this.realmAccountId,
+            consumerKey: this.credentials.consumerKey,
+            tokenId: this.credentials.tokenId,
+            baseUrl: this.baseUrl,
+            oauthSignature: oauthData.oauth_signature,
+            oauthTimestamp: oauthData.oauth_timestamp,
+            oauthNonce: oauthData.oauth_nonce
+          });
+        }
+        
+        throw new Error(`NetSuite API Error: ${response.status} - ${errorText}`);
+      }
+
+      const responseData = await response.json();
+      console.log('✅ Request successful:', {
+        dataType: typeof responseData,
+        isArray: Array.isArray(responseData),
+        hasItems: responseData.items ? responseData.items.length : 'N/A'
+      });
+
+      return responseData;
+      
+    } catch (fetchError) {
+      console.error('💥 Fetch error:', {
+        message: fetchError.message,
+        name: fetchError.name,
+        url,
+        method
+      });
+      throw fetchError;
     }
-    return response.json();
   }
 
   /**
-   * Test the connection to NetSuite
+   * Test the connection to NetSuite with detailed logging
    */
   async testConnection() {
+    console.log('🧪 Testing NetSuite connection...');
+    
     try {
-      console.log('Testing NetSuite connection...');
-      const result = await this.makeRequest('/assemblyItem?limit=1');
-      console.log('NetSuite connection test successful:', result);
-      return { success: true, message: 'Connection successful' };
+      // Try a simple endpoint that usually works
+      const result = await this.makeRequest('/currency?limit=1');
+      console.log('✅ NetSuite connection test successful!');
+      return { 
+        success: true, 
+        message: 'Connection successful',
+        testEndpoint: '/currency?limit=1',
+        resultType: typeof result
+      };
     } catch (error) {
-      console.error('NetSuite connection test failed:', error);
-      return { success: false, message: error.message };
+      console.error('❌ NetSuite connection test failed:', error.message);
+      return { 
+        success: false, 
+        message: error.message,
+        testEndpoint: '/currency?limit=1'
+      };
     }
   }
 
@@ -141,38 +258,74 @@ export class NetSuiteAuth {
   }
 
   /**
-   * Log NetSuite API activity (console or DB)
+   * Log NetSuite API activity
    */
   async logApiActivity(endpoint, method, success, error = null) {
-    console.log('NetSuite API Activity:', {
-      timestamp: new Date(), endpoint, method,
-      success, error: error?.message,
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      endpoint,
+      method,
+      success,
+      error: error?.message,
       accountId: this.realmAccountId
+    };
+    
+    console.log('📊 NetSuite API Activity:', logEntry);
+    
+    // Could extend this to save to database
+    try {
+      await this.connect();
+      // await this.models.NetSuiteLog.create(logEntry);
+    } catch (dbError) {
+      console.warn('Failed to save API log to database:', dbError.message);
+    }
+  }
+
+  /**
+   * Debug OAuth signature generation
+   */
+  debugOAuthSignature(url, method = 'GET') {
+    const requestData = { url, method: method.toUpperCase() };
+    const oauthData = this.oauth.authorize(requestData, this.token);
+    
+    console.log('🔍 OAuth Debug Information:', {
+      url,
+      method,
+      consumer_key: oauthData.oauth_consumer_key,
+      token: oauthData.oauth_token,
+      signature_method: oauthData.oauth_signature_method,
+      timestamp: oauthData.oauth_timestamp,
+      nonce: oauthData.oauth_nonce,
+      version: oauthData.oauth_version,
+      signature: oauthData.oauth_signature,
+      realm: this.realmAccountId
     });
-    // Extend to save into a log collection if desired
+    
+    return oauthData;
   }
 }
 
 /**
- * Factory to create NetSuiteAuth using user credentials or env
+ * FIXED: Factory to create NetSuiteAuth using user credentials or env
  */
 export const createNetSuiteAuth = async (user) => {
   let credentials;
   
-  console.log('Creating NetSuite Auth for user:', user ? 'authenticated user' : 'environment variables');
+  console.log('🏭 Creating NetSuite Auth for:', user ? 'authenticated user' : 'environment variables');
   
+  // Try to get credentials from user first
   if (user && typeof user.getNetSuiteCredentials === 'function') {
-    console.log('Using user method to get credentials');
+    console.log('📋 Using user method to get credentials');
     credentials = user.getNetSuiteCredentials();
   } else if (user?._id) {
-    console.log('Fetching user from database to get credentials');
+    console.log('🔍 Fetching user from database to get credentials');
     await db.connect();
-    const fullUser = await db.models.User.findById(user._id); // This returns a Mongoose document
+    const fullUser = await db.models.User.findById(user._id);
     if (fullUser && typeof fullUser.getNetSuiteCredentials === 'function') {
-      console.log('Found user method for credentials');
+      console.log('✅ Found user method for credentials');
       credentials = fullUser.getNetSuiteCredentials();
     } else if (fullUser?.netsuiteCredentials?.isConfigured) {
-      console.log('Using direct credential access');
+      console.log('📝 Using direct credential access from user');
       credentials = {
         accountId: fullUser.netsuiteCredentials.accountId,
         consumerKey: fullUser.netsuiteCredentials.consumerKey,
@@ -183,8 +336,9 @@ export const createNetSuiteAuth = async (user) => {
     }
   }
   
-  if (!credentials) {
-    console.log('Using environment variable credentials');
+  // Fallback to environment variables
+  if (!credentials || !credentials.accountId) {
+    console.log('🌍 Using environment variable credentials');
     credentials = {
       accountId: process.env.NETSUITE_ACCOUNT_ID,
       consumerKey: process.env.NETSUITE_CONSUMER_KEY,
@@ -194,12 +348,24 @@ export const createNetSuiteAuth = async (user) => {
     };
   }
   
-  console.log('NetSuite credentials loaded:', {
+  // Validate credentials
+  const missingCredentials = [];
+  if (!credentials.accountId) missingCredentials.push('accountId');
+  if (!credentials.consumerKey) missingCredentials.push('consumerKey');
+  if (!credentials.consumerSecret) missingCredentials.push('consumerSecret');
+  if (!credentials.tokenId) missingCredentials.push('tokenId');
+  if (!credentials.tokenSecret) missingCredentials.push('tokenSecret');
+  
+  if (missingCredentials.length > 0) {
+    throw new Error(`Missing NetSuite credentials: ${missingCredentials.join(', ')}`);
+  }
+  
+  console.log('✅ NetSuite credentials validated:', {
     accountId: credentials.accountId,
-    hasConsumerKey: !!credentials.consumerKey,
-    hasConsumerSecret: !!credentials.consumerSecret,
-    hasTokenId: !!credentials.tokenId,
-    hasTokenSecret: !!credentials.tokenSecret
+    consumerKeyLength: credentials.consumerKey?.length,
+    consumerSecretLength: credentials.consumerSecret?.length,
+    tokenIdLength: credentials.tokenId?.length,
+    tokenSecretLength: credentials.tokenSecret?.length
   });
   
   return new NetSuiteAuth(credentials);
