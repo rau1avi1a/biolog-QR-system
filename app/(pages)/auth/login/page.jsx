@@ -1,4 +1,4 @@
-// app/page.jsx
+// app/auth/login/page.jsx
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/shadcn/components/button';
 import { Input } from '@/components/ui/shadcn/components/input';
 import { Label } from '@/components/ui/shadcn/components/label';
 import { Card } from '@/components/ui/shadcn/components/card';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -17,35 +18,15 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  // Check if user is already logged in
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const res = await fetch('/api/auth?action=me', {
-          credentials: 'include'
-        });
-        if (res.ok) {
-          // User is already logged in, redirect to home
-          router.push('/home');
-        }
-      } catch (err) {
-        // User is not logged in, stay on login page
-      }
-    };
-    checkAuth();
-  }, [router]);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      // Updated to match your API structure: POST /api/auth?action=login
-      const res = await fetch('/api/auth?action=login', {
+      const res = await fetch('/api/auth?action=login', { // ✅ Fixed URL
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Important for cookies
         body: JSON.stringify(formData),
       });
 
@@ -53,8 +34,9 @@ export default function LoginPage() {
 
       if (!res.ok) throw new Error(data.message || 'Failed to sign in');
 
-      // Successfully signed in - use window.location for full page reload
-      window.location.href = '/home';
+      // Successfully signed in - redirect to home
+      window.location.href = '/home'; // Changed from '/' to '/home'
+      console.log('Redirecting to home')
     } catch (err) {
       setError(err.message);
       setIsLoading(false);
@@ -63,9 +45,18 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center">
+      <Image
+        src="/glass.png"
+        alt="background"
+        width={1600}
+        height={1600}
+        className="fixed top-0 left-0 w-full h-full object-cover z-[-1] pointer-events-none"
+        priority
+      />
+      
       <Card className="p-8 w-full max-w-md space-y-6 bg-white/90 backdrop-blur-sm">
         <div className="text-center">
-          <h1 className="text-2xl font-bold">Biolog MFG</h1>
+          <h1 className="text-2xl font-bold">Welcome to Biolog Inventory</h1>
           <p className="text-gray-600">Please sign in to continue</p>
         </div>
 
@@ -109,7 +100,6 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        {/* Uncomment if you want a registration link */}
         {/* <div className="text-center text-sm text-gray-600">
           Don't have an account?{' '}
           <button

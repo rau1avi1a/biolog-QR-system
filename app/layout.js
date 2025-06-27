@@ -4,7 +4,7 @@ import Image from 'next/image';
 import './globals.css';
 
 import Providers from './providers';
-import { Toaster } from '@/components/ui/toaster'; // Add this import
+import { Toaster } from '@/components/ui/shadcn/components/toaster'; // Add this import
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
