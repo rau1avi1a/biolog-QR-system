@@ -1,4 +1,4 @@
-// app/files/components/FileNavigator/hooks/core.js - FIXED: Proper React imports
+// app/files/components/FileNavigator/hooks/core.js - FIXED: Handle missing archive API
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'; // ✅ FIXED: All React imports
@@ -66,13 +66,13 @@ export function useCore(props) {
           
           // Handle different response formats
           let data = [];
-          if (result.data && Array.isArray(result.data)) {
+          if (result.error) {
+            console.error(`❌ Error loading ${status} files:`, result.error);
+            return [];
+          } else if (result.data && Array.isArray(result.data)) {
             data = result.data;
           } else if (Array.isArray(result)) {
             data = result;
-          } else if (result.error) {
-            console.error(`❌ Error loading ${status} files:`, result.error);
-            return [];
           }
           
           // Ensure each file has a displayable fileName
@@ -119,26 +119,28 @@ export function useCore(props) {
     queryFn: async () => {
       try {
         console.log('🔍 Loading archived files...');
-        // Use the correct API method for archived files
-        const result = await filesApi.archive.listFiles();
-        console.log('📚 Archive files result:', result);
+        
+        // FIXED: Since archive API doesn't exist, get completed batches instead
+        const result = await filesApi.workflow.getFilesByStatus('Completed');
+        console.log('📚 Archive files result (using completed batches):', result);
         
         let data = [];
-        if (result.data && Array.isArray(result.data)) {
+        if (result.error) {
+          console.error('❌ Error loading archived files:', result.error);
+          return [];
+        } else if (result.data && Array.isArray(result.data)) {
           data = result.data;
         } else if (Array.isArray(result)) {
           data = result;
-        } else if (result.error) {
-          console.error('❌ Error loading archived files:', result.error);
-          return [];
         }
         
-        // Ensure each archived file has a displayable fileName
+        // Ensure each archived file has a displayable fileName and mark as archived
         return data.map(file => ({
           ...file,
           fileName: file.fileName || 
                    `Batch Run ${file.runNumber}` ||
-                   'Archived File'
+                   'Archived File',
+          isArchived: true // Mark as archived for display purposes
         }));
       } catch (error) {
         console.error('💥 Failed to load archived files:', error);
@@ -160,52 +162,29 @@ export function useCore(props) {
     const rootFiles = [];
 
     archivedBatches.forEach(batch => {
-      const path = batch.folderPath || 'Root';
+      // FIXED: Since we don't have folderPath, group by status or date
+      const createdDate = new Date(batch.createdAt);
+      const monthYear = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
+      const path = `Completed ${monthYear}`;
       
-      if (path === 'Root') {
-        rootFiles.push(batch);
-      } else {
-        const pathParts = path.split(' / ');
-        let currentPath = '';
-        
-        pathParts.forEach((part, index) => {
-          const isLast = index === pathParts.length - 1;
-          currentPath = currentPath ? `${currentPath} / ${part}` : part;
-          
-          if (!folderMap.has(currentPath)) {
-            folderMap.set(currentPath, {
-              _id: `archive-${currentPath.replace(/[\s\/]/g, '-')}`,
-              name: part,
-              fullPath: currentPath,
-              parentPath: index > 0 ? pathParts.slice(0, index).join(' / ') : null,
-              children: [],
-              files: [],
-              isArchiveFolder: true
-            });
-          }
-          
-          if (isLast) {
-            folderMap.get(currentPath).files.push(batch);
-          }
+      if (!folderMap.has(path)) {
+        folderMap.set(path, {
+          _id: `archive-${path.replace(/\s/g, '-')}`,
+          name: `Completed ${monthYear}`,
+          fullPath: path,
+          parentPath: null,
+          children: [],
+          files: [],
+          isArchiveFolder: true
         });
       }
+      
+      folderMap.get(path).files.push(batch);
     });
 
     const folders = Array.from(folderMap.values());
-    const rootFolders = [];
 
-    folders.forEach(folder => {
-      if (!folder.parentPath) {
-        rootFolders.push(folder);
-      } else {
-        const parent = folderMap.get(folder.parentPath);
-        if (parent) {
-          parent.children.push(folder);
-        }
-      }
-    });
-
-    return { folders: rootFolders, rootFiles };
+    return { folders, rootFiles: [] };
   }, [archivedBatches]);
 
   /* ── COMPUTED VALUES ────────────────────────────────────────── */
@@ -243,13 +222,13 @@ export function useCore(props) {
       console.log('🔍 Search result:', result);
       
       let searchData = [];
-      if (result.data && Array.isArray(result.data)) {
+      if (result.error) {
+        console.error('❌ Search error:', result.error);
+        searchData = [];
+      } else if (result.data && Array.isArray(result.data)) {
         searchData = result.data;
       } else if (Array.isArray(result)) {
         searchData = result;
-      } else if (result.error) {
-        console.error('❌ Search error:', result.error);
-        searchData = [];
       }
       
       // Ensure each search result has a displayable fileName
