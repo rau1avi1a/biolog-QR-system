@@ -502,19 +502,20 @@ export const filesApi = {
   // === WORKFLOW HELPERS ===
   workflow: {
     async getFilesByStatus(status) {
-      return this.batches.listByStatus(status);
+      // FIXED: Use filesApi.batches instead of this.batches
+      return filesApi.batches.listByStatus(status);
     },
 
     async getInProgressFiles() {
-      return this.getFilesByStatus('In Progress');
+      return filesApi.workflow.getFilesByStatus('In Progress');
     },
 
     async getReviewFiles() {
-      return this.getFilesByStatus('Review');
+      return filesApi.workflow.getFilesByStatus('Review');
     },
 
     async getCompletedFiles() {
-      return this.getFilesByStatus('Completed');
+      return filesApi.workflow.getFilesByStatus('Completed');
     },
 
     async getDashboardData() {

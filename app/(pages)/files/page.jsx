@@ -1,4 +1,4 @@
-// app/files/page.jsx - FIXED: Better error handling and data fetching
+// app/(pages)/files/page.jsx - FIXED: Proper API response handling
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
@@ -45,20 +45,13 @@ export default function FilesPage() {
         const result = await filesApi.folders.list();
         console.log('📁 Page: Folders API result:', result);
         
-        // Handle different response formats
+        // FIXED: Handle the normalized response properly
         let foldersData = [];
-        if (result.success && result.data) {
-          // Format: { success: true, data: [...] }
-          foldersData = Array.isArray(result.data) ? result.data : 
-                      result.data.folders ? result.data.folders : [];
-        } else if (result.folders) {
-          // Format: { folders: [...] }
-          foldersData = Array.isArray(result.folders) ? result.folders : [];
-        } else if (Array.isArray(result)) {
-          // Direct array format
-          foldersData = result;
-        } else if (result.error) {
+        if (result.error) {
           throw new Error(result.error);
+        } else if (result.data) {
+          // The result.data contains the actual folders array
+          foldersData = Array.isArray(result.data) ? result.data : [];
         }
         
         setRoot(foldersData);
@@ -94,20 +87,13 @@ export default function FilesPage() {
 
         console.log('📄 Page: Files API result:', result);
 
-        // Handle different response formats
+        // FIXED: Handle the normalized response properly
         let filesData = [];
-        if (result.success && result.data) {
-          // Format: { success: true, data: [...] }
-          filesData = Array.isArray(result.data) ? result.data : 
-                     result.data.files ? result.data.files : [];
-        } else if (result.files) {
-          // Format: { files: [...] }
-          filesData = Array.isArray(result.files) ? result.files : [];
-        } else if (Array.isArray(result)) {
-          // Direct array format
-          filesData = result;
-        } else if (result.error) {
+        if (result.error) {
           throw new Error(result.error);
+        } else if (result.data) {
+          // The result.data contains the actual files array
+          filesData = Array.isArray(result.data) ? result.data : [];
         }
 
         setFiles(filesData);
@@ -129,6 +115,7 @@ export default function FilesPage() {
       console.log('🔍 Page: Creating folder:', name);
       const result = await filesApi.folders.create(name, currentFolder?._id);
       
+      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -147,6 +134,7 @@ export default function FilesPage() {
       console.log('🔍 Page: Updating folder:', id, 'to:', name);
       const result = await filesApi.folders.update(id, name);
       
+      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -165,6 +153,7 @@ export default function FilesPage() {
       console.log('🔍 Page: Deleting folder:', id);
       const result = await filesApi.folders.remove(id);
       
+      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -197,6 +186,7 @@ export default function FilesPage() {
         console.log(`🔍 Page: Uploading file ${i + 1}/${fileList.length}:`, file.name);
         const result = await filesApi.files.upload(file, currentFolder?._id);
         
+        // FIXED: Check for errors properly
         if (result.error) {
           throw new Error(`Failed to upload ${file.name}: ${result.error}`);
         }
@@ -234,6 +224,7 @@ export default function FilesPage() {
 
       const result = await filesApi.files.uploadBatch(fileDataArray, currentFolder?._id);
       
+      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -261,7 +252,10 @@ export default function FilesPage() {
       // Check if this is an archived file/batch
       if (file.isArchived || file.batchId) {
         const result = await filesApi.archive.getFile(file._id);
-        if (!result.error && result.data) {
+        if (result.error) {
+          throw new Error('Failed to load archived file: ' + result.error);
+        }
+        if (result.data) {
           setCurrentDoc({ 
             ...result.data, 
             pdf: result.data.pdf,
@@ -269,14 +263,15 @@ export default function FilesPage() {
             isArchived: true,
             originalFileId: result.data.originalFileId || result.data.fileId
           });
-        } else {
-          throw new Error('Failed to load archived file');
         }
       } else if (file.fileId || file.status || file.runNumber) {
         // This is a batch file
         const result = await filesApi.batches.get(file._id);
         
-        if (!result.error && result.data) {
+        if (result.error) {
+          throw new Error('Failed to load batch: ' + result.error);
+        }
+        if (result.data) {
           const batch = result.data;
           
           // For batches, prioritize the signed PDF if it exists
@@ -310,21 +305,20 @@ export default function FilesPage() {
             // Ensure we have a fileName for display
             fileName: batch.fileId?.fileName || file.fileName || `Batch Run ${batch.runNumber}`
           });
-        } else {
-          throw new Error('Batch not found');
         }
       } else {
         // This is an original file
         const result = await filesApi.files.getWithPdf(file._id);
-        if (!result.error && result.data) {
+        if (result.error) {
+          throw new Error('Failed to load file: ' + result.error);
+        }
+        if (result.data) {
           setCurrentDoc({ 
             ...result.data, 
             pdf: result.data.pdf,
             isBatch: false,
             fileName: result.data.fileName || file.fileName || 'Untitled File'
           });
-        } else {
-          throw new Error('File not found');
         }
       }
     } catch (error) {
