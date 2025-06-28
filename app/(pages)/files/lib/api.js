@@ -1,579 +1,664 @@
-// app/files/lib/api.js
-export const api = {
-  /* ── folders ────────────────────────── */
-  folders       : (p) => fetch(`/api/folders${p?`?parentId=${p}`:''}`)
-                         .then(r=>r.json()),
-  newFolder     : (n,p) => fetch('/api/folders',{
-                         method:'POST', headers:{'Content-Type':'application/json'},
-                         body:JSON.stringify({ name:n, parentId:p })
-                       }).then(r=>r.json()),
-  updateFolder  : (id,n)=> fetch(`/api/folders/${id}`,{
-                         method:'PATCH', headers:{'Content-Type':'application/json'},
-                         body:JSON.stringify({ name:n })
-                       }).then(r=>r.json()),
-  deleteFolder  : (id)=> fetch(`/api/folders/${id}`,{ method:'DELETE' })
-                       .then(r=>r.json()),
+// app/(pages)/files/lib/api.js - FIXED: Better response handling and error management
+import { api } from '@/app/apiClient'
 
-  /* ── files (mother) ─────────────────── */
-  files            : (fId) => fetch(`/api/files${fId?`?folderId=${fId}`:''}`)
-                             .then(r=>r.json()),
-  load             : (id)   => fetch(`/api/files?id=${id}`).then(r=>r.json()),
-  searchFiles      : (query) => {
-    if (!query?.trim()) {
-      return Promise.resolve({ files: [] });
-    }
-    return fetch(`/api/files?search=${encodeURIComponent(query.trim())}`)
-           .then(r => r.json());
-  },
-  upload           : (file,fId)=>{
-                       const fd=new FormData();
-                       fd.append('file',file);
-                       fd.append('fileName',file.name);
-                       if(fId) fd.append('folderId',fId);
-                       return fetch('/api/files',{method:'POST',body:fd});
-                     },
+/**
+ * Files Page API Client - FIXED
+ * 
+ * This module contains all API operations used by the Files page components.
+ * Fixed to handle different response formats from the backend and provide
+ * consistent error handling.
+ */
 
-  /* ── NEW: Batch upload with folder structure ─── */
-  uploadBatch: async (fileDataArray, baseFolderId = null) => {
-    console.log('API uploadBatch called with:', fileDataArray.length, 'files');
-    
-    const formData = new FormData();
-    
-    // Add base folder ID if provided
-    if (baseFolderId) {
-      formData.append('folderId', baseFolderId);
-      console.log('Using base folder ID:', baseFolderId);
-    }
-    
-    // Add each file with its relative path
-    fileDataArray.forEach((fileData, index) => {
-      const { file, relativePath } = fileData;
-      
-      console.log(`Adding file ${index}: ${file.name}, relativePath: ${relativePath}`);
-      
-      // Append the file directly 
-      formData.append('files', file);
-      
-      // Also append the relativePath for this file
-      formData.append(`relativePath_${index}`, relativePath);
-    });
-
-    const response = await fetch('/api/files/batch-upload', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`Batch upload failed: ${response.status} ${response.statusText}. ${errorData.error || ''}`);
-    }
-
-    const result = await response.json();
-    console.log('Upload response:', result);
-    return result;
-  },
-
-  updateFileMeta   : (id,p)=> fetch(`/api/files/${id}`,{
-                       method:'PATCH', headers:{'Content-Type':'application/json'},
-                       body:JSON.stringify(p)
-                     }).then(r=>r.json()),
-  updateFileStatus : (id,s)=> fetch(`/api/files/${id}/status`,{
-                       method:'PATCH', headers:{'Content-Type':'application/json'},
-                       body:JSON.stringify({ status:s })
-                     }).then(r=>r.json()),
-
-  /* ── NEW: Get files by status (for Status and Archive tabs) ─── */
-  getFilesByStatus: (status) => fetch(`/api/batches?status=${encodeURIComponent(status)}`)
-                               .then(r => r.json())
-                               .then(response => ({
-                                 files: response.success ? response.data : []
-                               })),
-
-  /* ── batches with FIXED response handling ────────────────────────── */
-  listBatches: async (status, fileId) => {
-    try {
-      const url = `/api/batches?` +
-        (status  ? `status=${encodeURIComponent(status)}` : '') +
-        (fileId  ? `&fileId=${fileId}` : '');
-      
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      throw error;
-    }
-  },
-    
-  newBatch: async (fileId, extra = {}) => {
-    try {
-      const payload = { fileId, ...extra };
-      
-      const response = await fetch('/api/batches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      
-      return {
-        success: data.success || true,
-        data: data.success ? data.data : data,
-        batch: data.success ? data.data : data
-      };
-      
-    } catch (error) {
-      throw error;
-    }
-  },
-      
-  getBatch: async (id) => {
-    try {
-      const response = await fetch(`/api/batches/${id}`);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      
-      return {
-        success: data.success || true,
-        data: data.success ? data.data : data,
-        batch: data.success ? data.data : data
-      };
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  updateBatch: async (id, payload) => {
-    try {
-      const response = await fetch(`/api/batches/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      
-      return {
-        success: data.success || true,
-        data: data.success ? data.data : data,
-        batch: data.success ? data.data : data
-      };
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  deleteBatch: (id) => fetch(`/api/batches/${id}`, { method:'DELETE' })
-                       .then(r=>r.json()),
-
-  /* ── Save with different actions and confirmation data ─── */
-  saveBatchFromEditor: async (originalFileId, editorData, action = 'save', confirmationData = null) => {
-    try {
-      const payload = { 
-        originalFileId, 
-        editorData,
-        action,
-        confirmationData,
-        status: action === 'save' ? 'In Progress' : 
-                action === 'submit_review' ? 'Review' :
-                action === 'submit_final' ? 'Completed' :
-                action === 'reject' ? 'In Progress' : 
-                action === 'create_work_order' ? 'In Progress' : 
-                action === 'complete' ? 'Completed' : 'In Progress'
-      };
-
-      const response = await fetch('/api/batches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-
-      return {
-        success: data.success || true,
-        data: data.success ? data.data : data,
-        batch: data.success ? data.data : data
-      };
-
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  /* ── NetSuite integration methods (UPDATED for consolidated route) ─── */
-  getAvailableLots: (itemId) =>
-    fetch(`/api/items?id=${itemId}&action=lots`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch available lots');
-        return r.json();
-      })
-      .then(response => ({
-        lots: response.success ? response.lots : []
-      })),
-
-  // Get NetSuite BOM for an assembly item
-  getNetsuiteBOM: (assemblyItemId) =>
-    fetch(`/api/netsuite?action=getBOM&assemblyItemId=${assemblyItemId}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch NetSuite BOM');
-        return r.json();
-      }),
-
-  // Search for NetSuite assembly items
-  searchNetsuiteAssemblyItems: (query) =>
-    fetch(`/api/netsuite?action=search&q=${encodeURIComponent(query)}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to search NetSuite assembly items');
-        return r.json();
-      }),
-
-  // Test NetSuite connection
-  testNetsuiteConnection: () =>
-    fetch('/api/netsuite?action=test')
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to test NetSuite connection');
-        return r.json();
-      }),
-
-  // Get NetSuite setup status
-  getNetsuiteSetup: () =>
-    fetch('/api/netsuite?action=setup')
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to get NetSuite setup status');
-        return r.json();
-      }),
-
-  // Configure NetSuite credentials
-  setupNetsuite: (credentials) =>
-    fetch('/api/netsuite?action=setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(credentials)
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to setup NetSuite credentials');
-      return r.json();
-    }),
-
-  // Create work order from batch
-  createWorkOrder: (batchId, quantity, options = {}) =>
-    fetch('/api/netsuite?action=workorder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchId, quantity, ...options })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to create work order');
-      return r.json();
-    }),
-
-  // Create work order from assembly item ID
-  createWorkOrderFromAssembly: (assemblyItemId, quantity, options = {}) =>
-    fetch('/api/netsuite?action=workorder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assemblyItemId, quantity, ...options })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to create work order');
-      return r.json();
-    }),
-
-  // Get work order status
-  getWorkOrderStatus: (workOrderId) =>
-    fetch(`/api/netsuite?action=workorder&id=${workOrderId}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to get work order status');
-        return r.json();
-      }),
-
-  // List work orders with filters
-  listWorkOrders: (filters = {}) => {
-    const params = new URLSearchParams({ action: 'workorder' });
-    if (filters.status) params.append('status', filters.status);
-    if (filters.assemblyItem) params.append('assemblyItem', filters.assemblyItem);
-    if (filters.limit) params.append('limit', filters.limit.toString());
-    
-    return fetch(`/api/netsuite?${params}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to list work orders');
-        return r.json();
-      });
-  },
-
-  // Complete work order
-  completeWorkOrder: (workOrderId, quantityCompleted) =>
-    fetch('/api/netsuite?action=workorder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        workOrderId, 
-        action: 'complete', 
-        quantityCompleted 
-      })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to complete work order');
-      return r.json();
-    }),
-
-  // Cancel work order
-  cancelWorkOrder: (workOrderId) =>
-    fetch('/api/netsuite?action=workorder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        workOrderId, 
-        action: 'cancel'
-      })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to cancel work order');
-      return r.json();
-    }),
-
-  // Map NetSuite components to local chemicals
-  mapNetsuiteComponents: (components) =>
-    fetch('/api/netsuite?action=mapping', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ components })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to map NetSuite components');
-      return r.json();
-    }),
-
-  // Import NetSuite items as local chemicals
-  importNetsuiteItems: (netsuiteComponents, createMissing = false) =>
-    fetch('/api/netsuite?action=import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ netsuiteComponents, createMissing })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to import NetSuite items');
-      return r.json();
-    }),
-
-  // Get NetSuite units
-  getNetsuiteUnits: (type = null) => {
-    const params = new URLSearchParams({ action: 'units' });
-    if (type) params.append('type', type);
-    
-    return fetch(`/api/netsuite?${params}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to get NetSuite units');
-        return r.json();
-      });
-  },
-
-  // Get specific NetSuite unit by ID
-  getNetsuiteUnit: (unitId) =>
-    fetch(`/api/netsuite?action=units&id=${unitId}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to get NetSuite unit');
-        return r.json();
-      }),
-
-  // Check NetSuite health
-  getNetsuiteHealth: () =>
-    fetch('/api/netsuite?action=health')
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to check NetSuite health');
-        return r.json();
-      }),
-
-  // Legacy methods for backward compatibility
-  transactChemicals: (batchId, confirmedComponents) =>
-    fetch('/api/netsuite?action=transaction', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchId, components: confirmedComponents })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to transact chemicals');
-      return r.json();
-    }),
-
-  createSolution: (batchId, solutionData) =>
-    fetch('/api/netsuite?action=solution', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchId, ...solutionData })
-    }).then(r => {
-      if (!r.ok) throw new Error('Failed to create solution');
-      return r.json();
-    }),
-
-  /* ── Enhanced Transaction Methods ─── */
+// Helper function to normalize API responses
+function normalizeResponse(result, dataField = 'data') {
+  console.log('🔧 Normalizing API response:', result);
   
-  // Get transactions for an item with enhanced filtering
-  getItemTransactions: async (itemId, options = {}) => {
-    const params = new URLSearchParams({
-      id: itemId,
-      action: 'transactions'
-    });
-    
-    if (options.txnType) params.append('type', options.txnType);
-    if (options.startDate) params.append('startDate', options.startDate);
-    if (options.endDate) params.append('endDate', options.endDate);
-    if (options.limit) params.append('limit', options.limit.toString());
-    if (options.page) params.append('page', options.page.toString());
-    
-    const response = await fetch(`/api/items?${params}`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch item transactions');
+  // Handle null/undefined responses
+  if (!result) {
+    return { data: null, error: 'No response received' };
+  }
+  
+  // Handle error responses
+  if (result.error) {
+    return { data: null, error: result.error };
+  }
+  
+  // Handle success responses with explicit success field
+  if (result.success === true) {
+    return { 
+      data: result[dataField] || result.data || result, 
+      error: null 
+    };
+  }
+  
+  // Handle success responses with explicit success field = false
+  if (result.success === false) {
+    return { 
+      data: null, 
+      error: result.error || result.message || 'Operation failed' 
+    };
+  }
+  
+  // Handle direct data responses (arrays or objects)
+  if (Array.isArray(result) || (typeof result === 'object' && !result.success && !result.error)) {
+    return { data: result, error: null };
+  }
+  
+  // Handle responses with specific data fields
+  if (result.folders || result.files || result.batches) {
+    return { data: result, error: null };
+  }
+  
+  // Default case - assume it's data
+  return { data: result, error: null };
+}
+
+// Helper function to handle API calls with consistent error handling
+async function handleApiCall(operation, apiCall) {
+  try {
+    console.log(`🚀 API Call: ${operation}`);
+    const result = await apiCall();
+    const normalized = normalizeResponse(result);
+    console.log(`✅ API Success: ${operation}`, normalized);
+    return normalized;
+  } catch (error) {
+    console.error(`❌ API Error: ${operation}`, error);
+    return { 
+      data: null, 
+      error: error.message || 'An error occurred' 
+    };
+  }
+}
+
+export const filesApi = {
+  // === FOLDER OPERATIONS ===
+  folders: {
+    async list(parentId = null) {
+      return handleApiCall('folders.list', async () => {
+        const result = await api.list.folders(parentId);
+        console.log('📁 Raw folders result:', result);
+        
+        // Handle different response formats
+        if (result.data && result.data.folders) {
+          return result.data.folders;
+        } else if (result.data && Array.isArray(result.data)) {
+          return result.data;
+        } else if (result.folders) {
+          return result.folders;
+        } else if (Array.isArray(result)) {
+          return result;
+        }
+        
+        return result;
+      });
+    },
+
+    async create(name, parentId = null) {
+      return handleApiCall('folders.create', async () => {
+        const result = await api.create.folder(name, parentId);
+        return result;
+      });
+    },
+
+    async update(id, name) {
+      return handleApiCall('folders.update', async () => {
+        const result = await api.update.folderName(id, name);
+        return result;
+      });
+    },
+
+    async remove(id) {
+      return handleApiCall('folders.remove', async () => {
+        const result = await api.remove.folder(id);
+        return result;
+      });
+    },
+
+    async getStructure(rootId = null) {
+      return handleApiCall('folders.getStructure', async () => {
+        const result = await api.list.folderStructure(rootId);
+        return result;
+      });
     }
-    
-    return response.json();
   },
 
-  // Get lot-specific transaction history
-  getLotTransactions: async (itemId, lotId, options = {}) => {
-    const params = new URLSearchParams({
-      id: itemId,
-      action: 'transactions',
-      lotId: lotId
-    });
-    
-    if (options.startDate) params.append('startDate', options.startDate);
-    if (options.endDate) params.append('endDate', options.endDate);
-    
-    const response = await fetch(`/api/items?${params}`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch lot transactions');
+  // === FILE OPERATIONS ===
+  files: {
+    async list(folderId = null) {
+      return handleApiCall('files.list', async () => {
+        const result = await api.list.files(folderId);
+        console.log('📄 Raw files result:', result);
+        
+        // Handle different response formats
+        if (result.data && result.data.files) {
+          return result.data.files;
+        } else if (result.data && Array.isArray(result.data)) {
+          return result.data;
+        } else if (result.files) {
+          return result.files;
+        } else if (Array.isArray(result)) {
+          return result;
+        }
+        
+        return result;
+      });
+    },
+
+    async get(id) {
+      return handleApiCall('files.get', async () => {
+        const result = await api.get.file(id);
+        return result;
+      });
+    },
+
+    async getWithPdf(id) {
+      return handleApiCall('files.getWithPdf', async () => {
+        const result = await api.get.fileWithPdf(id);
+        return result;
+      });
+    },
+
+    async search(query) {
+      return handleApiCall('files.search', async () => {
+        const result = await api.list.searchFiles(query);
+        console.log('🔍 Raw search result:', result);
+        
+        // Handle different response formats
+        if (result.data && result.data.files) {
+          return result.data.files;
+        } else if (result.data && Array.isArray(result.data)) {
+          return result.data;
+        } else if (result.files) {
+          return result.files;
+        } else if (Array.isArray(result)) {
+          return result;
+        }
+        
+        return result;
+      });
+    },
+
+    async upload(file, folderId = null, onProgress = null) {
+      return handleApiCall('files.upload', async () => {
+        const result = await api.custom.uploadFile(file, folderId, onProgress);
+        return result;
+      });
+    },
+
+    async uploadBatch(fileDataArray, baseFolderId = null, onProgress = null) {
+      return handleApiCall('files.uploadBatch', async () => {
+        const result = await api.custom.uploadBatch(fileDataArray, baseFolderId, onProgress);
+        return result;
+      });
+    },
+
+    async uploadFolder(files, baseFolderId = null, onProgress = null) {
+      return handleApiCall('files.uploadFolder', async () => {
+        const result = await api.custom.uploadFolder(files, baseFolderId, onProgress);
+        return result;
+      });
+    },
+
+    async updateMeta(id, metadata) {
+      return handleApiCall('files.updateMeta', async () => {
+        const result = await api.update.fileMeta(id, metadata);
+        return result;
+      });
     }
-    
-    return response.json();
   },
 
-  // Get transaction statistics for an item
-  getItemTransactionStats: async (itemId, startDate, endDate) => {
-    const params = new URLSearchParams({
-      id: itemId,
-      action: 'stats'
-    });
-    
-    if (startDate) params.append('startDate', startDate);
-    if (endDate) params.append('endDate', endDate);
-    
-    const response = await fetch(`/api/items?${params}`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch transaction stats');
+  // === BATCH OPERATIONS ===
+  batches: {
+    async list(options = {}) {
+      return handleApiCall('batches.list', async () => {
+        const result = await api.list.batches(options);
+        console.log('📦 Raw batches result:', result);
+        
+        // Handle different response formats
+        if (result.data && Array.isArray(result.data)) {
+          return result.data;
+        } else if (Array.isArray(result)) {
+          return result;
+        }
+        
+        return result;
+      });
+    },
+
+    async listByStatus(status) {
+      return handleApiCall('batches.listByStatus', async () => {
+        const result = await api.list.batchesByStatus(status);
+        console.log(`📦 Raw batches by status (${status}) result:`, result);
+        
+        // Handle different response formats
+        if (result.data && Array.isArray(result.data)) {
+          return result.data;
+        } else if (Array.isArray(result)) {
+          return result;
+        }
+        
+        return result;
+      });
+    },
+
+    async listByFile(fileId) {
+      return handleApiCall('batches.listByFile', async () => {
+        const result = await api.list.batchesByFile(fileId);
+        return result;
+      });
+    },
+
+    async get(id) {
+      return handleApiCall('batches.get', async () => {
+        const result = await api.get.batch(id);
+        console.log('📦 Raw batch get result:', result);
+        
+        // Handle different response formats
+        if (result.data) {
+          return result.data;
+        }
+        
+        return result;
+      });
+    },
+
+    async getWithWorkOrder(id) {
+      return handleApiCall('batches.getWithWorkOrder', async () => {
+        const result = await api.get.batchWithWorkOrder(id);
+        return result;
+      });
+    },
+
+    async create(data) {
+      return handleApiCall('batches.create', async () => {
+        const result = await api.create.batch(data);
+        return result;
+      });
+    },
+
+    async createFromFile(fileId, options = {}) {
+      return handleApiCall('batches.createFromFile', async () => {
+        const result = await api.create.batchFromFile(fileId, options);
+        return result;
+      });
+    },
+
+    async createFromEditor(originalFileId, editorData, action = 'save', confirmationData = null) {
+      return handleApiCall('batches.createFromEditor', async () => {
+        const result = await api.create.batchFromEditor(originalFileId, editorData, action, confirmationData);
+        return result;
+      });
+    },
+
+    async update(id, data) {
+      return handleApiCall('batches.update', async () => {
+        const result = await api.update.batch(id, data);
+        return result;
+      });
+    },
+
+    async updateStatus(id, status) {
+      return handleApiCall('batches.updateStatus', async () => {
+        const result = await api.update.batchStatus(id, status);
+        return result;
+      });
+    },
+
+    async remove(id) {
+      return handleApiCall('batches.remove', async () => {
+        const result = await api.remove.batch(id);
+        return result;
+      });
+    },
+
+    async submitForReview(id, confirmationData = {}) {
+      return handleApiCall('batches.submitForReview', async () => {
+        const result = await api.update.submitBatchForReview(id, confirmationData);
+        return result;
+      });
+    },
+
+    async complete(id, completionData = {}) {
+      return handleApiCall('batches.complete', async () => {
+        const result = await api.update.completeBatch(id, completionData);
+        return result;
+      });
+    },
+
+    async reject(id, rejectionReason) {
+      return handleApiCall('batches.reject', async () => {
+        const result = await api.update.rejectBatch(id, rejectionReason);
+        return result;
+      });
     }
-    
-    return response.json();
   },
 
-  // Get detailed transaction by ID
-  getTransactionDetails: async (txnId) => {
-    const response = await fetch(`/api/transactions?id=${txnId}`, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch transaction details');
+  // === ARCHIVE OPERATIONS ===
+  archive: {
+    async listFiles() {
+      return handleApiCall('archive.listFiles', async () => {
+        const result = await api.list.archivedFiles();
+        return result;
+      });
+    },
+
+    async listFilesByPath(folderPath) {
+      return handleApiCall('archive.listFilesByPath', async () => {
+        const result = await api.list.archivedFilesByPath(folderPath);
+        return result;
+      });
+    },
+
+    async listFolders() {
+      return handleApiCall('archive.listFolders', async () => {
+        const result = await api.list.archiveFolders();
+        return result;
+      });
+    },
+
+    async getFile(id) {
+      return handleApiCall('archive.getFile', async () => {
+        const result = await api.get.archivedFile(id);
+        return result;
+      });
+    },
+
+    async getStats() {
+      return handleApiCall('archive.getStats', async () => {
+        const result = await api.custom.getArchiveStats();
+        return result;
+      });
     }
-    
-    return response.json();
   },
 
-  // Reverse a transaction (admin only)
-  reverseTransaction: async (txnId, reason) => {
-    const response = await fetch(`/api/transactions?id=${txnId}&action=reverse`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason })
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to reverse transaction');
+  // === ITEM OPERATIONS ===
+  items: {
+    async search(query, type = null) {
+      return handleApiCall('items.search', async () => {
+        const result = await api.list.searchItems(query, type);
+        return result;
+      });
+    },
+
+    async searchChemicals(query) {
+      return handleApiCall('items.searchChemicals', async () => {
+        const result = await api.list.searchChemicals(query);
+        return result;
+      });
+    },
+
+    async searchSolutions(query) {
+      return handleApiCall('items.searchSolutions', async () => {
+        const result = await api.list.searchSolutions(query);
+        return result;
+      });
+    },
+
+    async get(id) {
+      return handleApiCall('items.get', async () => {
+        const result = await api.get.item(id);
+        return result;
+      });
+    },
+
+    async getLots(id) {
+      return handleApiCall('items.getLots', async () => {
+        const result = await api.get.itemLots(id);
+        return result;
+      });
+    },
+
+    async getTransactions(id, options = {}) {
+      return handleApiCall('items.getTransactions', async () => {
+        const result = await api.get.itemTransactions(id, options);
+        return result;
+      });
     }
-    
-    return response.json();
   },
 
-  // Create inventory adjustment transaction
-  createInventoryAdjustment: async (itemId, adjustments) => {
-    const response = await fetch('/api/transactions?action=adjustment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        itemId,
-        adjustments // Array of { lotNumber, qtyChange, reason, notes }
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to create inventory adjustment');
+  // === WORK ORDER OPERATIONS ===
+  workOrders: {
+    async getStatus(batchId) {
+      return handleApiCall('workOrders.getStatus', async () => {
+        const result = await api.custom.getWorkOrderStatus(batchId);
+        return result;
+      });
+    },
+
+    async create(batchId, quantity, options = {}) {
+      return handleApiCall('workOrders.create', async () => {
+        const result = await api.create.netsuiteWorkOrderFromBatch(batchId, quantity, options);
+        return result;
+      });
+    },
+
+    async retry(batchId, quantity) {
+      return handleApiCall('workOrders.retry', async () => {
+        const result = await api.custom.retryWorkOrder(batchId, quantity);
+        return result;
+      });
+    },
+
+    async complete(workOrderId, quantityCompleted = null) {
+      return handleApiCall('workOrders.complete', async () => {
+        const result = await api.custom.completeWorkOrder(workOrderId, quantityCompleted);
+        return result;
+      });
+    },
+
+    async cancel(workOrderId) {
+      return handleApiCall('workOrders.cancel', async () => {
+        const result = await api.custom.cancelWorkOrder(workOrderId);
+        return result;
+      });
     }
-    
-    return response.json();
   },
 
-  /* ── ARCHIVE methods ────────────────────── */
-  getArchiveFolders: () => 
-    fetch('/api/archive/folders')
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch archive folders');
-        return r.json();
-      }),
+  // === NETSUITE OPERATIONS ===
+  netsuite: {
+    async getBOM(assemblyItemId) {
+      return handleApiCall('netsuite.getBOM', async () => {
+        const result = await api.custom.getNetSuiteBOM(assemblyItemId);
+        return result;
+      });
+    },
 
-  getAllArchivedFiles: () =>
-    fetch('/api/archive/files')
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch archived files');
-        return r.json();
-      }),
+    async searchItems(query) {
+      return handleApiCall('netsuite.searchItems', async () => {
+        const result = await api.custom.searchNetSuiteItems(query);
+        return result;
+      });
+    },
 
-  getArchivedFilesByPath: (folderPath) =>
-    fetch(`/api/archive/files?folderPath=${encodeURIComponent(folderPath)}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch archived files');
-        return r.json();
-      }),
+    async mapComponents(components) {
+      return handleApiCall('netsuite.mapComponents', async () => {
+        const result = await api.custom.mapNetSuiteComponents(components);
+        return result;
+      });
+    },
 
-  loadArchivedFile: (id) => 
-    fetch(`/api/archive/files/${id}`)
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to load archived file');
-        return r.json();
-      }),
+    async getHealth() {
+      return handleApiCall('netsuite.getHealth', async () => {
+        const result = await api.custom.getNetSuiteHealth();
+        return result;
+      });
+    },
 
-  /* ── Archive stats for folder view ─── */
-  getArchiveStats: () =>
-    fetch('/api/archive/stats')
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to fetch archive stats');
-        return r.json();
-      }),
+    async getSetup() {
+      return handleApiCall('netsuite.getSetup', async () => {
+        const result = await api.custom.getNetSuiteSetup();
+        return result;
+      });
+    },
+
+    async test() {
+      return handleApiCall('netsuite.test', async () => {
+        const result = await api.custom.testNetSuite();
+        return result;
+      });
+    }
+  },
+
+  // === WORKFLOW HELPERS ===
+  workflow: {
+    async getFilesByStatus(status) {
+      return this.batches.listByStatus(status);
+    },
+
+    async getInProgressFiles() {
+      return this.getFilesByStatus('In Progress');
+    },
+
+    async getReviewFiles() {
+      return this.getFilesByStatus('Review');
+    },
+
+    async getCompletedFiles() {
+      return this.getFilesByStatus('Completed');
+    },
+
+    async getDashboardData() {
+      return handleApiCall('workflow.getDashboardData', async () => {
+        const result = await api.list.workflowOverview();
+        return result;
+      });
+    }
+  },
+
+  // === BULK OPERATIONS ===
+  bulk: {
+    async uploadFiles(files, folderId = null, onProgress = null) {
+      const fileDataArray = Array.from(files).map(file => ({
+        file,
+        relativePath: file.name
+      }));
+      return filesApi.files.uploadBatch(fileDataArray, folderId, onProgress);
+    },
+
+    async deleteBatches(batchIds, options = {}) {
+      return handleApiCall('bulk.deleteBatches', async () => {
+        const result = await api.remove.bulkBatches(batchIds, options);
+        return result;
+      });
+    },
+
+    async updateBatchStatuses(statusUpdates) {
+      return handleApiCall('bulk.updateBatchStatuses', async () => {
+        const result = await api.update.bulkBatchStatuses(statusUpdates);
+        return result;
+      });
+    }
+  },
+
+  // === VALIDATION HELPERS ===
+  validation: {
+    async validateBatchDelete(id) {
+      return handleApiCall('validation.validateBatchDelete', async () => {
+        const result = await api.remove.validateBeforeDelete('batch', id);
+        return result;
+      });
+    },
+
+    async validateFolderDelete(id) {
+      return handleApiCall('validation.validateFolderDelete', async () => {
+        const result = await api.remove.validateBeforeDelete('folder', id);
+        return result;
+      });
+    }
+  },
+
+  // === EDITOR-SPECIFIC OPERATIONS ===
+  editor: {
+    async saveFromEditor(originalFileId, editorData, action = 'save', confirmationData = null) {
+      return handleApiCall('editor.saveFromEditor', async () => {
+        const result = await api.custom.saveBatchFromEditor(originalFileId, editorData, action, confirmationData);
+        return result;
+      });
+    },
+
+    async loadForEditing(id, isBatch = false) {
+      return handleApiCall('editor.loadForEditing', async () => {
+        if (isBatch) {
+          const result = await api.get.batch(id);
+          return result;
+        } else {
+          const result = await api.get.fileWithPdf(id);
+          return result;
+        }
+      });
+    }
+  }
 };
+
+// === CONVENIENCE FUNCTIONS ===
+
+/**
+ * Check if a result has an error and handle it consistently
+ */
+export function hasError(result) {
+  return result && result.error !== null && result.error !== undefined;
+}
+
+/**
+ * Extract data from API result, handling both success and error cases
+ */
+export function extractData(result, fallback = null) {
+  if (hasError(result)) {
+    return fallback;
+  }
+  return result?.data || fallback;
+}
+
+/**
+ * Handle API errors consistently across components
+ */
+export function handleApiError(result, defaultMessage = 'An error occurred') {
+  if (hasError(result)) {
+    console.error('API Error:', result.error);
+    return result.error || defaultMessage;
+  }
+  return null;
+}
+
+/**
+ * Normalize file/batch data for consistent handling in components
+ */
+export function normalizeFileData(file) {
+  if (!file) return null;
+  
+  return {
+    id: file._id,
+    fileName: file.fileName || `Batch Run ${file.runNumber}` || 'Untitled',
+    status: file.status,
+    isBatch: file.isBatch || !!file.runNumber || !!file.batchId,
+    isArchived: file.isArchived || false,
+    runNumber: file.runNumber,
+    createdAt: file.createdAt,
+    updatedAt: file.updatedAt,
+    workOrderCreated: file.workOrderCreated || false,
+    chemicalsTransacted: file.chemicalsTransacted || false,
+    solutionCreated: file.solutionCreated || false,
+    // Include all original properties
+    ...file
+  };
+}
+
+/**
+ * Normalize folder data for consistent handling
+ */
+export function normalizeFolderData(folder) {
+  if (!folder) return null;
+  
+  return {
+    id: folder._id,
+    name: folder.name,
+    parentId: folder.parentId,
+    createdAt: folder.createdAt,
+    updatedAt: folder.updatedAt,
+    // Include all original properties  
+    ...folder
+  };
+}
+
+// Export individual API modules for focused imports
+export const { folders, files, batches, archive, items, workOrders, netsuite, workflow, bulk, validation, editor } = filesApi;

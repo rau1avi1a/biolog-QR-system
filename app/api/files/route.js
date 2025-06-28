@@ -1,6 +1,4 @@
-// =============================================================================
-// app/api/files/route.js - Complete file operations (FIXED)
-// =============================================================================
+// app/api/files/route.js - FIXED: Consistent response format
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
@@ -44,7 +42,11 @@ export async function GET(request) {
         // Handle PDF download: GET /api/files?id=123&action=download
         const batch = await db.services.batchService.getBatchById(id);
         if (!batch?.signedPdf?.data) {
-          return NextResponse.json({ error: 'No PDF found' }, { status: 404 });
+          return NextResponse.json({ 
+            success: false,
+            error: 'No PDF found',
+            data: null
+          }, { status: 404 });
         }
         
         const fileName = `${batch.fileId?.fileName || 'file'}-${batch.solutionLotNumber || `run-${batch.runNumber}`}.pdf`;
@@ -65,8 +67,11 @@ export async function GET(request) {
         
         return NextResponse.json({ 
           success: true, 
-          batches,
-          count: batches.length 
+          data: {
+            batches,
+            count: batches.length
+          },
+          error: null
         });
       }
       
@@ -77,7 +82,8 @@ export async function GET(request) {
         if (fileStats) {
           return NextResponse.json({ 
             success: true, 
-            stats: fileStats 
+            data: fileStats,
+            error: null
           });
         } else {
           // Fallback if getFileStats doesn't exist
@@ -88,11 +94,12 @@ export async function GET(request) {
           
           return NextResponse.json({ 
             success: true, 
-            stats: {
+            data: {
               file,
               batchCount: batches.length,
               completedBatches: batches.filter(b => b.status === 'Completed').length
-            }
+            },
+            error: null
           });
         }
       }
@@ -102,13 +109,15 @@ export async function GET(request) {
       if (!file) {
         return NextResponse.json({ 
           success: false, 
-          error: 'File not found' 
+          error: 'File not found',
+          data: null
         }, { status: 404 });
       }
       
       return NextResponse.json({ 
         success: true, 
-        file 
+        data: file,
+        error: null
       });
     }
 
@@ -120,9 +129,10 @@ export async function GET(request) {
       
       return NextResponse.json({ 
         success: true, 
-        files,
+        data: files, // Return files directly as data array
         count: files.length,
-        query: search
+        query: search,
+        error: null
       });
     }
 
@@ -133,9 +143,10 @@ export async function GET(request) {
     
     return NextResponse.json({ 
       success: true, 
-      files,
+      data: files, // Return files directly as data array
       count: files.length,
-      folderId: folderId || null
+      folderId: folderId || null,
+      error: null
     });
     
   } catch (error) {
@@ -143,7 +154,8 @@ export async function GET(request) {
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -156,7 +168,11 @@ export async function POST(request) {
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -169,7 +185,9 @@ export async function POST(request) {
       
       if (!files || files.length === 0) {
         return NextResponse.json({ 
-          error: 'No files provided' 
+          success: false,
+          error: 'No files provided',
+          data: null
         }, { status: 400 });
       }
       
@@ -191,7 +209,9 @@ export async function POST(request) {
       
       if (fileDataArray.length === 0) {
         return NextResponse.json({ 
-          error: 'No valid files to upload' 
+          success: false,
+          error: 'No valid files to upload',
+          data: null
         }, { status: 400 });
       }
       
@@ -205,11 +225,14 @@ export async function POST(request) {
       
       return NextResponse.json({
         success: true,
+        data: {
+          uploaded: successful.length,
+          failed: failed.length,
+          results: successful,
+          errors: failed
+        },
         message: `Uploaded ${successful.length} files successfully${failed.length ? `, ${failed.length} failed` : ''}`,
-        uploaded: successful.length,
-        failed: failed.length,
-        results: successful,
-        errors: failed
+        error: null
       });
     }
     
@@ -219,14 +242,18 @@ export async function POST(request) {
     
     if (!fileBlob) {
       return NextResponse.json({ 
-        error: 'No file provided' 
+        success: false,
+        error: 'No file provided',
+        data: null
       }, { status: 400 });
     }
 
     // Validate file type (optional)
     if (fileBlob.type && !fileBlob.type.includes('pdf')) {
       return NextResponse.json({ 
-        error: 'Only PDF files are supported' 
+        success: false,
+        error: 'Only PDF files are supported',
+        data: null
       }, { status: 400 });
     }
 
@@ -238,7 +265,9 @@ export async function POST(request) {
 
     if (!fileName) {
       return NextResponse.json({ 
-        error: 'File name is required' 
+        success: false,
+        error: 'File name is required',
+        data: null
       }, { status: 400 });
     }
 
@@ -252,8 +281,9 @@ export async function POST(request) {
     
     return NextResponse.json({ 
       success: true, 
-      file,
-      message: 'File uploaded successfully'
+      data: file,
+      message: 'File uploaded successfully',
+      error: null
     }, { status: 201 });
     
   } catch (error) {
@@ -261,7 +291,8 @@ export async function POST(request) {
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -272,13 +303,21 @@ export async function PATCH(request) {
     const id = searchParams.get('id');
     
     if (!id) {
-      return NextResponse.json({ error: 'File ID required' }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'File ID required',
+        data: null
+      }, { status: 400 });
     }
 
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -288,7 +327,8 @@ export async function PATCH(request) {
     if (!existingFile) {
       return NextResponse.json({ 
         success: false, 
-        error: 'File not found' 
+        error: 'File not found',
+        data: null
       }, { status: 404 });
     }
     
@@ -309,8 +349,9 @@ export async function PATCH(request) {
     
     return NextResponse.json({ 
       success: true, 
-      file,
-      message: 'File updated successfully'
+      data: file,
+      message: 'File updated successfully',
+      error: null
     });
     
   } catch (error) {
@@ -318,7 +359,8 @@ export async function PATCH(request) {
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -329,13 +371,21 @@ export async function DELETE(request) {
     const id = searchParams.get('id');
     
     if (!id) {
-      return NextResponse.json({ error: 'File ID required' }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'File ID required',
+        data: null
+      }, { status: 400 });
     }
 
     // Get authenticated user and check permissions
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -345,7 +395,8 @@ export async function DELETE(request) {
     if (!existingFile) {
       return NextResponse.json({ 
         success: false, 
-        error: 'File not found' 
+        error: 'File not found',
+        data: null
       }, { status: 404 });
     }
 
@@ -356,7 +407,9 @@ export async function DELETE(request) {
 
     if (batches.length > 0 && user.role !== 'admin') {
       return NextResponse.json({ 
-        error: `Cannot delete file with ${batches.length} associated batches. Admin access required.` 
+        success: false,
+        error: `Cannot delete file with ${batches.length} associated batches. Admin access required.`,
+        data: null
       }, { status: 403 });
     }
 
@@ -364,8 +417,12 @@ export async function DELETE(request) {
     
     return NextResponse.json({ 
       success: true, 
+      data: {
+        deletedFile: existingFile,
+        deletedBatches: batches.length
+      },
       message: 'File deleted successfully',
-      deletedBatches: batches.length
+      error: null
     });
     
   } catch (error) {
@@ -373,7 +430,8 @@ export async function DELETE(request) {
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }

@@ -1,6 +1,4 @@
-// =============================================================================
-// app/api/batches/route.js - Complete batches operations (FIXED)
-// =============================================================================
+// app/api/batches/route.js - FIXED: Consistent response format with fileName
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
@@ -50,7 +48,8 @@ export async function GET(request) {
             description: status.workOrderNumber ? 
               `NetSuite Work Order ${status.workOrderNumber}` : 
               'Work Order'
-          }
+          },
+          error: null
         }, {
           headers: { 'Cache-Control': 'no-cache' }
         });
@@ -61,11 +60,24 @@ export async function GET(request) {
       if (!batch) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Batch not found' 
+          error: 'Batch not found',
+          data: null
         }, { status: 404 });
       }
       
-      return NextResponse.json({ success: true, data: batch });
+      // Ensure fileName is available for display
+      const enrichedBatch = {
+        ...batch,
+        fileName: batch.fileName || 
+                 (batch.fileId?.fileName ? `${batch.fileId.fileName.replace('.pdf', '')}-Run-${batch.runNumber}.pdf` : null) ||
+                 `Batch Run ${batch.runNumber}`
+      };
+      
+      return NextResponse.json({ 
+        success: true, 
+        data: enrichedBatch,
+        error: null
+      });
     }
 
     // GET /api/batches?status=Review&fileId=123
@@ -87,14 +99,29 @@ export async function GET(request) {
       sort: { [sort]: order }
     });
     
-    return NextResponse.json({ success: true, data: batches });
+    // Enrich batches with fileName for display
+    const enrichedBatches = batches.map(batch => ({
+      ...batch,
+      fileName: batch.fileName || 
+               (batch.fileId?.fileName ? `${batch.fileId.fileName.replace('.pdf', '')}-Run-${batch.runNumber}.pdf` : null) ||
+               `Batch Run ${batch.runNumber}`
+    }));
+    
+    return NextResponse.json({ 
+      success: true, 
+      data: enrichedBatches,
+      count: enrichedBatches.length,
+      filter,
+      error: null
+    });
     
   } catch (error) {
     console.error('GET batches error:', error);
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -108,7 +135,11 @@ export async function POST(request) {
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -119,7 +150,9 @@ export async function POST(request) {
       
       if (!quantity || quantity <= 0) {
         return NextResponse.json({ 
-          error: 'Valid quantity required' 
+          success: false,
+          error: 'Valid quantity required',
+          data: null
         }, { status: 400 });
       }
 
@@ -128,7 +161,8 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         data: result,
-        message: 'Work order creation retry initiated'
+        message: 'Work order creation retry initiated',
+        error: null
       });
     }
 
@@ -140,7 +174,8 @@ export async function POST(request) {
     if (!fileId) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Missing fileId or originalFileId' 
+        error: 'Missing fileId or originalFileId',
+        data: null
       }, { status: 400 });
     }
 
@@ -149,16 +184,26 @@ export async function POST(request) {
     if (!file) {
       return NextResponse.json({ 
         success: false, 
-        error: 'File not found' 
+        error: 'File not found',
+        data: null
       }, { status: 404 });
     }
 
     const batch = await db.services.batchService.createBatch(payload);
     
+    // Enrich with fileName for display
+    const enrichedBatch = {
+      ...batch,
+      fileName: batch.fileName || 
+               (file.fileName ? `${file.fileName.replace('.pdf', '')}-Run-${batch.runNumber}.pdf` : null) ||
+               `Batch Run ${batch.runNumber}`
+    };
+    
     return NextResponse.json({ 
       success: true, 
-      data: batch,
-      message: 'Batch created successfully'
+      data: enrichedBatch,
+      message: 'Batch created successfully',
+      error: null
     }, { status: 201 });
     
   } catch (error) {
@@ -166,7 +211,8 @@ export async function POST(request) {
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -177,13 +223,21 @@ export async function PATCH(request) {
     const id = searchParams.get('id');
     
     if (!id) {
-      return NextResponse.json({ error: 'Batch ID required' }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Batch ID required',
+        data: null
+      }, { status: 400 });
     }
 
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -193,7 +247,8 @@ export async function PATCH(request) {
     if (!existingBatch) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Batch not found' 
+        error: 'Batch not found',
+        data: null
       }, { status: 404 });
     }
 
@@ -202,10 +257,19 @@ export async function PATCH(request) {
 
     const batch = await db.services.batchService.updateBatch(id, payload);
     
+    // Enrich with fileName for display
+    const enrichedBatch = {
+      ...batch,
+      fileName: batch.fileName || 
+               (batch.fileId?.fileName ? `${batch.fileId.fileName.replace('.pdf', '')}-Run-${batch.runNumber}.pdf` : null) ||
+               `Batch Run ${batch.runNumber}`
+    };
+    
     return NextResponse.json({ 
       success: true, 
-      data: batch,
-      message: 'Batch updated successfully'
+      data: enrichedBatch,
+      message: 'Batch updated successfully',
+      error: null
     });
     
   } catch (error) {
@@ -213,7 +277,8 @@ export async function PATCH(request) {
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -224,13 +289,21 @@ export async function DELETE(request) {
     const id = searchParams.get('id');
     
     if (!id) {
-      return NextResponse.json({ error: 'Batch ID required' }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Batch ID required',
+        data: null
+      }, { status: 400 });
     }
 
     // Get authenticated user and check permissions
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     // Only allow admins or the creator to delete batches
@@ -240,13 +313,16 @@ export async function DELETE(request) {
       if (!existingBatch) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Batch not found' 
+          error: 'Batch not found',
+          data: null
         }, { status: 404 });
       }
       
       if (existingBatch.createdBy?.toString() !== user._id.toString()) {
         return NextResponse.json({ 
-          error: 'Permission denied - you can only delete your own batches' 
+          success: false,
+          error: 'Permission denied - you can only delete your own batches',
+          data: null
         }, { status: 403 });
       }
     }
@@ -256,7 +332,8 @@ export async function DELETE(request) {
     return NextResponse.json({ 
       success: true, 
       data: batch,
-      message: 'Batch deleted successfully'
+      message: 'Batch deleted successfully',
+      error: null
     });
     
   } catch (error) {
@@ -264,7 +341,8 @@ export async function DELETE(request) {
     return NextResponse.json({ 
       success: false, 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
