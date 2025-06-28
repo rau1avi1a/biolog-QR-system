@@ -1,6 +1,4 @@
-// =============================================================================
-// app/api/folders/route.js - Complete folder operations (FIXED)
-// =============================================================================
+// app/api/folders/route.js - FIXED: Consistent response format
 import { NextResponse } from "next/server";
 import db from '@/db';
 import { jwtVerify } from 'jose';
@@ -48,7 +46,8 @@ export async function GET(request) {
         if (!folder) {
           return NextResponse.json({ 
             success: false, 
-            error: "Folder not found" 
+            error: "Folder not found",
+            data: null
           }, { status: 404 });
         }
 
@@ -57,9 +56,12 @@ export async function GET(request) {
         
         return NextResponse.json({ 
           success: true, 
-          folder,
-          path: fullPath,
-          breadcrumbs: fullPath.map(f => ({ _id: f._id, name: f.name }))
+          data: {
+            folder,
+            path: fullPath,
+            breadcrumbs: fullPath.map(f => ({ _id: f._id, name: f.name }))
+          },
+          error: null
         });
       }
 
@@ -75,12 +77,15 @@ export async function GET(request) {
 
         return NextResponse.json({ 
           success: true, 
-          subfolders,
-          files,
-          counts: {
-            subfolders: subfolders.length,
-            files: files.length
-          }
+          data: {
+            subfolders,
+            files,
+            counts: {
+              subfolders: subfolders.length,
+              files: files.length
+            }
+          },
+          error: null
         });
       }
       
@@ -92,13 +97,15 @@ export async function GET(request) {
       if (!folder) {
         return NextResponse.json({ 
           success: false, 
-          error: "Folder not found" 
+          error: "Folder not found",
+          data: null
         }, { status: 404 });
       }
       
       return NextResponse.json({ 
         success: true, 
-        folder 
+        data: folder,
+        error: null
       });
     }
 
@@ -139,9 +146,10 @@ export async function GET(request) {
     
     return NextResponse.json({ 
       success: true, 
-      folders: foldersWithCounts,
+      data: foldersWithCounts,
+      count: foldersWithCounts.length,
       parentId: actualParentId,
-      count: foldersWithCounts.length
+      error: null
     });
     
   } catch (error) {
@@ -149,7 +157,8 @@ export async function GET(request) {
     return NextResponse.json({ 
       success: false, 
       error: "Internal server error",
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -162,7 +171,11 @@ export async function POST(request) {
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -171,7 +184,11 @@ export async function POST(request) {
       // POST /api/folders?action=delete&id=123
       const id = searchParams.get('id');
       if (!id) {
-        return NextResponse.json({ error: "Folder ID required" }, { status: 400 });
+        return NextResponse.json({ 
+          success: false,
+          error: "Folder ID required",
+          data: null
+        }, { status: 400 });
       }
 
       // Check if folder exists
@@ -179,7 +196,8 @@ export async function POST(request) {
       if (!folder) {
         return NextResponse.json({ 
           success: false, 
-          error: "Folder not found" 
+          error: "Folder not found",
+          data: null
         }, { status: 404 });
       }
 
@@ -191,7 +209,9 @@ export async function POST(request) {
 
       if (fileCount > 0 || subfolderCount > 0) {
         return NextResponse.json({ 
-          error: `Cannot delete folder: contains ${fileCount} files and ${subfolderCount} subfolders` 
+          success: false,
+          error: `Cannot delete folder: contains ${fileCount} files and ${subfolderCount} subfolders`,
+          data: null
         }, { status: 400 });
       }
 
@@ -199,7 +219,9 @@ export async function POST(request) {
       
       return NextResponse.json({ 
         success: true,
-        message: `Folder "${folder.name}" deleted successfully`
+        data: { deletedFolder: folder },
+        message: `Folder "${folder.name}" deleted successfully`,
+        error: null
       });
     }
 
@@ -208,14 +230,19 @@ export async function POST(request) {
       const { folderId, newParentId } = await request.json();
       
       if (!folderId) {
-        return NextResponse.json({ error: "Folder ID required" }, { status: 400 });
+        return NextResponse.json({ 
+          success: false,
+          error: "Folder ID required",
+          data: null
+        }, { status: 400 });
       }
 
       const folder = await db.models.Folder.findById(folderId);
       if (!folder) {
         return NextResponse.json({ 
           success: false, 
-          error: "Folder not found" 
+          error: "Folder not found",
+          data: null
         }, { status: 404 });
       }
 
@@ -224,14 +251,18 @@ export async function POST(request) {
         const newParent = await db.models.Folder.findById(newParentId);
         if (!newParent) {
           return NextResponse.json({ 
-            error: "New parent folder not found" 
+            success: false,
+            error: "New parent folder not found",
+            data: null
           }, { status: 404 });
         }
 
         // Check for circular reference
         if (newParent.path && newParent.path.includes(folderId)) {
           return NextResponse.json({ 
-            error: "Cannot move folder to its own subfolder" 
+            success: false,
+            error: "Cannot move folder to its own subfolder",
+            data: null
           }, { status: 400 });
         }
       }
@@ -241,8 +272,9 @@ export async function POST(request) {
 
       return NextResponse.json({ 
         success: true, 
-        folder: folder.toObject(),
-        message: "Folder moved successfully"
+        data: folder.toObject(),
+        message: "Folder moved successfully",
+        error: null
       });
     }
 
@@ -250,7 +282,11 @@ export async function POST(request) {
     const { name, parentId = null } = await request.json();
 
     if (!name?.trim()) {
-      return NextResponse.json({ error: "Folder name required" }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        error: "Folder name required",
+        data: null
+      }, { status: 400 });
     }
 
     const trimmedName = name.trim();
@@ -260,7 +296,9 @@ export async function POST(request) {
       const parentFolder = await db.models.Folder.findById(parentId);
       if (!parentFolder) {
         return NextResponse.json({ 
-          error: "Parent folder not found" 
+          success: false,
+          error: "Parent folder not found",
+          data: null
         }, { status: 404 });
       }
     }
@@ -274,7 +312,9 @@ export async function POST(request) {
 
     if (existingFolder) {
       return NextResponse.json({ 
-        error: "A folder with this name already exists in this location" 
+        success: false,
+        error: "A folder with this name already exists in this location",
+        data: null
       }, { status: 409 });
     }
 
@@ -287,14 +327,17 @@ export async function POST(request) {
 
       return NextResponse.json({ 
         success: true, 
-        folder: folder.toObject(),
-        message: `Folder "${trimmedName}" created successfully`
+        data: folder.toObject(),
+        message: `Folder "${trimmedName}" created successfully`,
+        error: null
       }, { status: 201 });
       
     } catch (error) {
       if (error.code === 11000) {
         return NextResponse.json({ 
-          error: "A folder with this name already exists in this location" 
+          success: false,
+          error: "A folder with this name already exists in this location",
+          data: null
         }, { status: 409 });
       }
       throw error;
@@ -305,7 +348,8 @@ export async function POST(request) {
     return NextResponse.json({ 
       success: false, 
       error: "Internal server error",
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
@@ -316,13 +360,21 @@ export async function PATCH(request) {
     const id = searchParams.get('id');
     
     if (!id) {
-      return NextResponse.json({ error: "Folder ID required" }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        error: "Folder ID required",
+        data: null
+      }, { status: 400 });
     }
 
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        error: 'Unauthorized',
+        data: null
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -330,7 +382,11 @@ export async function PATCH(request) {
     const { name } = await request.json();
     
     if (!name?.trim()) {
-      return NextResponse.json({ error: "Folder name required" }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        error: "Folder name required",
+        data: null
+      }, { status: 400 });
     }
 
     const trimmedName = name.trim();
@@ -340,7 +396,8 @@ export async function PATCH(request) {
     if (!existingFolder) {
       return NextResponse.json({ 
         success: false, 
-        error: "Folder not found" 
+        error: "Folder not found",
+        data: null
       }, { status: 404 });
     }
 
@@ -353,7 +410,9 @@ export async function PATCH(request) {
 
     if (duplicateFolder) {
       return NextResponse.json({ 
-        error: "A folder with this name already exists in this location" 
+        success: false,
+        error: "A folder with this name already exists in this location",
+        data: null
       }, { status: 409 });
     }
     
@@ -371,8 +430,9 @@ export async function PATCH(request) {
     
     return NextResponse.json({ 
       success: true, 
-      folder: folder.toObject(),
-      message: `Folder renamed to "${trimmedName}" successfully`
+      data: folder.toObject(),
+      message: `Folder renamed to "${trimmedName}" successfully`,
+      error: null
     });
     
   } catch (error) {
@@ -380,7 +440,8 @@ export async function PATCH(request) {
     return NextResponse.json({ 
       success: false, 
       error: "Internal server error",
-      message: error.message 
+      message: error.message,
+      data: null
     }, { status: 500 });
   }
 }
