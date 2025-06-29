@@ -89,7 +89,7 @@ export function useComponentState(core, props) {
   // === TAB MANAGEMENT ===
   const tabs = useMemo(() => [
     { id: 'details', label: 'Details', icon: 'FileText' },
-    { id: 'components', label: `Components (${core.totalComponents})`, icon: 'Beaker' },
+    { id: 'components', label: `Components (${core.totalComponents || 0})`, icon: 'Beaker' },
     { id: 'solution', label: 'Solution', icon: 'FlaskRound' }
   ], [core.totalComponents]);
 
@@ -100,9 +100,11 @@ export function useComponentState(core, props) {
 
   // === EVENT HANDLERS ===
   const handleFieldChange = useCallback((field, value) => {
-    core.handleFieldChange(field, value);
-    markFieldTouched(field);
-    validateField(field, value);
+    if (core.handleFieldChange) {
+      core.handleFieldChange(field, value);
+      markFieldTouched(field);
+      validateField(field, value);
+    }
   }, [core.handleFieldChange, markFieldTouched, validateField]);
 
   const handleFieldBlur = useCallback((field, value) => {
@@ -111,6 +113,8 @@ export function useComponentState(core, props) {
   }, [markFieldTouched, validateField]);
 
   const handleSave = useCallback(async () => {
+    if (!core.save) return;
+
     // Validate all fields before saving
     const fields = ['fileName', 'recipeQty'];
     let hasErrors = false;
@@ -125,7 +129,9 @@ export function useComponentState(core, props) {
     });
 
     if (hasErrors) {
-      core.setError('Please fix the form errors before saving');
+      if (core.setError) {
+        core.setError('Please fix the form errors before saving');
+      }
       return;
     }
 
@@ -141,6 +147,8 @@ export function useComponentState(core, props) {
   }, []);
 
   const handleDeleteConfirm = useCallback(async () => {
+    if (!core.deleteFile) return;
+
     try {
       await core.deleteFile();
       setShowDeleteConfirm(false);
@@ -167,16 +175,22 @@ export function useComponentState(core, props) {
 
   // === COMPONENT MANAGEMENT HANDLERS ===
   const handleAddComponent = useCallback((item) => {
-    core.addComponent(item);
-    setShowComponentForm(false);
+    if (core.addComponent) {
+      core.addComponent(item);
+      setShowComponentForm(false);
+    }
   }, [core.addComponent]);
 
   const handleEditComponent = useCallback((component) => {
-    core.startEditingComponent(component);
-    setShowComponentForm(true);
+    if (core.startEditingComponent) {
+      core.startEditingComponent(component);
+      setShowComponentForm(true);
+    }
   }, [core.startEditingComponent]);
 
   const handleUpdateComponent = useCallback((componentId, updates) => {
+    if (!core.updateComponent) return;
+
     // Validate component quantity
     if (updates.qty !== undefined) {
       markFieldTouched('componentQty');
@@ -185,11 +199,15 @@ export function useComponentState(core, props) {
     }
 
     core.updateComponent(componentId, updates);
-    core.stopEditingComponent();
+    if (core.stopEditingComponent) {
+      core.stopEditingComponent();
+    }
     setShowComponentForm(false);
   }, [core, markFieldTouched, validateField]);
 
   const handleRemoveComponent = useCallback((componentId) => {
+    if (!core.removeComponent) return;
+
     const shouldRemove = window.confirm('Are you sure you want to remove this component?');
     if (shouldRemove) {
       core.removeComponent(componentId);
@@ -197,36 +215,54 @@ export function useComponentState(core, props) {
   }, [core.removeComponent]);
 
   const handleCancelComponentEdit = useCallback(() => {
-    core.stopEditingComponent();
+    if (core.stopEditingComponent) {
+      core.stopEditingComponent();
+    }
     setShowComponentForm(false);
   }, [core.stopEditingComponent]);
 
   // === SEARCH RESULT HANDLERS ===
   const handleSelectSearchResult = useCallback((item) => {
     handleAddComponent(item);
-    core.setSearchResults([]);
+    if (core.setSearchResults) {
+      core.setSearchResults([]);
+    }
   }, [handleAddComponent, core.setSearchResults]);
 
   const handleSelectSolutionResult = useCallback((solution) => {
-    core.selectSolution(solution);
-    core.setSolutionResults([]);
+    if (core.selectSolution) {
+      core.selectSolution(solution);
+    }
+    if (core.setSolutionResults) {
+      core.setSolutionResults([]);
+    }
   }, [core.selectSolution, core.setSolutionResults]);
 
-  // === SEARCH RESULT FORMATTING ===
+  // === SEARCH RESULT FORMATTING WITH NULL SAFETY ===
   const getFormattedSearchResults = useCallback(() => {
+    // Add null safety check
+    if (!core.searchResults || !Array.isArray(core.searchResults)) {
+      return [];
+    }
+    
     return core.searchResults.map(item => ({
       ...item,
-      displayText: `${item.displayName} (${item.sku})`,
-      subtitle: `${item.itemCategory} • Stock: ${item.qtyOnHand || 0} ${item.uom || ''}`,
+      displayText: `${item.displayName || 'Unknown'} (${item.sku || 'No SKU'})`,
+      subtitle: `${item.itemCategory || 'Unknown'} • Stock: ${item.qtyOnHand || 0} ${item.uom || ''}`,
       isChemical: item.itemCategory === 'chemical',
       isSolution: item.itemCategory === 'solution'
     }));
   }, [core.searchResults]);
 
   const getFormattedSolutionResults = useCallback(() => {
+    // Add null safety check - this is where the error was occurring
+    if (!core.solutionResults || !Array.isArray(core.solutionResults)) {
+      return [];
+    }
+    
     return core.solutionResults.map(solution => ({
       ...solution,
-      displayText: `${solution.displayName} (${solution.sku})`,
+      displayText: `${solution.displayName || 'Unknown'} (${solution.sku || 'No SKU'})`,
       subtitle: solution.netsuiteInternalId ? 
         `NetSuite ID: ${solution.netsuiteInternalId}` : 
         'No NetSuite ID',
@@ -236,6 +272,11 @@ export function useComponentState(core, props) {
 
   // === COMPONENT DISPLAY LOGIC ===
   const getComponentDisplayData = useCallback(() => {
+    // Add null safety check
+    if (!core.components || !Array.isArray(core.components)) {
+      return [];
+    }
+    
     return core.components.map(comp => {
       const item = comp.item || {};
       return {
@@ -271,7 +312,7 @@ export function useComponentState(core, props) {
   const getSaveButtonConfig = useCallback(() => {
     return {
       disabled: !isFormValid || !core.hasChanges || core.isSaving || !core.canEdit,
-      loading: core.isSaving,
+      loading: core.isSaving || false,
       text: core.isSaving ? 'Saving...' : 'Save Changes',
       variant: core.hasChanges ? 'default' : 'outline'
     };
@@ -280,7 +321,7 @@ export function useComponentState(core, props) {
   const getDeleteButtonConfig = useCallback(() => {
     return {
       disabled: core.isDeleting || !core.canEdit,
-      loading: core.isDeleting,
+      loading: core.isDeleting || false,
       text: core.isDeleting ? 'Deleting...' : 'Delete File',
       variant: 'destructive'
     };
@@ -289,7 +330,7 @@ export function useComponentState(core, props) {
   const getBOMImportButtonConfig = useCallback(() => {
     return {
       disabled: !core.canImportBOM || core.isImportingBOM,
-      loading: core.isImportingBOM,
+      loading: core.isImportingBOM || false,
       text: core.isImportingBOM ? 'Importing...' : 'Import from NetSuite',
       variant: 'outline'
     };
