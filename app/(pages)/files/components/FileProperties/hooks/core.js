@@ -18,67 +18,15 @@ import { filesApi } from '../../../lib/api';
 export function useCore(props) {
   const { file, onSaved, onFileDeleted, readOnly = false } = props;
 
-  // === EARLY RETURN FOR NULL FILE ===
-  if (!file) {
-    return {
-      // Return a safe default state when no file is provided
-      fileName: '',
-      description: '',
-      recipeQty: '',
-      recipeUnit: 'L',
-      components: [],
-      solutionRef: null,
-      selectedSolution: null,
-      editingComponent: null,
-      componentSearch: '',
-      searchResults: [],
-      isSearching: false,
-      showBOMImport: false,
-      isImportingBOM: false,
-      solutionSearch: '',
-      solutionResults: [],
-      isSearchingSolutions: false,
-      isSaving: false,
-      isDeleting: false,
-      error: null,
-      hasChanges: false,
-      canEdit: false,
-      isOriginalFile: false,
-      hasSolution: false,
-      canImportBOM: false,
-      totalComponents: 0,
-      mappedComponents: 0,
-      isValid: false,
-      // Provide no-op functions
-      handleFieldChange: () => {},
-      handleComponentSearchChange: () => {},
-      handleSolutionSearchChange: () => {},
-      addComponent: () => {},
-      updateComponent: () => {},
-      removeComponent: () => {},
-      startEditingComponent: () => {},
-      stopEditingComponent: () => {},
-      selectSolution: () => {},
-      clearSolution: () => {},
-      openBOMImport: () => {},
-      closeBOMImport: () => {},
-      handleBOMImport: () => Promise.resolve(),
-      save: () => Promise.resolve(),
-      deleteFile: () => Promise.resolve(),
-      setError: () => {},
-      setSearchResults: () => {},
-      setSolutionResults: () => {}
-    };
-  }
-
   // === CORE FILE STATE ===
-  const [fileName, setFileName] = useState(file?.fileName || '');
-  const [description, setDescription] = useState(file?.description || '');
-  const [recipeQty, setRecipeQty] = useState(file?.recipeQty || '');
-  const [recipeUnit, setRecipeUnit] = useState(file?.recipeUnit || 'L');
-  const [components, setComponents] = useState(file?.components || []);
-  const [solutionRef, setSolutionRef] = useState(file?.solutionRef || null);
-  const [selectedSolution, setSelectedSolution] = useState(file?.solution || null);
+  // Always call hooks first, regardless of file state
+  const [fileName, setFileName] = useState('');
+  const [description, setDescription] = useState('');
+  const [recipeQty, setRecipeQty] = useState('');
+  const [recipeUnit, setRecipeUnit] = useState('L');
+  const [components, setComponents] = useState([]);
+  const [solutionRef, setSolutionRef] = useState(null);
+  const [selectedSolution, setSelectedSolution] = useState(null);
 
   // === COMPONENT MANAGEMENT STATE ===
   const [editingComponent, setEditingComponent] = useState(null);
@@ -465,7 +413,61 @@ export function useCore(props) {
     };
   }, []);
 
-  // === RETURN INTERFACE ===
+  // === CONDITIONAL RETURN LOGIC ===
+  // Now that all hooks are called, we can conditionally return different values
+  if (!file) {
+    return {
+      // Return a safe default state when no file is provided
+      fileName: '',
+      description: '',
+      recipeQty: '',
+      recipeUnit: 'L',
+      components: [],
+      solutionRef: null,
+      selectedSolution: null,
+      editingComponent: null,
+      componentSearch: '',
+      searchResults: [],
+      isSearching: false,
+      showBOMImport: false,
+      isImportingBOM: false,
+      solutionSearch: '',
+      solutionResults: [],
+      isSearchingSolutions: false,
+      isSaving: false,
+      isDeleting: false,
+      error: null,
+      hasChanges: false,
+      canEdit: false,
+      isOriginalFile: false,
+      hasSolution: false,
+      canImportBOM: false,
+      totalComponents: 0,
+      mappedComponents: 0,
+      isValid: false,
+      // Provide no-op functions
+      handleFieldChange: () => {},
+      handleComponentSearchChange: () => {},
+      handleSolutionSearchChange: () => {},
+      addComponent: () => {},
+      updateComponent: () => {},
+      removeComponent: () => {},
+      startEditingComponent: () => {},
+      stopEditingComponent: () => {},
+      selectSolution: () => {},
+      clearSolution: () => {},
+      openBOMImport: () => {},
+      closeBOMImport: () => {},
+      handleBOMImport: () => Promise.resolve(),
+      save: () => Promise.resolve(),
+      deleteFile: () => Promise.resolve(),
+      setError: () => {},
+      setSearchResults: () => {},
+      setSolutionResults: () => {}
+    };
+  }
+
+  // === RETURN INTERFACE FOR VALID FILE ===
   return {
     // === STATE ===
     fileName,

@@ -389,8 +389,28 @@ export const filesApi = {
 
     async searchSolutions(query) {
       return handleApiCall('items.searchSolutions', async () => {
-        const result = await api.list.searchSolutions(query);
-        return result;
+        // Call the correct endpoint with proper query parameters
+        const response = await fetch(`/api/items?type=solution&search=${encodeURIComponent(query)}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include', // Include cookies for auth
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('🔍 searchSolutions API response:', result);
+        
+        // The backend returns { success: true, items: [...] }
+        if (result.success) {
+          return result.items;
+        } else {
+          throw new Error(result.error || 'Failed to search solutions');
+        }
       });
     },
 
