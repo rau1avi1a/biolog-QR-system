@@ -1,4 +1,4 @@
-// app/(pages)/files/page.jsx - FIXED: Proper file opening and search functionality
+// app/(pages)/files/page.jsx - FIXED: File opening and search filtering
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
@@ -60,12 +60,14 @@ export default function FilesPage() {
             foldersData = Array.isArray(foldersResult.data) ? foldersResult.data : [];
           }
           
-          // Handle files
+          // Handle files - ONLY original files (filter out batches)
           let filesData = [];
           if (filesResult.error) {
             console.error('❌ Error loading folder files:', filesResult.error);
           } else if (filesResult.data) {
-            filesData = Array.isArray(filesResult.data) ? filesResult.data : [];
+            const allFiles = Array.isArray(filesResult.data) ? filesResult.data : [];
+            // Filter to only include original files (not batches)
+            filesData = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
           }
           
           setRoot(foldersData);
@@ -95,13 +97,15 @@ export default function FilesPage() {
             foldersData = Array.isArray(foldersResult.data) ? foldersResult.data : [];
           }
           
-          // Handle root files
+          // Handle root files - ONLY original files (filter out batches)
           let filesData = [];
           if (filesResult.error) {
             console.error('❌ Error loading root files:', filesResult.error);
             // Don't fail completely for file errors
           } else if (filesResult.data) {
-            filesData = Array.isArray(filesResult.data) ? filesResult.data : [];
+            const allFiles = Array.isArray(filesResult.data) ? filesResult.data : [];
+            // Filter to only include original files (not batches)
+            filesData = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
           }
           
           setRoot(foldersData);
@@ -252,7 +256,7 @@ export default function FilesPage() {
     }
   }, [currentFolder, triggerRefresh]);
 
-  // === ENHANCED FILE OPENING LOGIC ===
+  // === ENHANCED FILE OPENING LOGIC (FIXED) ===
   const openFile = useCallback(async (file) => {
     try {
       console.log('🔍 Page: Opening file:', file);
@@ -264,8 +268,14 @@ export default function FilesPage() {
       // Show loading state
       setError(null);
 
-      // Determine file type and load accordingly
-      if (file.sourceType === 'batch' || file.isBatch || file.status || file.runNumber) {
+      // FIXED: Better detection of file type
+      const isBatchFile = file.sourceType === 'batch' || 
+                         file.isBatch || 
+                         file.status || 
+                         file.runNumber ||
+                         file.batchId;
+
+      if (isBatchFile) {
         // This is a batch file
         console.log('📦 Page: Opening batch file:', file._id);
         
@@ -349,25 +359,52 @@ export default function FilesPage() {
         }
         
       } else {
-        // This is an original file
+        // FIXED: This is an original file - call API correctly for PDF data
         console.log('📄 Page: Opening original file:', file._id);
         
-        const result = await filesApi.files.getWithPdf(file._id);
+        // Use the direct fetch approach to ensure action parameter is sent correctly
+        const response = await fetch(`/api/files?id=${encodeURIComponent(file._id)}&action=with-pdf`);
+        const result = await response.json();
+        
+        console.log('📄 Page: API result:', { 
+          success: result.success, 
+          hasPdf: !!result.data?.pdf, 
+          error: result.error,
+          pdfType: typeof result.data?.pdf,
+          pdfLength: result.data?.pdf?.length
+        });
+        
         if (result.error) {
           throw new Error('Failed to load file: ' + result.error);
         }
         
-        if (result.data) {
-          const docData = { 
-            ...result.data, 
-            pdf: result.data.pdf,
-            isBatch: false,
-            fileName: result.data.fileName || file.fileName || 'Untitled File'
-          };
-          
-          console.log('✅ Page: Original file loaded successfully');
-          setCurrentDoc(docData);
+        if (!result.data) {
+          throw new Error('No data returned from API');
         }
+        
+        const pdfData = result.data.pdf;
+        
+        if (!pdfData) {
+          console.error('📄 Page: No PDF data in response. Full response:', result);
+          throw new Error('No PDF data found in file - check server logs for file service errors');
+        }
+        
+        // Verify PDF data format
+        if (typeof pdfData !== 'string' || !pdfData.startsWith('data:')) {
+          console.error('📄 Page: Invalid PDF data format:', { type: typeof pdfData, starts: pdfData?.substring(0, 20) });
+          throw new Error('PDF data is not in the correct base64 data URL format');
+        }
+        
+        // The file service should have already converted PDF to base64 data URL format
+        const docData = { 
+          ...result.data, 
+          pdf: pdfData,
+          isBatch: false,
+          fileName: result.data.fileName || file.fileName || 'Untitled File'
+        };
+        
+        console.log('✅ Page: Original file loaded successfully with PDF data');
+        setCurrentDoc(docData);
       }
       
     } catch (error) {
