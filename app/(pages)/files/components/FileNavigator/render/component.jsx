@@ -1,7 +1,7 @@
-// app/files/components/FileNavigator/render/component.jsx - FIXED with proper React imports
+// app/(pages)/files/components/FileNavigator/render/component.jsx - Enhanced with expandable folder tree
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react'; // ✅ FIXED: Added all required React imports
+import React, { useRef, useState } from 'react';
 import { ui } from '@/components/ui';
 import { useCore } from '../hooks/core';
 import { useComponentState } from '../hooks/state';
@@ -13,6 +13,11 @@ export default function FileNavigator(props) {
   // Add the missing refs
   const fileInputRef = useRef();
   const folderInputRef = useRef();
+
+  // State for expandable folder tree
+  const [expandedFolders, setExpandedFolders] = useState(new Set());
+  const [folderChildren, setFolderChildren] = useState(new Map());
+  const [loadingFolders, setLoadingFolders] = useState(new Set());
 
   // Helper function to handle file uploads
   const handleFileUpload = (e) => {
@@ -33,6 +38,60 @@ export default function FileNavigator(props) {
     
     // Reset input
     e.target.value = '';
+  };
+
+  // Toggle folder expansion
+  const toggleFolderExpansion = async (folder) => {
+    const folderId = folder._id;
+    const isExpanded = expandedFolders.has(folderId);
+    
+    if (isExpanded) {
+      // Collapse folder
+      setExpandedFolders(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(folderId);
+        return newSet;
+      });
+    } else {
+      // Expand folder - load children if not already loaded
+      setExpandedFolders(prev => new Set([...prev, folderId]));
+      
+      if (!folderChildren.has(folderId)) {
+        setLoadingFolders(prev => new Set([...prev, folderId]));
+        
+        try {
+          // Load both subfolders and files for this folder
+          const [foldersResult] = await Promise.all([
+            core?.loadFolderChildren ? core.loadFolderChildren(folderId) : { folders: [], files: [] },
+            // You might want to add a method to load files for a specific folder
+            Promise.resolve({ files: [] })
+          ]);
+          
+          setFolderChildren(prev => new Map([
+            ...prev,
+            [folderId, {
+              folders: foldersResult.folders || [],
+              files: foldersResult.files || []
+            }]
+          ]));
+        } catch (error) {
+          console.error('Failed to load folder children:', error);
+        } finally {
+          setLoadingFolders(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(folderId);
+            return newSet;
+          });
+        }
+      }
+    }
+  };
+
+  // Navigate to folder (for viewing its contents)
+  const navigateToFolder = (folder) => {
+    if (core?.navigateToFolder) {
+      core.navigateToFolder(folder);
+    }
   };
 
   // Add error display for debugging
@@ -205,7 +264,20 @@ export default function FileNavigator(props) {
                       value={state.searchInputValue}
                       onFocus={state.handleSearchFocus}
                       onBlur={state.handleSearchBlur}
-                      onChange={(e) => state.setSearchInputValue(e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        state.setSearchInputValue(value);
+                        // Trigger search through core hook
+                        if (core?.setSearchQuery) {
+                          core.setSearchQuery(value);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          state.handleSearchSubmit(e);
+                        }
+                      }}
                       className="pl-10 pr-12 h-9 bg-white/80 dark:bg-slate-800/80 border-slate-200/60 dark:border-slate-700/60 focus:border-primary/60 transition-colors"
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -268,24 +340,58 @@ export default function FileNavigator(props) {
                         <EmptySearchResults />
                       )
                     ) : (
-                      // Normal Folder View
+                      // Normal Folder View - Enhanced with expandable tree
                       <>
-                        {/* Render Folders */}
-                        {Array.isArray(props.root) && props.root.map(folder => (
+                        {/* Back to parent button */}
+                        {props.currentFolder && (
+                          <div className="mb-3">
+                            <ui.Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => navigateToFolder(null)}
+                              className="flex items-center gap-2 w-full justify-start text-slate-600 hover:text-primary hover:bg-primary/10"
+                            >
+                              <ui.icons.ArrowLeft size={14} />
+                              <span>Back to Root</span>
+                            </ui.Button>
+                          </div>
+                        )}
+
+                        {/* Render Expandable Folder Tree */}
+                        {!props.currentFolder && Array.isArray(props.root) && (
+                          <ExpandableFolderTree
+                            folders={props.root}
+                            expandedFolders={expandedFolders}
+                            folderChildren={folderChildren}
+                            loadingFolders={loadingFolders}
+                            onToggleExpansion={toggleFolderExpansion}
+                            onNavigateToFolder={navigateToFolder}
+                            onEditFolder={state.openEditFolderDialog}
+                            onDeleteFolder={state.openDeleteFolderDialog}
+                            level={0}
+                          />
+                        )}
+
+                        {/* Show current folder's direct children */}
+                        {props.currentFolder && Array.isArray(props.root) && props.root.map(folder => (
                           <FolderItem
                             key={folder._id}
                             folder={folder}
                             currentFolder={props.currentFolder}
-                            onNavigate={core?.navigateToFolder}
+                            onNavigate={navigateToFolder}
                             onEdit={state.openEditFolderDialog}
                             onDelete={state.openDeleteFolderDialog}
                           />
                         ))}
 
-                        {/* Render Root Files */}
-                        {!props.currentFolder && Array.isArray(props.files) && props.files.length > 0 && (
-                          <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-700/60">
-                            <h4 className="font-medium text-sm mb-3 pl-2 text-slate-600 dark:text-slate-400">Root Files</h4>
+                        {/* Render Files */}
+                        {Array.isArray(props.files) && props.files.length > 0 && (
+                          <div className={(!props.currentFolder && props.root?.length > 0) ? "mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-700/60" : ""}>
+                            {(!props.currentFolder && props.root?.length > 0) && (
+                              <h4 className="font-medium text-sm mb-3 pl-2 text-slate-600 dark:text-slate-400">
+                                {props.currentFolder ? 'Files in this folder' : 'Root Files'}
+                              </h4>
+                            )}
                             <div className="space-y-1">
                               {props.files.map(f => (
                                 <FileCard
@@ -297,21 +403,6 @@ export default function FileNavigator(props) {
                                 />
                               ))}
                             </div>
-                          </div>
-                        )}
-
-                        {/* Render Files in Current Folder */}
-                        {props.currentFolder && Array.isArray(props.files) && props.files.length > 0 && (
-                          <div className="space-y-1">
-                            {props.files.map(f => (
-                              <FileCard
-                                key={f._id}
-                                file={f}
-                                onClick={() => core?.openFileAndClose(f)}
-                                getFileIcon={state.getFileIcon}
-                                getFileBadgeClass={state.getFileBadgeClass}
-                              />
-                            ))}
                           </div>
                         )}
 
@@ -375,32 +466,178 @@ export default function FileNavigator(props) {
   );
 }
 
-// ===== COMPONENT HELPERS =====
+// ===== NEW: EXPANDABLE FOLDER TREE COMPONENT =====
+function ExpandableFolderTree({ 
+  folders, 
+  expandedFolders, 
+  folderChildren, 
+  loadingFolders,
+  onToggleExpansion, 
+  onNavigateToFolder, 
+  onEditFolder, 
+  onDeleteFolder,
+  level = 0 
+}) {
+  return (
+    <div className="space-y-1">
+      {folders.map(folder => (
+        <div key={folder._id}>
+          <FolderItemExpandable
+            folder={folder}
+            isExpanded={expandedFolders.has(folder._id)}
+            isLoading={loadingFolders.has(folder._id)}
+            onToggleExpansion={() => onToggleExpansion(folder)}
+            onNavigateToFolder={() => onNavigateToFolder(folder)}
+            onEditFolder={() => onEditFolder(folder)}
+            onDeleteFolder={() => onDeleteFolder(folder)}
+            level={level}
+          />
+          
+          {/* Render children if expanded */}
+          {expandedFolders.has(folder._id) && folderChildren.has(folder._id) && (
+            <div className="ml-6 mt-1">
+              <ExpandableFolderTree
+                folders={folderChildren.get(folder._id).folders || []}
+                expandedFolders={expandedFolders}
+                folderChildren={folderChildren}
+                loadingFolders={loadingFolders}
+                onToggleExpansion={onToggleExpansion}
+                onNavigateToFolder={onNavigateToFolder}
+                onEditFolder={onEditFolder}
+                onDeleteFolder={onDeleteFolder}
+                level={level + 1}
+              />
+              
+              {/* Show files in expanded folder */}
+              {folderChildren.get(folder._id).files?.map(file => (
+                <div key={file._id} className="ml-4">
+                  <FileCard
+                    file={file}
+                    onClick={() => {/* handle file click */}}
+                    getFileIcon={() => ({ name: 'FileIcon', className: 'text-slate-500' })}
+                    getFileBadgeClass={() => 'bg-slate-100 text-slate-800 border-slate-200'}
+                    compact
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
-function FileCard({ file, onClick, getFileIcon, getFileBadgeClass }) {
+// ===== ENHANCED FOLDER ITEM WITH EXPANSION =====
+function FolderItemExpandable({ 
+  folder, 
+  isExpanded, 
+  isLoading,
+  onToggleExpansion, 
+  onNavigateToFolder, 
+  onEditFolder, 
+  onDeleteFolder,
+  level = 0 
+}) {
+  const indentClass = level > 0 ? `ml-${level * 4}` : '';
+  
+  return (
+    <div className={`select-none ${indentClass}`}>
+      <div className="flex items-center gap-1 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 rounded-lg px-2 py-2 group transition-colors">
+        {/* Expansion toggle */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpansion();
+          }}
+          className="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          {isLoading ? (
+            <ui.icons.Loader2 size={12} className="animate-spin" />
+          ) : (
+            <ui.icons.ChevronRight 
+              size={12} 
+              className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} 
+            />
+          )}
+        </button>
+        
+        {/* Folder icon and name */}
+        <div 
+          className="flex items-center gap-2 flex-1 cursor-pointer"
+          onClick={onNavigateToFolder}
+        >
+          <ui.icons.FolderIcon size={14} className="text-slate-500" />
+          <span className="truncate text-sm">{folder.name}</span>
+          
+          {/* File/folder count badges */}
+          {(folder.fileCount > 0 || folder.subfolderCount > 0) && (
+            <div className="flex gap-1 ml-2">
+              {folder.subfolderCount > 0 && (
+                <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                  {folder.subfolderCount}
+                </span>
+              )}
+              {folder.fileCount > 0 && (
+                <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                  {folder.fileCount}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        
+        {/* Actions menu */}
+        <ui.DropdownMenu>
+          <ui.DropdownMenuTrigger asChild onClick={e => e.stopPropagation()}>
+            <ui.Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
+              <ui.icons.MoreHorizontal size={14}/>
+            </ui.Button>
+          </ui.DropdownMenuTrigger>
+          <ui.DropdownMenuContent align="end" className="w-48">
+            <ui.DropdownMenuItem onClick={() => onNavigateToFolder()}>
+              <ui.icons.FolderOpen size={14} className="mr-2"/> Open Folder
+            </ui.DropdownMenuItem>
+            <ui.DropdownMenuItem onClick={() => onEditFolder()}>
+              <ui.icons.Edit2 size={14} className="mr-2"/> Rename Folder
+            </ui.DropdownMenuItem>
+            <ui.DropdownMenuSeparator/>
+            <ui.DropdownMenuItem onClick={() => onDeleteFolder()} className="text-red-600">
+              <ui.icons.Trash2 size={14} className="mr-2"/> Delete Folder
+            </ui.DropdownMenuItem>
+          </ui.DropdownMenuContent>
+        </ui.DropdownMenu>
+      </div>
+    </div>
+  );
+}
+
+// ===== EXISTING COMPONENT HELPERS (keeping the same) =====
+
+function FileCard({ file, onClick, getFileIcon, getFileBadgeClass, compact = false }) {
   const icon = getFileIcon(file);
   
   return (
     <ui.Card
       onClick={onClick}
-      className="group hover:shadow-md transition-all duration-200 hover:border-primary/20 cursor-pointer mb-2 border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/50 backdrop-blur"
+      className={`group hover:shadow-md transition-all duration-200 hover:border-primary/20 cursor-pointer ${compact ? 'mb-1' : 'mb-2'} border-slate-200/60 dark:border-slate-700/60 bg-white/80 dark:bg-slate-800/50 backdrop-blur`}
     >
-      <ui.CardContent className="p-3">
+      <ui.CardContent className={compact ? "p-2" : "p-3"}>
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
+          <div className={`${compact ? 'p-1' : 'p-2'} rounded-lg bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors`}>
             {React.createElement(ui.icons[icon.name], { 
-              size: 14, 
+              size: compact ? 12 : 14, 
               className: icon.className 
             })}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 mb-1">
-              <span className="truncate flex-1 font-medium text-sm group-hover:text-primary transition-colors">
+              <span className={`truncate flex-1 font-medium ${compact ? 'text-xs' : 'text-sm'} group-hover:text-primary transition-colors`}>
                 {file.fileName || `Batch Run ${file.runNumber}` || 'Untitled'}
               </span>
             </div>
             {file.status && (
-              <ui.Badge variant="outline" className={`text-xs ${getFileBadgeClass(file.status)}`}>
+              <ui.Badge variant="outline" className={`${compact ? 'text-xs' : 'text-xs'} ${getFileBadgeClass(file.status)}`}>
                 {file.status}
               </ui.Badge>
             )}

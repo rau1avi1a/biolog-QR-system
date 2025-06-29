@@ -1,7 +1,7 @@
-// app/files/components/FileNavigator/hooks/core.js - FIXED: Handle missing archive API
+// app/(pages)/files/components/FileNavigator/hooks/core.js - COMPLETE Enhanced with folder children loading
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'; // ✅ FIXED: All React imports
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { filesApi } from '../../../lib/api';
 
@@ -60,11 +60,9 @@ export function useCore(props) {
       queryFn: async () => {
         try {
           console.log(`🔍 Loading ${status} files...`);
-          // Use the correct API method for getting files by status
           const result = await filesApi.workflow.getFilesByStatus(status);
           console.log(`📊 ${status} files result:`, result);
           
-          // Handle different response formats
           let data = [];
           if (result.error) {
             console.error(`❌ Error loading ${status} files:`, result.error);
@@ -75,7 +73,6 @@ export function useCore(props) {
             data = result;
           }
           
-          // Ensure each file has a displayable fileName
           return data.map(file => ({
             ...file,
             fileName: file.fileName || 
@@ -119,8 +116,6 @@ export function useCore(props) {
     queryFn: async () => {
       try {
         console.log('🔍 Loading archived files...');
-        
-        // FIXED: Since archive API doesn't exist, get completed batches instead
         const result = await filesApi.workflow.getFilesByStatus('Completed');
         console.log('📚 Archive files result (using completed batches):', result);
         
@@ -134,13 +129,12 @@ export function useCore(props) {
           data = result;
         }
         
-        // Ensure each archived file has a displayable fileName and mark as archived
         return data.map(file => ({
           ...file,
           fileName: file.fileName || 
                    `Batch Run ${file.runNumber}` ||
                    'Archived File',
-          isArchived: true // Mark as archived for display purposes
+          isArchived: true
         }));
       } catch (error) {
         console.error('💥 Failed to load archived files:', error);
@@ -162,7 +156,6 @@ export function useCore(props) {
     const rootFiles = [];
 
     archivedBatches.forEach(batch => {
-      // FIXED: Since we don't have folderPath, group by status or date
       const createdDate = new Date(batch.createdAt);
       const monthYear = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
       const path = `Completed ${monthYear}`;
@@ -183,7 +176,6 @@ export function useCore(props) {
     });
 
     const folders = Array.from(folderMap.values());
-
     return { folders, rootFiles: [] };
   }, [archivedBatches]);
 
@@ -217,8 +209,11 @@ export function useCore(props) {
     setSearchBusy(true);
     try {
       console.log('🔍 Performing search for:', query);
-      // Use the correct API method for searching files
-      const result = await filesApi.files.search(query.trim());
+      
+      // Use the enhanced search API that handles fuzzy matching
+      const response = await fetch(`/api/files?search=${encodeURIComponent(query.trim())}`);
+      const result = await response.json();
+      
       console.log('🔍 Search result:', result);
       
       let searchData = [];
@@ -231,7 +226,7 @@ export function useCore(props) {
         searchData = result;
       }
       
-      // Ensure each search result has a displayable fileName
+      // Ensure all search results have proper fileName for display
       const enrichedResults = searchData.map(file => ({
         ...file,
         fileName: file.fileName || 
@@ -240,6 +235,7 @@ export function useCore(props) {
                  'Untitled'
       }));
       
+      console.log('✅ Search completed:', enrichedResults.length, 'results');
       setSearchResults(enrichedResults);
     } catch (error) {
       console.error('💥 Search failed:', error);
@@ -330,9 +326,7 @@ export function useCore(props) {
   /* ── FILE STATUS OPERATIONS ─────────────────────────────────── */
   const changeFileStatus = useCallback(async (fileId, status) => {
     try {
-      // Use the correct API method for updating batch status
       await filesApi.batches.updateStatus(fileId, status);
-      // Trigger refresh of status tabs will be handled by query invalidation
     } catch (error) {
       console.error('Failed to update file status:', error);
     }
@@ -341,14 +335,35 @@ export function useCore(props) {
   /* ── FOLDER TREE OPERATIONS ─────────────────────────────────── */
   const loadFolderChildren = useCallback(async (folderId) => {
     try {
+      console.log('🔍 Loading children for folder:', folderId);
+      
+      // Load both subfolders and files for this folder
       const [foldersResult, filesResult] = await Promise.all([
         filesApi.folders.list(folderId),
         filesApi.files.list(folderId)
       ]);
       
+      console.log('📁 Folder children result:', { foldersResult, filesResult });
+      
+      // Handle folders result
+      let folders = [];
+      if (foldersResult.error) {
+        console.error('❌ Error loading subfolders:', foldersResult.error);
+      } else if (foldersResult.data) {
+        folders = Array.isArray(foldersResult.data) ? foldersResult.data : [];
+      }
+      
+      // Handle files result
+      let files = [];
+      if (filesResult.error) {
+        console.error('❌ Error loading folder files:', filesResult.error);
+      } else if (filesResult.data) {
+        files = Array.isArray(filesResult.data) ? filesResult.data : [];
+      }
+      
       return {
-        folders: foldersResult.data || [],
-        files: filesResult.data || []
+        folders,
+        files
       };
     } catch (error) {
       console.error('Failed to load folder children:', error);
@@ -358,6 +373,7 @@ export function useCore(props) {
 
   /* ── NAVIGATION HELPERS ─────────────────────────────────────── */
   const navigateToFolder = useCallback((folder) => {
+    console.log('🧭 Navigating to folder:', folder?.name || 'root');
     setCurrentFolder(folder);
     setSearch?.(null);
   }, [setCurrentFolder, setSearch]);
@@ -439,7 +455,7 @@ export function useCore(props) {
     clearSearch,
     performSearch,
     changeFileStatus,
-    loadFolderChildren,
+    loadFolderChildren, // NEW: Added for expandable tree
     navigateToFolder,
     navigateToArchiveFolder,
     openFileAndClose,
