@@ -1,7 +1,7 @@
-// app/files/components/PDFEditor/hooks/state.js
+// app/files/components/PDFEditor/hooks/state.js - FIXED with useEffect import
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 
 /**
  * PDFEditor State Hook
@@ -144,7 +144,6 @@ export function useComponentState(core, props) {
     return null;
   }, [core.isOriginal, core.isDraft, core.isInProgress, core.isInReview, core.isSaving, core.isCreatingWorkOrder, compact]);
 
-  // === SAVE DIALOG LOGIC ===
   // === SAVE DIALOG LOGIC ===
   const getActionInfo = useCallback(() => {
     const isOriginal = !doc?.isBatch;

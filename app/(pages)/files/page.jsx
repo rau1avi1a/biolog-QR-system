@@ -1,4 +1,4 @@
-// app/(pages)/files/page.jsx - FIXED: Proper API response handling
+// app/(pages)/files/page.jsx - FIXED: Proper file opening and search functionality
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
@@ -34,88 +34,104 @@ export default function FilesPage() {
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
-  // === LOAD DATA FOR FILE NAVIGATOR ===
+  // === ENHANCED FOLDER LOADING LOGIC ===
   useEffect(() => {
-    const loadRootFolders = async () => {
+    const loadFolderData = async () => {
       try {
         setDataLoading(true);
         setError(null);
-        console.log('🔍 Page: Loading root folders...');
         
-        const result = await filesApi.folders.list();
-        console.log('📁 Page: Folders API result:', result);
-        
-        // FIXED: Handle the normalized response properly
-        let foldersData = [];
-        if (result.error) {
-          throw new Error(result.error);
-        } else if (result.data) {
-          // The result.data contains the actual folders array
-          foldersData = Array.isArray(result.data) ? result.data : [];
+        if (currentFolder) {
+          // Load data for a specific folder
+          console.log('🔍 Page: Loading data for folder:', currentFolder.name);
+          
+          const [foldersResult, filesResult] = await Promise.all([
+            filesApi.folders.list(currentFolder._id),
+            filesApi.files.list(currentFolder._id)
+          ]);
+          
+          console.log('📁 Page: Folder data results:', { foldersResult, filesResult });
+          
+          // Handle folders
+          let foldersData = [];
+          if (foldersResult.error) {
+            console.error('❌ Error loading subfolders:', foldersResult.error);
+          } else if (foldersResult.data) {
+            foldersData = Array.isArray(foldersResult.data) ? foldersResult.data : [];
+          }
+          
+          // Handle files
+          let filesData = [];
+          if (filesResult.error) {
+            console.error('❌ Error loading folder files:', filesResult.error);
+          } else if (filesResult.data) {
+            filesData = Array.isArray(filesResult.data) ? filesResult.data : [];
+          }
+          
+          setRoot(foldersData);
+          setFiles(filesData);
+          
+          console.log('✅ Page: Loaded folder data:', {
+            subfolders: foldersData.length,
+            files: filesData.length
+          });
+          
+        } else {
+          // Load root folders and files
+          console.log('🔍 Page: Loading root data...');
+          
+          const [foldersResult, filesResult] = await Promise.all([
+            filesApi.folders.list(), // No parent = root folders
+            filesApi.files.list()    // No folder = root files
+          ]);
+          
+          console.log('📁 Page: Root data results:', { foldersResult, filesResult });
+          
+          // Handle root folders
+          let foldersData = [];
+          if (foldersResult.error) {
+            throw new Error(foldersResult.error);
+          } else if (foldersResult.data) {
+            foldersData = Array.isArray(foldersResult.data) ? foldersResult.data : [];
+          }
+          
+          // Handle root files
+          let filesData = [];
+          if (filesResult.error) {
+            console.error('❌ Error loading root files:', filesResult.error);
+            // Don't fail completely for file errors
+          } else if (filesResult.data) {
+            filesData = Array.isArray(filesResult.data) ? filesResult.data : [];
+          }
+          
+          setRoot(foldersData);
+          setFiles(filesData);
+          
+          console.log('✅ Page: Loaded root data:', {
+            folders: foldersData.length,
+            files: filesData.length
+          });
         }
         
-        setRoot(foldersData);
-        console.log('✅ Page: Loaded folders:', foldersData.length);
-        
       } catch (error) {
-        console.error('❌ Page: Failed to load folders:', error);
-        setError(`Failed to load folders: ${error.message}`);
+        console.error('❌ Page: Failed to load folder data:', error);
+        setError(`Failed to load data: ${error.message}`);
         setRoot([]);
+        setFiles([]);
       } finally {
         setDataLoading(false);
       }
     };
 
-    loadRootFolders();
-  }, [refreshTrigger]);
-
-  useEffect(() => {
-    const loadFiles = async () => {
-      try {
-        setError(null);
-        let result;
-        
-        if (currentFolder) {
-          console.log('🔍 Page: Loading files for folder:', currentFolder.name);
-          result = await filesApi.files.list(currentFolder._id);
-        } else if (view === 'folders') {
-          console.log('🔍 Page: Loading root files...');
-          result = await filesApi.files.list();
-        } else {
-          return;
-        }
-
-        console.log('📄 Page: Files API result:', result);
-
-        // FIXED: Handle the normalized response properly
-        let filesData = [];
-        if (result.error) {
-          throw new Error(result.error);
-        } else if (result.data) {
-          // The result.data contains the actual files array
-          filesData = Array.isArray(result.data) ? result.data : [];
-        }
-
-        setFiles(filesData);
-        console.log('✅ Page: Loaded files:', filesData.length);
-        
-      } catch (error) {
-        console.error('❌ Page: Failed to load files:', error);
-        setError(`Failed to load files: ${error.message}`);
-        setFiles([]);
-      }
-    };
-
-    loadFiles();
-  }, [currentFolder, view, refreshTrigger]);
+    loadFolderData();
+  }, [currentFolder, refreshTrigger, view]);
 
   // === FOLDER OPERATIONS ===
   const createFolder = useCallback(async (name) => {
     try {
-      console.log('🔍 Page: Creating folder:', name);
+      console.log('🔍 Page: Creating folder:', name, 'in:', currentFolder?.name || 'root');
       const result = await filesApi.folders.create(name, currentFolder?._id);
       
-      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -134,7 +150,6 @@ export default function FilesPage() {
       console.log('🔍 Page: Updating folder:', id, 'to:', name);
       const result = await filesApi.folders.update(id, name);
       
-      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -153,7 +168,6 @@ export default function FilesPage() {
       console.log('🔍 Page: Deleting folder:', id);
       const result = await filesApi.folders.remove(id);
       
-      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -186,7 +200,6 @@ export default function FilesPage() {
         console.log(`🔍 Page: Uploading file ${i + 1}/${fileList.length}:`, file.name);
         const result = await filesApi.files.upload(file, currentFolder?._id);
         
-        // FIXED: Check for errors properly
         if (result.error) {
           throw new Error(`Failed to upload ${file.name}: ${result.error}`);
         }
@@ -214,7 +227,6 @@ export default function FilesPage() {
     setUploadProgress({ current: 0, total: fileList.length });
 
     try {
-      // Build the file data array with relative paths
       const fileDataArray = fileList.map((file) => ({
         file,
         relativePath: file.webkitRelativePath || file.name
@@ -224,7 +236,6 @@ export default function FilesPage() {
 
       const result = await filesApi.files.uploadBatch(fileDataArray, currentFolder?._id);
       
-      // FIXED: Check for errors properly
       if (result.error) {
         throw new Error(result.error);
       }
@@ -241,6 +252,7 @@ export default function FilesPage() {
     }
   }, [currentFolder, triggerRefresh]);
 
+  // === ENHANCED FILE OPENING LOGIC ===
   const openFile = useCallback(async (file) => {
     try {
       console.log('🔍 Page: Opening file:', file);
@@ -249,53 +261,55 @@ export default function FilesPage() {
         throw new Error('Invalid file data');
       }
 
-      // Check if this is an archived file/batch
-      if (file.isArchived || file.batchId) {
-        const result = await filesApi.archive.getFile(file._id);
-        if (result.error) {
-          throw new Error('Failed to load archived file: ' + result.error);
-        }
-        if (result.data) {
-          setCurrentDoc({ 
-            ...result.data, 
-            pdf: result.data.pdf,
-            isBatch: true,
-            isArchived: true,
-            originalFileId: result.data.originalFileId || result.data.fileId
-          });
-        }
-      } else if (file.fileId || file.status || file.runNumber) {
+      // Show loading state
+      setError(null);
+
+      // Determine file type and load accordingly
+      if (file.sourceType === 'batch' || file.isBatch || file.status || file.runNumber) {
         // This is a batch file
+        console.log('📦 Page: Opening batch file:', file._id);
+        
         const result = await filesApi.batches.get(file._id);
         
         if (result.error) {
           throw new Error('Failed to load batch: ' + result.error);
         }
+        
         if (result.data) {
           const batch = result.data;
           
-          // For batches, prioritize the signed PDF if it exists
           let pdfData = null;
           
+          // Try different PDF sources in order of preference
           if (batch.signedPdf && batch.signedPdf.data) {
             // Use the baked PDF that has overlays burned in
             pdfData = `data:${batch.signedPdf.contentType || 'application/pdf'};base64,${batch.signedPdf.data.toString('base64')}`;
+            console.log('📄 Using signed PDF');
           } else if (batch.pdf) {
+            // Use stored PDF data
             pdfData = batch.pdf;
+            console.log('📄 Using batch PDF data');
           } else if (batch.fileId) {
             // Fallback: load from original file
             const originalFileId = typeof batch.fileId === 'object' ? batch.fileId._id : batch.fileId;
+            console.log('📄 Loading PDF from original file:', originalFileId);
+            
             try {
               const originalResult = await filesApi.files.getWithPdf(originalFileId);
               if (!originalResult.error && originalResult.data?.pdf) {
                 pdfData = originalResult.data.pdf;
+                console.log('📄 Using original file PDF');
               }
             } catch (err) {
               console.error('Failed to load original file PDF:', err);
             }
           }
           
-          setCurrentDoc({ 
+          if (!pdfData) {
+            throw new Error('No PDF data found for this batch');
+          }
+          
+          const docData = { 
             ...batch, 
             pdf: pdfData,
             isBatch: true,
@@ -303,28 +317,63 @@ export default function FilesPage() {
             // Don't pass overlays if we have a baked PDF
             overlays: batch.signedPdf ? null : (batch.overlays || null),
             // Ensure we have a fileName for display
-            fileName: batch.fileId?.fileName || file.fileName || `Batch Run ${batch.runNumber}`
-          });
+            fileName: batch.fileId?.fileName || file.fileName || `Batch Run ${batch.runNumber}`,
+            runNumber: batch.runNumber
+          };
+          
+          console.log('✅ Page: Batch loaded successfully');
+          setCurrentDoc(docData);
         }
+        
+      } else if (file.isArchived) {
+        // This is an archived file
+        console.log('🗄️ Page: Opening archived file:', file._id);
+        
+        const result = await filesApi.archive.getFile(file._id);
+        if (result.error) {
+          throw new Error('Failed to load archived file: ' + result.error);
+        }
+        
+        if (result.data) {
+          const docData = { 
+            ...result.data, 
+            pdf: result.data.pdf,
+            isBatch: true,
+            isArchived: true,
+            originalFileId: result.data.originalFileId || result.data.fileId,
+            fileName: result.data.fileName || file.fileName || 'Archived File'
+          };
+          
+          console.log('✅ Page: Archived file loaded successfully');
+          setCurrentDoc(docData);
+        }
+        
       } else {
         // This is an original file
+        console.log('📄 Page: Opening original file:', file._id);
+        
         const result = await filesApi.files.getWithPdf(file._id);
         if (result.error) {
           throw new Error('Failed to load file: ' + result.error);
         }
+        
         if (result.data) {
-          setCurrentDoc({ 
+          const docData = { 
             ...result.data, 
             pdf: result.data.pdf,
             isBatch: false,
             fileName: result.data.fileName || file.fileName || 'Untitled File'
-          });
+          };
+          
+          console.log('✅ Page: Original file loaded successfully');
+          setCurrentDoc(docData);
         }
       }
+      
     } catch (error) {
-      console.error('Failed to open file:', error);
+      console.error('❌ Page: Failed to open file:', error);
       setError(`Failed to open file: ${error.message}`);
-      throw error;
+      // Don't throw - just show error message
     }
   }, []);
 
@@ -342,28 +391,23 @@ export default function FilesPage() {
   }, []);
 
   const handlePropertiesSaved = useCallback((updatedDoc) => {
-    // Update current doc if it's the one being edited
     if (currentDoc && currentDoc._id === updatedDoc._id) {
       setCurrentDoc(updatedDoc);
     }
-    // Trigger file list refresh
     triggerRefresh();
   }, [currentDoc, triggerRefresh]);
 
   const handleFileDeleted = useCallback((deletedDoc) => {
-    // Close properties
     setPropertiesDoc(null);
-    // Clear current doc if it was deleted
     if (currentDoc && currentDoc._id === deletedDoc._id) {
       setCurrentDoc(null);
     }
-    // Trigger file list refresh
     triggerRefresh();
   }, [currentDoc, triggerRefresh]);
 
   // === FILE NAVIGATOR PROPS ===
   const fileNavigatorProps = {
-    // Navigation state (what FileNavigator expects)
+    // Navigation state
     view,
     setView,
     root,
@@ -377,14 +421,14 @@ export default function FilesPage() {
     dataLoading,
     error,
 
-    // Operations (what FileNavigator expects)
+    // Operations
     createFolder,
     updateFolder,
     deleteFolder,
     handleFiles,
     onFolderUpload,
 
-    // Event handlers (what FileNavigator expects)
+    // Event handlers
     openFile,
     closeDrawer: handleCloseDrawer,
     refreshTrigger,
@@ -399,7 +443,8 @@ export default function FilesPage() {
     view,
     uploading,
     dataLoading,
-    hasError: !!error
+    hasError: !!error,
+    currentDoc: currentDoc?.fileName || 'none'
   });
 
   // === RENDER ===
