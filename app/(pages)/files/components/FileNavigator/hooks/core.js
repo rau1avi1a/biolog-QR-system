@@ -1,4 +1,4 @@
-// app/(pages)/files/components/FileNavigator/hooks/core.js - COMPLETE Enhanced with folder children loading
+// app/(pages)/files/components/FileNavigator/hooks/core.js - FIXED: Search only original files
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -194,7 +194,7 @@ export function useCore(props) {
     return currentArchiveFolder.children || [];
   }, [currentArchiveFolder, archiveStructure.folders]);
 
-  /* ── SEARCH OPERATIONS ──────────────────────────────────────── */
+  /* ── SEARCH OPERATIONS (FIXED: Only search original files for Files tab) ──────────── */
   const performSearch = useCallback(async (query) => {
     if (!query?.trim()) {
       setSearchResults(null);
@@ -208,42 +208,78 @@ export function useCore(props) {
 
     setSearchBusy(true);
     try {
-      console.log('🔍 Performing search for:', query);
+      console.log('🔍 Performing search for:', query, 'in view:', view);
       
-      // Use the enhanced search API that handles fuzzy matching
-      const response = await fetch(`/api/files?search=${encodeURIComponent(query.trim())}`);
-      const result = await response.json();
-      
-      console.log('🔍 Search result:', result);
-      
-      let searchData = [];
-      if (result.error) {
-        console.error('❌ Search error:', result.error);
-        searchData = [];
-      } else if (result.data && Array.isArray(result.data)) {
-        searchData = result.data;
-      } else if (Array.isArray(result)) {
-        searchData = result;
+      if (view === 'folders') {
+        // FIXED: For Files tab, only search original files (not batches)
+        console.log('📄 Searching original files only...');
+        
+        // Use the files API search which should return original files
+        const response = await fetch(`/api/files?search=${encodeURIComponent(query.trim())}`);
+        const result = await response.json();
+        
+        console.log('🔍 Files API search result:', result);
+        
+        let searchData = [];
+        if (result.error) {
+          console.error('❌ Search error:', result.error);
+          searchData = [];
+        } else if (result.data && Array.isArray(result.data)) {
+          searchData = result.data;
+        } else if (Array.isArray(result)) {
+          searchData = result;
+        }
+        
+        // FIXED: Filter to ensure only original files (no batches)
+        const originalFilesOnly = searchData.filter(file => {
+          const isOriginalFile = !file.isBatch && 
+                                !file.runNumber && 
+                                !file.status && 
+                                !file.sourceType && 
+                                !file.batchId;
+          return isOriginalFile;
+        });
+        
+        console.log('✅ Filtered to original files only:', originalFilesOnly.length, 'out of', searchData.length);
+        setSearchResults(originalFilesOnly);
+        
+      } else {
+        // For Status and Archive tabs, use the existing search logic
+        const response = await fetch(`/api/files?search=${encodeURIComponent(query.trim())}`);
+        const result = await response.json();
+        
+        console.log('🔍 Search result:', result);
+        
+        let searchData = [];
+        if (result.error) {
+          console.error('❌ Search error:', result.error);
+          searchData = [];
+        } else if (result.data && Array.isArray(result.data)) {
+          searchData = result.data;
+        } else if (Array.isArray(result)) {
+          searchData = result;
+        }
+        
+        // Ensure all search results have proper fileName for display
+        const enrichedResults = searchData.map(file => ({
+          ...file,
+          fileName: file.fileName || 
+                   (file.fileId?.fileName ? `${file.fileId.fileName.replace('.pdf', '')}-Run-${file.runNumber}.pdf` : null) ||
+                   `Batch Run ${file.runNumber}` ||
+                   'Untitled'
+        }));
+        
+        console.log('✅ Search completed:', enrichedResults.length, 'results');
+        setSearchResults(enrichedResults);
       }
       
-      // Ensure all search results have proper fileName for display
-      const enrichedResults = searchData.map(file => ({
-        ...file,
-        fileName: file.fileName || 
-                 (file.fileId?.fileName ? `${file.fileId.fileName.replace('.pdf', '')}-Run-${file.runNumber}.pdf` : null) ||
-                 `Batch Run ${file.runNumber}` ||
-                 'Untitled'
-      }));
-      
-      console.log('✅ Search completed:', enrichedResults.length, 'results');
-      setSearchResults(enrichedResults);
     } catch (error) {
       console.error('💥 Search failed:', error);
       setSearchResults([]);
     } finally {
       setSearchBusy(false);
     }
-  }, []);
+  }, [view]);
 
   const debouncedSearch = useCallback((query) => {
     clearTimeout(searchTimerRef.current);
@@ -353,12 +389,14 @@ export function useCore(props) {
         folders = Array.isArray(foldersResult.data) ? foldersResult.data : [];
       }
       
-      // Handle files result
+      // Handle files result - FIXED: Filter to only original files
       let files = [];
       if (filesResult.error) {
         console.error('❌ Error loading folder files:', filesResult.error);
       } else if (filesResult.data) {
-        files = Array.isArray(filesResult.data) ? filesResult.data : [];
+        const allFiles = Array.isArray(filesResult.data) ? filesResult.data : [];
+        // Filter to only include original files (not batches)
+        files = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
       }
       
       return {
@@ -418,7 +456,8 @@ export function useCore(props) {
     statusFilesInProgress: statusTabData.files.inProgress?.length || 0,
     statusFilesReview: statusTabData.files.review?.length || 0,
     archiveFilesCount: currentArchiveFiles?.length || 0,
-    archiveFoldersCount: currentArchiveFolders?.length || 0
+    archiveFoldersCount: currentArchiveFolders?.length || 0,
+    view: view
   });
   
   return {
@@ -455,7 +494,7 @@ export function useCore(props) {
     clearSearch,
     performSearch,
     changeFileStatus,
-    loadFolderChildren, // NEW: Added for expandable tree
+    loadFolderChildren,
     navigateToFolder,
     navigateToArchiveFolder,
     openFileAndClose,

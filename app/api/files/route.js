@@ -1,4 +1,4 @@
-// app/api/files/route.js - FIXED: Better response handling and fuzzy search
+// app/api/files/route.js - FIXED: Better original file filtering and PDF handling
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
@@ -103,9 +103,27 @@ export async function GET(request) {
           });
         }
       }
+
+      if (action === 'with-pdf') {
+        // FIXED: Get file with PDF data: GET /api/files?id=123&action=with-pdf
+        const file = await db.services.fileService.getFileById(id, { includePdf: true });
+        if (!file) {
+          return NextResponse.json({ 
+            success: false, 
+            error: 'File not found',
+            data: null
+          }, { status: 404 });
+        }
+        
+        return NextResponse.json({ 
+          success: true, 
+          data: file,
+          error: null
+        });
+      }
       
       // Regular file get: GET /api/files?id=123
-      const file = await db.services.fileService.getFileById(id, { includePdf: true });
+      const file = await db.services.fileService.getFileById(id);
       if (!file) {
         return NextResponse.json({ 
           success: false, 
@@ -136,51 +154,30 @@ export async function GET(request) {
       }
 
       try {
-        // Use fuzzy search - search both files and batches
+        // FIXED: Search only original files (not batches)
         const searchTerm = search.trim();
         
-        // Search in files
+        // Search in original files only
         const files = await db.services.fileService.searchFiles(searchTerm);
-        console.log('📄 Found files:', files?.length || 0);
+        console.log('📄 Found original files:', files?.length || 0);
         
-        // Search in batches (for batch files)
-        const batches = await db.services.batchService.listBatches({
-          filter: {},
-          limit: 100
+        // FIXED: Filter to ensure only original files are returned
+        const originalFiles = (files || []).filter(file => {
+          // Check that it's NOT a batch file
+          const isNotBatch = !file.isBatch && 
+                            !file.runNumber && 
+                            !file.status && 
+                            !file.batchId &&
+                            !file.sourceType;
+          return isNotBatch;
         });
         
-        // Filter batches with fuzzy matching
-        const matchingBatches = batches.filter(batch => {
-          const fileName = batch.fileName || 
-                          (batch.fileId?.fileName ? `${batch.fileId.fileName.replace('.pdf', '')}-Run-${batch.runNumber}.pdf` : null) ||
-                          `Batch Run ${batch.runNumber}`;
-          
-          return fuzzyMatch(fileName.toLowerCase(), searchTerm.toLowerCase());
-        });
-        
-        console.log('📦 Found batches:', matchingBatches?.length || 0);
-        
-        // Combine and deduplicate results
-        const allResults = [
-          ...(files || []).map(file => ({ ...file, sourceType: 'file' })),
-          ...matchingBatches.map(batch => ({ 
-            ...batch, 
-            sourceType: 'batch',
-            fileName: batch.fileName || 
-                     (batch.fileId?.fileName ? `${batch.fileId.fileName.replace('.pdf', '')}-Run-${batch.runNumber}.pdf` : null) ||
-                     `Batch Run ${batch.runNumber}`
-          }))
-        ];
-        
-        // Remove duplicates and sort by relevance
-        const uniqueResults = deduplicateAndSort(allResults, searchTerm);
-        
-        console.log('✅ Total search results:', uniqueResults.length);
+        console.log('✅ Filtered to original files only:', originalFiles.length, 'out of', files?.length || 0);
         
         return NextResponse.json({ 
           success: true, 
-          data: uniqueResults,
-          count: uniqueResults.length,
+          data: originalFiles,
+          count: originalFiles.length,
           query: search,
           error: null
         });
@@ -204,10 +201,22 @@ export async function GET(request) {
     
     console.log('📁 Listed files:', files?.length || 0, 'for folder:', folderId || 'root');
     
+    // FIXED: Filter to only return original files (not batches)
+    const originalFiles = (files || []).filter(file => {
+      const isNotBatch = !file.isBatch && 
+                        !file.runNumber && 
+                        !file.status && 
+                        !file.batchId &&
+                        !file.sourceType;
+      return isNotBatch;
+    });
+    
+    console.log('✅ Filtered to original files only:', originalFiles.length, 'out of', files?.length || 0);
+    
     return NextResponse.json({ 
       success: true, 
-      data: files || [], // Ensure array
-      count: files?.length || 0,
+      data: originalFiles,
+      count: originalFiles.length,
       folderId: folderId || null,
       error: null
     });
@@ -221,109 +230,6 @@ export async function GET(request) {
       data: null
     }, { status: 500 });
   }
-}
-
-// Fuzzy search helper
-function fuzzyMatch(text, pattern) {
-  // Simple fuzzy matching algorithm
-  const textLower = text.toLowerCase();
-  const patternLower = pattern.toLowerCase();
-  
-  // Exact match
-  if (textLower.includes(patternLower)) {
-    return true;
-  }
-  
-  // Split pattern into words and check if all words exist in text
-  const patternWords = patternLower.split(/\s+/).filter(word => word.length > 0);
-  if (patternWords.length === 0) return false;
-  
-  const allWordsMatch = patternWords.every(word => textLower.includes(word));
-  if (allWordsMatch) {
-    return true;
-  }
-  
-  // Check for partial word matches (useful for "gen a12" matching "GEN III Substrate A 12")
-  const textWords = textLower.split(/\s+/);
-  let patternIndex = 0;
-  
-  for (const textWord of textWords) {
-    if (patternIndex >= patternWords.length) break;
-    
-    const patternWord = patternWords[patternIndex];
-    
-    // Check if text word starts with pattern word or contains it
-    if (textWord.startsWith(patternWord) || textWord.includes(patternWord)) {
-      patternIndex++;
-    }
-  }
-  
-  // Consider it a match if we found most of the pattern words
-  return patternIndex >= Math.ceil(patternWords.length * 0.7); // 70% of words should match
-}
-
-// Deduplicate and sort by relevance
-function deduplicateAndSort(results, searchTerm) {
-  const seen = new Set();
-  const unique = [];
-  
-  for (const result of results) {
-    const key = `${result._id}-${result.sourceType}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(result);
-    }
-  }
-  
-  // Sort by relevance (exact matches first, then partial matches)
-  return unique.sort((a, b) => {
-    const aName = (a.fileName || '').toLowerCase();
-    const bName = (b.fileName || '').toLowerCase();
-    const searchLower = searchTerm.toLowerCase();
-    
-    // Exact matches first
-    const aExact = aName.includes(searchLower) ? 1 : 0;
-    const bExact = bName.includes(searchLower) ? 1 : 0;
-    
-    if (aExact !== bExact) {
-      return bExact - aExact; // Exact matches first
-    }
-    
-    // Then by string similarity (shorter distance = better match)
-    const aDistance = levenshteinDistance(aName, searchLower);
-    const bDistance = levenshteinDistance(bName, searchLower);
-    
-    return aDistance - bDistance;
-  });
-}
-
-// Simple Levenshtein distance for relevance scoring
-function levenshteinDistance(str1, str2) {
-  const matrix = [];
-  
-  for (let i = 0; i <= str2.length; i++) {
-    matrix[i] = [i];
-  }
-  
-  for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
-  }
-  
-  for (let i = 1; i <= str2.length; i++) {
-    for (let j = 1; j <= str1.length; j++) {
-      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-  
-  return matrix[str2.length][str1.length];
 }
 
 export async function POST(request) {
