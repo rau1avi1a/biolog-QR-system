@@ -1,5 +1,5 @@
 // =============================================================================
-// app/api/auth/route.js
+// app/api/auth/route.js (FIXED: Standardized Response Format)
 // =============================================================================
 import { NextResponse } from 'next/server';
 import db from '@/db';
@@ -15,7 +15,11 @@ export async function POST(request) {
     await db.connect();
     const user = await db.models.User.findOne({ email });
     if (!user || !(await user.matchPassword(password))) {
-      return NextResponse.json({ message: 'Invalid credentials' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Invalid credentials'
+      }, { status: 401 });
     }
 
     const token = await new SignJWT({ userId: user._id, role: user.role, email: user.email })
@@ -26,7 +30,15 @@ export async function POST(request) {
 
     const response = NextResponse.json({
       success: true,
-      user: { _id: user._id, name: user.name, email: user.email, role: user.role }
+      data: {
+        user: { 
+          _id: user._id, 
+          name: user.name, 
+          email: user.email, 
+          role: user.role 
+        }
+      },
+      error: null
     });
 
     response.cookies.set({
@@ -43,7 +55,12 @@ export async function POST(request) {
   }
 
   if (action === 'logout') {
-    const response = NextResponse.json({ message: 'Logged out successfully' });
+    const response = NextResponse.json({ 
+      success: true,
+      data: { loggedOut: true },
+      error: null,
+      message: 'Logged out successfully'
+    });
     response.cookies.set({ name: 'auth_token', value: '', expires: new Date(0) });
     return response;
   }
@@ -52,13 +69,21 @@ export async function POST(request) {
     const { name, email, password, role, netsuiteCredentials } = await request.json();
 
     if (!name || !email || !password) {
-      return NextResponse.json({ message: 'Missing required fields' }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Missing required fields'
+      }, { status: 400 });
     }
 
     await db.connect();
     const existingUser = await db.models.User.findOne({ email });
     if (existingUser) {
-      return NextResponse.json({ message: 'User already exists' }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'User already exists'
+      }, { status: 400 });
     }
 
     // Hash password before storing
@@ -108,10 +133,18 @@ export async function POST(request) {
       hasNetSuiteAccess: newUser.hasNetSuiteAccess()
     };
 
-    return NextResponse.json(userResponse, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      data: { user: userResponse },
+      error: null
+    }, { status: 201 });
   }
 
-  return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  return NextResponse.json({ 
+    success: false,
+    data: null,
+    error: 'Invalid action'
+  }, { status: 400 });
 }
 
 export async function GET(request) {
@@ -121,28 +154,47 @@ export async function GET(request) {
   if (action === 'me') {
     try {
       const token = request.cookies.get('auth_token')?.value;
-      if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 });
+      if (!token) {
+        return NextResponse.json({ 
+          success: false,
+          data: null,
+          error: 'No token'
+        }, { status: 401 });
+      }
 
       const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
       
       await db.connect();
       const user = await db.models.User.findById(payload.userId).select('-password');
       
-      if (!user) return NextResponse.json({ error: 'User not found' }, { status: 401 });
+      if (!user) {
+        return NextResponse.json({ 
+          success: false,
+          data: null,
+          error: 'User not found'
+        }, { status: 401 });
+      }
 
       return NextResponse.json({
         success: true,
-        user: { 
-          _id: user._id, 
-          name: user.name, 
-          email: user.email, 
-          role: user.role,
-          hasNetSuiteAccess: user.hasNetSuiteAccess()
-        }
+        data: {
+          user: { 
+            _id: user._id, 
+            name: user.name, 
+            email: user.email, 
+            role: user.role,
+            hasNetSuiteAccess: user.hasNetSuiteAccess()
+          }
+        },
+        error: null
       });
     } catch (error) {
       console.error('Auth verification error:', error);
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Invalid token'
+      }, { status: 401 });
     }
   }
 
@@ -150,7 +202,13 @@ export async function GET(request) {
     try {
       // Verify user has permission to list users (admin only)
       const token = request.cookies.get('auth_token')?.value;
-      if (!token) return NextResponse.json({ error: 'No token' }, { status: 401 });
+      if (!token) {
+        return NextResponse.json({ 
+          success: false,
+          data: null,
+          error: 'No token'
+        }, { status: 401 });
+      }
 
       const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
       
@@ -158,19 +216,38 @@ export async function GET(request) {
       const requestingUser = await db.models.User.findById(payload.userId);
       
       if (!requestingUser || requestingUser.role !== 'admin') {
-        return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+        return NextResponse.json({ 
+          success: false,
+          data: null,
+          error: 'Admin access required'
+        }, { status: 403 });
       }
 
       const users = await db.models.User.find()
         .select('-password -netsuiteCredentials.consumerSecret -netsuiteCredentials.tokenSecret')
         .lean();
 
-      return NextResponse.json({ success: true, users });
+      return NextResponse.json({ 
+        success: true, 
+        data: {
+          users,
+          count: users.length
+        },
+        error: null
+      });
     } catch (error) {
       console.error('List users error:', error);
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Invalid token'
+      }, { status: 401 });
     }
   }
 
-  return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  return NextResponse.json({ 
+    success: false,
+    data: null,
+    error: 'Invalid action'
+  }, { status: 400 });
 }

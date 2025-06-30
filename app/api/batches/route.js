@@ -1,4 +1,4 @@
-// app/api/batches/route.js - FIXED: Consistent response format with fileName
+// app/api/batches/route.js - FIXED: Consistent wrapped list responses with metadata
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
@@ -60,8 +60,8 @@ export async function GET(request) {
       if (!batch) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Batch not found',
-          data: null
+          data: null,
+          error: 'Batch not found'
         }, { status: 404 });
       }
       
@@ -80,7 +80,7 @@ export async function GET(request) {
       });
     }
 
-    // GET /api/batches?status=Review&fileId=123
+    // List batches with various filters: GET /api/batches?status=Review&fileId=123
     const filter = {};
     const status = searchParams.get('status');
     const fileId = searchParams.get('fileId');
@@ -89,15 +89,19 @@ export async function GET(request) {
     const sort = searchParams.get('sort') || 'createdAt';
     const order = searchParams.get('order') === 'asc' ? 1 : -1;
     
+    // Build filter object
     if (status) filter.status = status;
     if (fileId) filter.fileId = fileId;
 
-    const batches = await db.services.batchService.listBatches({ 
+    // Query options
+    const queryOptions = {
       filter,
       limit,
       skip,
       sort: { [sort]: order }
-    });
+    };
+
+    const batches = await db.services.batchService.listBatches(queryOptions);
     
     // Enrich batches with fileName for display
     const enrichedBatches = batches.map(batch => ({
@@ -107,21 +111,102 @@ export async function GET(request) {
                `Batch Run ${batch.runNumber}`
     }));
     
+    // Build query info for transparency
+    const query = {
+      filter: {
+        status: status || null,
+        fileId: fileId || null
+      },
+      pagination: {
+        limit,
+        skip,
+        sort,
+        order: order === 1 ? 'asc' : 'desc'
+      }
+    };
+
+    // Get total count for this filter (if needed for pagination)
+    let totalCount = enrichedBatches.length;
+    if (skip > 0 || enrichedBatches.length === limit) {
+      // If we're paginating or hit the limit, get actual total count
+      try {
+        totalCount = await db.services.batchService.countBatches?.(filter) || enrichedBatches.length;
+      } catch (error) {
+        // Fallback if countBatches doesn't exist
+        console.warn('countBatches method not available, using returned count');
+        totalCount = enrichedBatches.length;
+      }
+    }
+
+    // Build response with metadata
+    const responseData = {
+      batches: enrichedBatches,
+      count: enrichedBatches.length,
+      totalCount: totalCount,
+      query,
+      pagination: {
+        limit,
+        skip,
+        hasMore: enrichedBatches.length === limit,
+        page: Math.floor(skip / limit) + 1,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    };
+
+    // Add context info based on filters
+    if (status) {
+      responseData.statusFilter = {
+        status,
+        description: `Batches with status: ${status}`
+      };
+    }
+
+    if (fileId) {
+      // Try to get file info for context
+      try {
+        const file = await db.services.fileService.getFileById(fileId);
+        responseData.fileContext = {
+          fileId,
+          fileName: file?.fileName || 'Unknown File',
+          description: `Batches for file: ${file?.fileName || fileId}`
+        };
+      } catch (error) {
+        responseData.fileContext = {
+          fileId,
+          fileName: 'Unknown File',
+          description: `Batches for file: ${fileId}`
+        };
+      }
+    }
+    
     return NextResponse.json({ 
       success: true, 
-      data: enrichedBatches,
-      count: enrichedBatches.length,
-      filter,
+      data: responseData,
       error: null
     });
     
   } catch (error) {
     console.error('GET batches error:', error);
+    
+    // Return consistent error structure
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: {
+        batches: [],
+        count: 0,
+        totalCount: 0,
+        query: {
+          filter: {
+            status: searchParams.get('status') || null,
+            fileId: searchParams.get('fileId') || null
+          },
+          pagination: {
+            limit: parseInt(searchParams.get('limit')) || 50,
+            skip: parseInt(searchParams.get('skip')) || 0
+          }
+        }
+      },
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }
@@ -137,8 +222,8 @@ export async function POST(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -151,8 +236,8 @@ export async function POST(request) {
       if (!quantity || quantity <= 0) {
         return NextResponse.json({ 
           success: false,
-          error: 'Valid quantity required',
-          data: null
+          data: null,
+          error: 'Valid quantity required'
         }, { status: 400 });
       }
 
@@ -161,8 +246,8 @@ export async function POST(request) {
       return NextResponse.json({
         success: true,
         data: result,
-        message: 'Work order creation retry initiated',
-        error: null
+        error: null,
+        message: 'Work order creation retry initiated'
       });
     }
 
@@ -174,8 +259,8 @@ export async function POST(request) {
     if (!fileId) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Missing fileId or originalFileId',
-        data: null
+        data: null,
+        error: 'Missing fileId or originalFileId'
       }, { status: 400 });
     }
 
@@ -184,8 +269,8 @@ export async function POST(request) {
     if (!file) {
       return NextResponse.json({ 
         success: false, 
-        error: 'File not found',
-        data: null
+        data: null,
+        error: 'File not found'
       }, { status: 404 });
     }
 
@@ -202,17 +287,16 @@ export async function POST(request) {
     return NextResponse.json({ 
       success: true, 
       data: enrichedBatch,
-      message: 'Batch created successfully',
-      error: null
+      error: null,
+      message: 'Batch created successfully'
     }, { status: 201 });
     
   } catch (error) {
     console.error('POST batches error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: null,
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }
@@ -225,8 +309,8 @@ export async function PATCH(request) {
     if (!id) {
       return NextResponse.json({ 
         success: false,
-        error: 'Batch ID required',
-        data: null
+        data: null,
+        error: 'Batch ID required'
       }, { status: 400 });
     }
 
@@ -235,8 +319,8 @@ export async function PATCH(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -247,8 +331,8 @@ export async function PATCH(request) {
     if (!existingBatch) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Batch not found',
-        data: null
+        data: null,
+        error: 'Batch not found'
       }, { status: 404 });
     }
 
@@ -268,17 +352,16 @@ export async function PATCH(request) {
     return NextResponse.json({ 
       success: true, 
       data: enrichedBatch,
-      message: 'Batch updated successfully',
-      error: null
+      error: null,
+      message: 'Batch updated successfully'
     });
     
   } catch (error) {
     console.error('PATCH batches error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: null,
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }
@@ -291,8 +374,8 @@ export async function DELETE(request) {
     if (!id) {
       return NextResponse.json({ 
         success: false,
-        error: 'Batch ID required',
-        data: null
+        data: null,
+        error: 'Batch ID required'
       }, { status: 400 });
     }
 
@@ -301,8 +384,8 @@ export async function DELETE(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -313,16 +396,16 @@ export async function DELETE(request) {
       if (!existingBatch) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Batch not found',
-          data: null
+          data: null,
+          error: 'Batch not found'
         }, { status: 404 });
       }
       
       if (existingBatch.createdBy?.toString() !== user._id.toString()) {
         return NextResponse.json({ 
           success: false,
-          error: 'Permission denied - you can only delete your own batches',
-          data: null
+          data: null,
+          error: 'Permission denied - you can only delete your own batches'
         }, { status: 403 });
       }
     }
@@ -332,17 +415,16 @@ export async function DELETE(request) {
     return NextResponse.json({ 
       success: true, 
       data: batch,
-      message: 'Batch deleted successfully',
-      error: null
+      error: null,
+      message: 'Batch deleted successfully'
     });
     
   } catch (error) {
     console.error('DELETE batches error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: null,
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }

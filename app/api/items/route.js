@@ -1,5 +1,5 @@
 // =============================================================================
-// app/api/items/route.js - Complete item operations (FIXED)
+// app/api/items/route.js - Complete item operations (FIXED: Standardized Response Format)
 // =============================================================================
 import { NextResponse } from 'next/server';
 import db from '@/db';
@@ -45,9 +45,12 @@ export async function GET(request) {
         
         return NextResponse.json({ 
           success: true, 
-          lots,
-          count: lots.length,
-          itemId: id
+          data: {
+            lots,
+            count: lots.length,
+            itemId: id
+          },
+          error: null
         });
       }
       
@@ -66,10 +69,13 @@ export async function GET(request) {
         
         return NextResponse.json({ 
           success: true, 
-          transactions,
-          count: transactions.length,
-          itemId: id,
-          options
+          data: {
+            transactions,
+            count: transactions.length,
+            itemId: id,
+            options
+          },
+          error: null
         });
       }
       
@@ -82,12 +88,15 @@ export async function GET(request) {
         
         return NextResponse.json({ 
           success: true, 
-          stats,
-          itemId: id,
-          period: {
-            startDate,
-            endDate
-          }
+          data: {
+            stats,
+            itemId: id,
+            period: {
+              startDate,
+              endDate
+            }
+          },
+          error: null
         });
       }
 
@@ -97,13 +106,15 @@ export async function GET(request) {
         if (!item) {
           return NextResponse.json({ 
             success: false, 
-            error: 'Item not found' 
+            data: null,
+            error: 'Item not found'
           }, { status: 404 });
         }
         
         return NextResponse.json({ 
           success: true, 
-          item
+          data: item,
+          error: null
         });
       }
 
@@ -113,9 +124,12 @@ export async function GET(request) {
         
         return NextResponse.json({ 
           success: true, 
-          vendors,
-          count: vendors.length,
-          itemId: id
+          data: {
+            vendors,
+            count: vendors.length,
+            itemId: id
+          },
+          error: null
         });
       }
       
@@ -124,13 +138,15 @@ export async function GET(request) {
       if (!item) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Item not found' 
+          data: null,
+          error: 'Item not found'
         }, { status: 404 });
       }
       
       return NextResponse.json({ 
         success: true, 
-        item
+        data: item,
+        error: null
       });
     }
 
@@ -154,10 +170,13 @@ export async function GET(request) {
       
       return NextResponse.json({ 
         success: true, 
-        items,
-        count: items.length,
-        query,
-        pagination: { limit, skip }
+        data: {
+          items,
+          count: items.length,
+          query,
+          pagination: { limit, skip }
+        },
+        error: null
       });
     }
 
@@ -166,15 +185,19 @@ export async function GET(request) {
     
     return NextResponse.json({ 
       success: true, 
-      items,
-      count: items.length,
-      query
+      data: {
+        items,
+        count: items.length,
+        query
+      },
+      error: null
     });
     
   } catch (error) {
     console.error('GET items error:', error);
     return NextResponse.json({ 
       success: false, 
+      data: null,
       error: 'Internal server error',
       message: error.message 
     }, { status: 500 });
@@ -191,7 +214,11 @@ export async function POST(request) {
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Unauthorized'
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -204,7 +231,9 @@ export async function POST(request) {
       
       if (!delta || isNaN(delta)) {
         return NextResponse.json({ 
-          error: 'qty must be a non-zero number' 
+          success: false,
+          data: null,
+          error: 'qty must be a non-zero number'
         }, { status: 400 });
       }
 
@@ -213,7 +242,8 @@ export async function POST(request) {
       if (!item) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Item not found' 
+          data: null,
+          error: 'Item not found'
         }, { status: 404 });
       }
 
@@ -222,14 +252,18 @@ export async function POST(request) {
         const lots = await db.services.itemService.getLots(id, lotId);
         if (lots.length === 0) {
           return NextResponse.json({ 
-            error: 'Lot not found' 
+            success: false,
+            data: null,
+            error: 'Lot not found'
           }, { status: 404 });
         }
 
         const lot = lots[0];
         if (lot.availableQty < Math.abs(delta)) {
           return NextResponse.json({ 
-            error: `Insufficient quantity. Available: ${lot.availableQty}, Requested: ${Math.abs(delta)}` 
+            success: false,
+            data: null,
+            error: `Insufficient quantity. Available: ${lot.availableQty}, Requested: ${Math.abs(delta)}`
           }, { status: 400 });
         }
       }
@@ -264,8 +298,11 @@ export async function POST(request) {
       
       return NextResponse.json({ 
         success: true, 
-        item: updatedItem, 
-        transaction: txn,
+        data: {
+          item: updatedItem, 
+          transaction: txn
+        },
+        error: null,
         message: `Transaction posted: ${delta > 0 ? 'Added' : 'Removed'} ${Math.abs(delta)} ${item.uom || 'units'}`
       });
     }
@@ -276,7 +313,9 @@ export async function POST(request) {
       
       if (!vendorId) {
         return NextResponse.json({ 
-          error: 'Vendor ID required' 
+          success: false,
+          data: null,
+          error: 'Vendor ID required'
         }, { status: 400 });
       }
 
@@ -290,7 +329,8 @@ export async function POST(request) {
       
       return NextResponse.json({ 
         success: true, 
-        vendorItem,
+        data: vendorItem,
+        error: null,
         message: 'Item linked to vendor successfully'
       });
     }
@@ -302,7 +342,9 @@ export async function POST(request) {
     const { itemType, sku, displayName } = body;
     if (!itemType || !sku || !displayName) {
       return NextResponse.json({ 
-        error: 'itemType, sku, and displayName are required' 
+        success: false,
+        data: null,
+        error: 'itemType, sku, and displayName are required'
       }, { status: 400 });
     }
 
@@ -310,7 +352,9 @@ export async function POST(request) {
     const existingItem = await db.models.Item.findOne({ sku });
     if (existingItem) {
       return NextResponse.json({ 
-        error: 'An item with this SKU already exists' 
+        success: false,
+        data: null,
+        error: 'An item with this SKU already exists'
       }, { status: 409 });
     }
 
@@ -321,7 +365,8 @@ export async function POST(request) {
     
     return NextResponse.json({ 
       success: true, 
-      item,
+      data: item,
+      error: null,
       message: `${itemType} "${displayName}" created successfully`
     }, { status: 201 });
     
@@ -329,6 +374,7 @@ export async function POST(request) {
     console.error('POST items error:', error);
     return NextResponse.json({ 
       success: false, 
+      data: null,
       error: 'Internal server error',
       message: error.message 
     }, { status: 500 });
@@ -341,13 +387,21 @@ export async function PATCH(request) {
     const id = searchParams.get('id');
     
     if (!id) {
-      return NextResponse.json({ error: 'Item ID required' }, { status: 400 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Item ID required'
+      }, { status: 400 });
     }
 
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Unauthorized'
+      }, { status: 401 });
     }
 
     await db.connect();
@@ -357,7 +411,8 @@ export async function PATCH(request) {
     if (!existingItem) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Item not found' 
+        data: null,
+        error: 'Item not found'
       }, { status: 404 });
     }
     
@@ -370,7 +425,8 @@ export async function PATCH(request) {
     
     return NextResponse.json({ 
       success: true, 
-      item: updated,
+      data: updated,
+      error: null,
       message: 'Item updated successfully'
     });
     
@@ -378,6 +434,7 @@ export async function PATCH(request) {
     console.error('PATCH items error:', error);
     return NextResponse.json({ 
       success: false, 
+      data: null,
       error: 'Internal server error',
       message: error.message 
     }, { status: 500 });
@@ -395,7 +452,9 @@ export async function DELETE(request) {
     const user = await getAuthUser(request);
     if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
       return NextResponse.json({ 
-        error: 'Admin or manager access required for deletions' 
+        success: false,
+        data: null,
+        error: 'Admin or manager access required for deletions'
       }, { status: 403 });
     }
 
@@ -407,7 +466,8 @@ export async function DELETE(request) {
       if (!item) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Item not found' 
+          data: null,
+          error: 'Item not found'
         }, { status: 404 });
       }
 
@@ -415,8 +475,12 @@ export async function DELETE(request) {
       
       return NextResponse.json({
         success: true,
-        message: `Lot ${deleted.lotNumber} deleted successfully`,
-        deletedLot: deleted
+        data: {
+          deletedLot: deleted,
+          itemId: id
+        },
+        error: null,
+        message: `Lot ${deleted.lotNumber} deleted successfully`
       });
     }
 
@@ -426,7 +490,8 @@ export async function DELETE(request) {
       if (!item) {
         return NextResponse.json({ 
           success: false, 
-          error: 'Item not found' 
+          data: null,
+          error: 'Item not found'
         }, { status: 404 });
       }
 
@@ -436,7 +501,9 @@ export async function DELETE(request) {
       // Check for active inventory
       if (item.qtyOnHand > 0 && !forceDelete) {
         return NextResponse.json({ 
-          error: `Cannot delete item with ${item.qtyOnHand} units on hand. Use force=true to override or adjust quantity to zero first.` 
+          success: false,
+          data: null,
+          error: `Cannot delete item with ${item.qtyOnHand} units on hand. Use force=true to override or adjust quantity to zero first.`
         }, { status: 400 });
       }
 
@@ -448,7 +515,9 @@ export async function DELETE(request) {
 
       if (recentTransactions.length > 0 && !forceDelete) {
         return NextResponse.json({ 
-          error: 'Item has recent transaction history. Use force=true to override.' 
+          success: false,
+          data: null,
+          error: 'Item has recent transaction history. Use force=true to override.'
         }, { status: 400 });
       }
 
@@ -456,24 +525,30 @@ export async function DELETE(request) {
       
       return NextResponse.json({ 
         success: true, 
-        message: `Item "${item.displayName}" deleted successfully`,
-        deletedItem: {
-          _id: item._id,
-          sku: item.sku,
-          displayName: item.displayName,
-          itemType: item.itemType
-        }
+        data: {
+          deletedItem: {
+            _id: item._id,
+            sku: item.sku,
+            displayName: item.displayName,
+            itemType: item.itemType
+          }
+        },
+        error: null,
+        message: `Item "${item.displayName}" deleted successfully`
       });
     }
 
     return NextResponse.json({ 
-      error: 'Invalid delete request' 
+      success: false,
+      data: null,
+      error: 'Invalid delete request'
     }, { status: 400 });
     
   } catch (error) {
     console.error('DELETE items error:', error);
     return NextResponse.json({ 
       success: false, 
+      data: null,
       error: 'Internal server error',
       message: error.message 
     }, { status: 500 });

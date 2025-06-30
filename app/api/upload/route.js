@@ -1,5 +1,5 @@
 // =============================================================================
-// app/api/upload/route.js - CSV Upload Handler for Solution Inventory
+// app/api/upload/route.js - CSV Upload Handler for Solution Inventory (FIXED: Standardized Response Format)
 // =============================================================================
 import { NextResponse } from 'next/server';
 import db from '@/db';
@@ -36,7 +36,11 @@ export async function POST(request) {
     // Get authenticated user
     const user = await getAuthUser(request);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Unauthorized'
+      }, { status: 401 });
     }
 
     if (type === 'product' || type === 'solution') {
@@ -44,13 +48,16 @@ export async function POST(request) {
     }
 
     return NextResponse.json({ 
-      error: 'Invalid upload type. Supported types: product, solution' 
+      success: false,
+      data: null,
+      error: 'Invalid upload type. Supported types: product, solution'
     }, { status: 400 });
     
   } catch (error) {
     console.error('Upload error:', error);
     return NextResponse.json({ 
       success: false, 
+      data: null,
       error: 'Internal server error',
       message: error.message 
     }, { status: 500 });
@@ -64,7 +71,9 @@ async function handleSolutionInventoryUpload(request, user, itemType) {
     
     if (!file) {
       return NextResponse.json({ 
-        error: 'No file provided' 
+        success: false,
+        data: null,
+        error: 'No file provided'
       }, { status: 400 });
     }
 
@@ -85,7 +94,9 @@ async function handleSolutionInventoryUpload(request, user, itemType) {
 
     if (!parsed.data || parsed.data.length === 0) {
       return NextResponse.json({ 
-        error: 'No data found in CSV file' 
+        success: false,
+        data: null,
+        error: 'No data found in CSV file'
       }, { status: 400 });
     }
 
@@ -96,8 +107,12 @@ async function handleSolutionInventoryUpload(request, user, itemType) {
     
     if (missingColumns.length > 0) {
       return NextResponse.json({ 
-        error: `Missing required columns: ${missingColumns.join(', ')}`,
-        foundColumns: headers
+        success: false,
+        data: {
+          foundColumns: headers,
+          missingColumns
+        },
+        error: `Missing required columns: ${missingColumns.join(', ')}`
       }, { status: 400 });
     }
 
@@ -106,14 +121,16 @@ async function handleSolutionInventoryUpload(request, user, itemType) {
     
     return NextResponse.json({
       success: true,
-      message: `Successfully processed ${results.totalRows} rows`,
-      results
+      data: results,
+      error: null,
+      message: `Successfully processed ${results.totalRows} rows`
     });
     
   } catch (error) {
     console.error('Solution inventory upload error:', error);
     return NextResponse.json({ 
       success: false, 
+      data: null,
       error: 'Failed to process solution inventory file',
       message: error.message 
     }, { status: 500 });
@@ -289,28 +306,32 @@ export async function GET(request) {
   if (type === 'product' || type === 'solution') {
     return NextResponse.json({
       success: true,
-      uploadType: type,
-      expectedFormat: {
-        columns: [
-          { name: 'Name', description: 'Item SKU', required: true },
-          { name: 'Display Name', description: 'Item display name', required: true },
-          { name: 'Type', description: 'Item type (not stored)', required: false },
-          { name: 'Internal ID', description: 'NetSuite Internal ID', required: true },
-          { name: 'Number', description: 'Lot number', required: false },
-          { name: 'On Hand', description: 'Lot quantity', required: false }
-        ],
-        notes: [
-          'Multiple rows with same Name/Internal ID will be treated as different lots',
-          'Lots with 0 quantity will be skipped',
-          'Items will be created even if no lots have quantity',
-          'Existing items will be updated with new NetSuite ID and lots'
-        ]
-      }
+      data: {
+        uploadType: type,
+        expectedFormat: {
+          columns: [
+            { name: 'Name', description: 'Item SKU', required: true },
+            { name: 'Display Name', description: 'Item display name', required: true },
+            { name: 'Type', description: 'Item type (not stored)', required: false },
+            { name: 'Internal ID', description: 'NetSuite Internal ID', required: true },
+            { name: 'Number', description: 'Lot number', required: false },
+            { name: 'On Hand', description: 'Lot quantity', required: false }
+          ],
+          notes: [
+            'Multiple rows with same Name/Internal ID will be treated as different lots',
+            'Lots with 0 quantity will be skipped',
+            'Items will be created even if no lots have quantity',
+            'Existing items will be updated with new NetSuite ID and lots'
+          ]
+        }
+      },
+      error: null
     });
   }
   
   return NextResponse.json({
     success: false,
+    data: null,
     error: 'Invalid upload type. Supported types: product, solution'
   }, { status: 400 });
 }

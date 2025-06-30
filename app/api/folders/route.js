@@ -1,4 +1,4 @@
-// app/api/folders/route.js - FIXED: Consistent response format
+// app/api/folders/route.js - FIXED: Consistent wrapped list responses with metadata
 import { NextResponse } from "next/server";
 import db from '@/db';
 import { jwtVerify } from 'jose';
@@ -46,8 +46,8 @@ export async function GET(request) {
         if (!folder) {
           return NextResponse.json({ 
             success: false, 
-            error: "Folder not found",
-            data: null
+            data: null,
+            error: "Folder not found"
           }, { status: 404 });
         }
 
@@ -59,7 +59,9 @@ export async function GET(request) {
           data: {
             folder,
             path: fullPath,
-            breadcrumbs: fullPath.map(f => ({ _id: f._id, name: f.name }))
+            breadcrumbs: fullPath.map(f => ({ _id: f._id, name: f.name })),
+            depth: fullPath.length - 1,
+            isRoot: !folder.parentId
           },
           error: null
         });
@@ -82,8 +84,11 @@ export async function GET(request) {
             files,
             counts: {
               subfolders: subfolders.length,
-              files: files.length
-            }
+              files: files.length,
+              total: subfolders.length + files.length
+            },
+            parentId: id,
+            isEmpty: subfolders.length === 0 && files.length === 0
           },
           error: null
         });
@@ -97,8 +102,8 @@ export async function GET(request) {
       if (!folder) {
         return NextResponse.json({ 
           success: false, 
-          error: "Folder not found",
-          data: null
+          data: null,
+          error: "Folder not found"
         }, { status: 404 });
       }
       
@@ -109,7 +114,7 @@ export async function GET(request) {
       });
     }
 
-    // GET /api/folders?parentId=123 or GET /api/folders (root level)
+    // List folders: GET /api/folders?parentId=123 or GET /api/folders (root level)
     const actualParentId = parentId === 'null' || parentId === '' ? null : parentId;
     
     const folders = await db.models.Folder.find({ 
@@ -119,18 +124,23 @@ export async function GET(request) {
     .sort({ name: 1 })
     .lean();
 
-    // Get file count for each folder
+    // Get file count and subfolder count for each folder (with error handling)
     const foldersWithCounts = await Promise.all(
       folders.map(async (folder) => {
         try {
-          const fileCount = await db.models.File.countDocuments({ folderId: folder._id });
-          const subfolderCount = await db.models.Folder.countDocuments({ parentId: folder._id });
+          const [fileCount, subfolderCount] = await Promise.all([
+            db.models.File.countDocuments({ folderId: folder._id }),
+            db.models.Folder.countDocuments({ parentId: folder._id })
+          ]);
           
           return {
             ...folder,
             fileCount,
             subfolderCount,
-            isEmpty: fileCount === 0 && subfolderCount === 0
+            totalItems: fileCount + subfolderCount,
+            isEmpty: fileCount === 0 && subfolderCount === 0,
+            hasFiles: fileCount > 0,
+            hasSubfolders: subfolderCount > 0
           };
         } catch (error) {
           console.error(`Error getting counts for folder ${folder._id}:`, error);
@@ -138,27 +148,111 @@ export async function GET(request) {
             ...folder,
             fileCount: 0,
             subfolderCount: 0,
-            isEmpty: true
+            totalItems: 0,
+            isEmpty: true,
+            hasFiles: false,
+            hasSubfolders: false,
+            countError: true
           };
         }
       })
     );
+
+    // Build context information
+    let parentContext = null;
+    if (actualParentId) {
+      try {
+        const parentFolder = await db.models.Folder.findById(actualParentId)
+          .select('name parentId path')
+          .lean();
+        
+        if (parentFolder) {
+          parentContext = {
+            id: actualParentId,
+            name: parentFolder.name,
+            path: parentFolder.path || [],
+            isRoot: !parentFolder.parentId
+          };
+        }
+      } catch (error) {
+        console.warn(`Could not load parent folder ${actualParentId}:`, error.message);
+        parentContext = {
+          id: actualParentId,
+          name: 'Unknown Folder',
+          path: [],
+          isRoot: false,
+          error: 'Could not load parent folder details'
+        };
+      }
+    }
+
+    // Calculate summary statistics
+    const totalFileCount = foldersWithCounts.reduce((sum, folder) => sum + folder.fileCount, 0);
+    const totalSubfolderCount = foldersWithCounts.reduce((sum, folder) => sum + folder.subfolderCount, 0);
+    const emptyFolders = foldersWithCounts.filter(f => f.isEmpty);
+
+    const responseData = {
+      folders: foldersWithCounts,
+      count: foldersWithCounts.length,
+      query: {
+        parentId: actualParentId,
+        level: actualParentId ? 'subfolder' : 'root'
+      },
+      parentContext,
+      summary: {
+        totalFolders: foldersWithCounts.length,
+        totalFiles: totalFileCount,
+        totalSubfolders: totalSubfolderCount,
+        emptyFolders: emptyFolders.length,
+        nonEmptyFolders: foldersWithCounts.length - emptyFolders.length
+      },
+      hierarchy: {
+        isRoot: !actualParentId,
+        level: actualParentId ? 'child' : 'root',
+        parentId: actualParentId
+      }
+    };
+
+    // Add helpful descriptions
+    if (!actualParentId) {
+      responseData.description = 'Root level folders';
+    } else {
+      responseData.description = parentContext 
+        ? `Subfolders of "${parentContext.name}"`
+        : `Subfolders of folder ${actualParentId}`;
+    }
     
     return NextResponse.json({ 
       success: true, 
-      data: foldersWithCounts,
-      count: foldersWithCounts.length,
-      parentId: actualParentId,
+      data: responseData,
       error: null
     });
     
   } catch (error) {
     console.error('GET folders error:', error);
+    
+    // Return consistent error structure
+    const actualParentId = searchParams.get('parentId') === 'null' || searchParams.get('parentId') === '' ? null : searchParams.get('parentId');
+    
     return NextResponse.json({ 
       success: false, 
-      error: "Internal server error",
-      message: error.message,
-      data: null
+      data: {
+        folders: [],
+        count: 0,
+        query: {
+          parentId: actualParentId,
+          level: actualParentId ? 'subfolder' : 'root'
+        },
+        parentContext: actualParentId ? { id: actualParentId, error: 'Could not load parent' } : null,
+        summary: {
+          totalFolders: 0,
+          totalFiles: 0,
+          totalSubfolders: 0,
+          emptyFolders: 0,
+          nonEmptyFolders: 0
+        }
+      },
+      error: "Internal server error: " + error.message
     }, { status: 500 });
   }
 }
@@ -173,8 +267,8 @@ export async function POST(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -186,8 +280,8 @@ export async function POST(request) {
       if (!id) {
         return NextResponse.json({ 
           success: false,
-          error: "Folder ID required",
-          data: null
+          data: null,
+          error: "Folder ID required"
         }, { status: 400 });
       }
 
@@ -196,8 +290,8 @@ export async function POST(request) {
       if (!folder) {
         return NextResponse.json({ 
           success: false, 
-          error: "Folder not found",
-          data: null
+          data: null,
+          error: "Folder not found"
         }, { status: 404 });
       }
 
@@ -210,8 +304,15 @@ export async function POST(request) {
       if (fileCount > 0 || subfolderCount > 0) {
         return NextResponse.json({ 
           success: false,
-          error: `Cannot delete folder: contains ${fileCount} files and ${subfolderCount} subfolders`,
-          data: null
+          data: {
+            folder,
+            contents: {
+              files: fileCount,
+              subfolders: subfolderCount,
+              total: fileCount + subfolderCount
+            }
+          },
+          error: `Cannot delete folder: contains ${fileCount} files and ${subfolderCount} subfolders`
         }, { status: 400 });
       }
 
@@ -219,9 +320,12 @@ export async function POST(request) {
       
       return NextResponse.json({ 
         success: true,
-        data: { deletedFolder: folder },
-        message: `Folder "${folder.name}" deleted successfully`,
-        error: null
+        data: { 
+          deletedFolder: folder,
+          parentId: folder.parentId 
+        },
+        error: null,
+        message: `Folder "${folder.name}" deleted successfully`
       });
     }
 
@@ -232,8 +336,8 @@ export async function POST(request) {
       if (!folderId) {
         return NextResponse.json({ 
           success: false,
-          error: "Folder ID required",
-          data: null
+          data: null,
+          error: "Folder ID required"
         }, { status: 400 });
       }
 
@@ -241,8 +345,8 @@ export async function POST(request) {
       if (!folder) {
         return NextResponse.json({ 
           success: false, 
-          error: "Folder not found",
-          data: null
+          data: null,
+          error: "Folder not found"
         }, { status: 404 });
       }
 
@@ -252,8 +356,8 @@ export async function POST(request) {
         if (!newParent) {
           return NextResponse.json({ 
             success: false,
-            error: "New parent folder not found",
-            data: null
+            data: null,
+            error: "New parent folder not found"
           }, { status: 404 });
         }
 
@@ -261,20 +365,31 @@ export async function POST(request) {
         if (newParent.path && newParent.path.includes(folderId)) {
           return NextResponse.json({ 
             success: false,
-            error: "Cannot move folder to its own subfolder",
-            data: null
+            data: {
+              folder,
+              newParent,
+              circularPath: newParent.path
+            },
+            error: "Cannot move folder to its own subfolder"
           }, { status: 400 });
         }
       }
 
+      const oldParentId = folder.parentId;
       folder.parentId = newParentId === 'null' ? null : newParentId;
       await folder.save(); // This will trigger the pre-save hook to update path
 
       return NextResponse.json({ 
         success: true, 
-        data: folder.toObject(),
-        message: "Folder moved successfully",
-        error: null
+        data: {
+          folder: folder.toObject(),
+          move: {
+            from: oldParentId,
+            to: newParentId === 'null' ? null : newParentId
+          }
+        },
+        error: null,
+        message: "Folder moved successfully"
       });
     }
 
@@ -284,8 +399,8 @@ export async function POST(request) {
     if (!name?.trim()) {
       return NextResponse.json({ 
         success: false,
-        error: "Folder name required",
-        data: null
+        data: null,
+        error: "Folder name required"
       }, { status: 400 });
     }
 
@@ -297,8 +412,8 @@ export async function POST(request) {
       if (!parentFolder) {
         return NextResponse.json({ 
           success: false,
-          error: "Parent folder not found",
-          data: null
+          data: null,
+          error: "Parent folder not found"
         }, { status: 404 });
       }
     }
@@ -313,8 +428,12 @@ export async function POST(request) {
     if (existingFolder) {
       return NextResponse.json({ 
         success: false,
-        error: "A folder with this name already exists in this location",
-        data: null
+        data: {
+          existingFolder,
+          attemptedName: trimmedName,
+          parentId: actualParentId
+        },
+        error: "A folder with this name already exists in this location"
       }, { status: 409 });
     }
 
@@ -325,19 +444,38 @@ export async function POST(request) {
         createdBy: user._id
       });
 
+      // Add context info for response
+      const responseData = {
+        folder: folder.toObject(),
+        location: {
+          parentId: actualParentId,
+          isRoot: !actualParentId
+        }
+      };
+
+      // Add parent context if applicable
+      if (actualParentId) {
+        try {
+          const parent = await db.models.Folder.findById(actualParentId).select('name');
+          responseData.location.parentName = parent?.name || 'Unknown';
+        } catch (error) {
+          responseData.location.parentName = 'Unknown';
+        }
+      }
+
       return NextResponse.json({ 
         success: true, 
-        data: folder.toObject(),
-        message: `Folder "${trimmedName}" created successfully`,
-        error: null
+        data: responseData,
+        error: null,
+        message: `Folder "${trimmedName}" created successfully`
       }, { status: 201 });
       
     } catch (error) {
       if (error.code === 11000) {
         return NextResponse.json({ 
           success: false,
-          error: "A folder with this name already exists in this location",
-          data: null
+          data: null,
+          error: "A folder with this name already exists in this location"
         }, { status: 409 });
       }
       throw error;
@@ -347,9 +485,8 @@ export async function POST(request) {
     console.error('POST folders error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: "Internal server error",
-      message: error.message,
-      data: null
+      data: null,
+      error: "Internal server error: " + error.message
     }, { status: 500 });
   }
 }
@@ -362,8 +499,8 @@ export async function PATCH(request) {
     if (!id) {
       return NextResponse.json({ 
         success: false,
-        error: "Folder ID required",
-        data: null
+        data: null,
+        error: "Folder ID required"
       }, { status: 400 });
     }
 
@@ -372,8 +509,8 @@ export async function PATCH(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -384,8 +521,8 @@ export async function PATCH(request) {
     if (!name?.trim()) {
       return NextResponse.json({ 
         success: false,
-        error: "Folder name required",
-        data: null
+        data: null,
+        error: "Folder name required"
       }, { status: 400 });
     }
 
@@ -396,8 +533,8 @@ export async function PATCH(request) {
     if (!existingFolder) {
       return NextResponse.json({ 
         success: false, 
-        error: "Folder not found",
-        data: null
+        data: null,
+        error: "Folder not found"
       }, { status: 404 });
     }
 
@@ -411,8 +548,12 @@ export async function PATCH(request) {
     if (duplicateFolder) {
       return NextResponse.json({ 
         success: false,
-        error: "A folder with this name already exists in this location",
-        data: null
+        data: {
+          existingFolder,
+          duplicateFolder,
+          attemptedName: trimmedName
+        },
+        error: "A folder with this name already exists in this location"
       }, { status: 409 });
     }
     
@@ -430,18 +571,23 @@ export async function PATCH(request) {
     
     return NextResponse.json({ 
       success: true, 
-      data: folder.toObject(),
-      message: `Folder renamed to "${trimmedName}" successfully`,
-      error: null
+      data: {
+        folder: folder.toObject(),
+        changes: {
+          oldName: existingFolder.name,
+          newName: trimmedName
+        }
+      },
+      error: null,
+      message: `Folder renamed to "${trimmedName}" successfully`
     });
     
   } catch (error) {
     console.error('PATCH folders error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: "Internal server error",
-      message: error.message,
-      data: null
+      data: null,
+      error: "Internal server error: " + error.message
     }, { status: 500 });
   }
 }

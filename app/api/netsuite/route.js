@@ -1,5 +1,5 @@
 // =============================================================================
-// app/api/netsuite/route.js - Consolidated NetSuite operations (FIXED)
+// app/api/netsuite/route.js - Consolidated NetSuite operations (FIXED: Standardized Response Format)
 // =============================================================================
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
@@ -80,7 +80,11 @@ export async function GET(request) {
           };
         }
         
-        return NextResponse.json(healthCheck);
+        return NextResponse.json({
+          success: true,
+          data: healthCheck,
+          error: null
+        });
       }
 
       case 'test': {
@@ -88,10 +92,14 @@ export async function GET(request) {
         const testResult = await auth.testConnection();
         
         return NextResponse.json({
-          success: testResult.success,
-          message: testResult.message,
-          configured: true,
-          timestamp: new Date().toISOString()
+          success: true,
+          data: {
+            success: testResult.success,
+            message: testResult.message,
+            configured: true,
+            timestamp: new Date().toISOString()
+          },
+          error: null
         });
       }
 
@@ -100,9 +108,13 @@ export async function GET(request) {
         if (!searchQuery || searchQuery.trim().length < 2) {
           return NextResponse.json({
             success: true,
-            items: [],
-            message: 'Search query too short (minimum 2 characters)',
-            query: searchQuery
+            data: {
+              items: [],
+              message: 'Search query too short (minimum 2 characters)',
+              query: searchQuery,
+              count: 0
+            },
+            error: null
           });
         }
 
@@ -111,9 +123,12 @@ export async function GET(request) {
         
         return NextResponse.json({
           success: true,
-          items: assemblyItems || [],
-          query: searchQuery,
-          count: assemblyItems?.length || 0
+          data: {
+            items: assemblyItems || [],
+            query: searchQuery,
+            count: assemblyItems?.length || 0
+          },
+          error: null
         });
       }
 
@@ -122,7 +137,8 @@ export async function GET(request) {
         if (!assemblyItemId) {
           return NextResponse.json({
             success: false,
-            message: 'Assembly Item ID is required for getBOM action'
+            data: null,
+            error: 'Assembly Item ID is required for getBOM action'
           }, { status: 400 });
         }
 
@@ -131,23 +147,26 @@ export async function GET(request) {
         
         return NextResponse.json({
           success: true,
-          bom: {
-            bomId: bomData.bomId,
-            bomName: bomData.bomName,
-            revisionId: bomData.revisionId,
-            revisionName: bomData.revisionName,
-            effectiveStartDate: bomData.effectiveStartDate,
-            effectiveEndDate: bomData.effectiveEndDate
+          data: {
+            bom: {
+              bomId: bomData.bomId,
+              bomName: bomData.bomName,
+              revisionId: bomData.revisionId,
+              revisionName: bomData.revisionName,
+              effectiveStartDate: bomData.effectiveStartDate,
+              effectiveEndDate: bomData.effectiveEndDate
+            },
+            recipe: bomData.recipe || bomData.normalizedComponents || [],
+            components: bomData.components,
+            mappedComponents: bomData.mappedComponents,
+            assemblyItemId: assemblyItemId,
+            debug: {
+              rawComponentsCount: bomData.components?.length || 0,
+              normalizedComponentsCount: bomData.normalizedComponents?.length || 0,
+              recipeComponentsCount: bomData.recipe?.length || 0
+            }
           },
-          recipe: bomData.recipe || bomData.normalizedComponents || [],
-          components: bomData.components,
-          mappedComponents: bomData.mappedComponents,
-          assemblyItemId: assemblyItemId,
-          debug: {
-            rawComponentsCount: bomData.components?.length || 0,
-            normalizedComponentsCount: bomData.normalizedComponents?.length || 0,
-            recipeComponentsCount: bomData.recipe?.length || 0
-          }
+          error: null
         });
       }
 
@@ -163,13 +182,17 @@ export async function GET(request) {
           if (!unit) {
             return NextResponse.json({
               success: false,
+              data: null,
               error: `Unit ID ${unitId} not found`
             }, { status: 404 });
           }
           
           return NextResponse.json({
             success: true,
-            unit: { id: unitId, ...unit }
+            data: { 
+              unit: { id: unitId, ...unit }
+            },
+            error: null
           });
         }
         
@@ -184,8 +207,11 @@ export async function GET(request) {
         
         return NextResponse.json({
           success: true,
-          units,
-          count: units.length
+          data: {
+            units,
+            count: units.length
+          },
+          error: null
         });
       }
 
@@ -201,7 +227,8 @@ export async function GET(request) {
           const workOrder = await workOrderService.getWorkOrderStatus(workOrderId);
           return NextResponse.json({
             success: true,
-            data: workOrder
+            data: workOrder,
+            error: null
           });
         } else {
           const filters = {};
@@ -212,9 +239,12 @@ export async function GET(request) {
           const workOrders = await workOrderService.listWorkOrders(filters);
           return NextResponse.json({
             success: true,
-            data: workOrders,
-            count: workOrders.length,
-            filters
+            data: {
+              workOrders,
+              count: workOrders.length,
+              filters
+            },
+            error: null
           });
         }
       }
@@ -231,15 +261,18 @@ export async function GET(request) {
         
         return NextResponse.json({
           success: true,
-          configured: hasAccess || envConfigured,
-          userConfigured: hasAccess,
-          envConfigured: envConfigured,
-          user: {
-            id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role
-          }
+          data: {
+            configured: hasAccess || envConfigured,
+            userConfigured: hasAccess,
+            envConfigured: envConfigured,
+            user: {
+              id: user._id,
+              name: user.name,
+              email: user.email,
+              role: user.role
+            }
+          },
+          error: null
         });
       }
 
@@ -254,11 +287,14 @@ export async function GET(request) {
           
           return NextResponse.json({
             success: true,
-            mapping: {
-              localItem,
-              netsuiteItem: netsuiteItem[0] || null,
-              mapped: !!netsuiteItem[0]
-            }
+            data: {
+              mapping: {
+                localItem,
+                netsuiteItem: netsuiteItem[0] || null,
+                mapped: !!netsuiteItem[0]
+              }
+            },
+            error: null
           });
         }
         
@@ -271,15 +307,19 @@ export async function GET(request) {
         
         return NextResponse.json({
           success: true,
-          mappedItems,
-          count: mappedItems.length
+          data: {
+            mappedItems,
+            count: mappedItems.length
+          },
+          error: null
         });
       }
 
       default:
         return NextResponse.json({
           success: false,
-          message: 'Invalid action. Available actions: health, test, search, getBOM, units, workorder, setup, mapping'
+          data: null,
+          error: 'Invalid action. Available actions: health, test, search, getBOM, units, workorder, setup, mapping'
         }, { status: 400 });
     }
 
@@ -287,8 +327,8 @@ export async function GET(request) {
     console.error('NetSuite GET API Error:', error);
     return NextResponse.json({ 
       success: false,
-      message: 'Authentication or configuration error',
-      error: error.message 
+      data: null,
+      error: error.message
     }, { status: 500 });
   }
 }
@@ -325,7 +365,8 @@ export async function POST(request) {
           if (!accountId || !consumerKey || !consumerSecret || !tokenId || !tokenSecret) {
             return NextResponse.json({
               success: false,
-              message: 'All NetSuite credentials are required'
+              data: null,
+              error: 'All NetSuite credentials are required'
             }, { status: 400 });
           }
 
@@ -347,16 +388,22 @@ export async function POST(request) {
           
           return NextResponse.json({
             success: true,
-            message: 'NetSuite credentials configured successfully',
-            configured: user.hasNetSuiteAccess(),
-            connectionTest: testResult
+            data: {
+              message: 'NetSuite credentials configured successfully',
+              configured: user.hasNetSuiteAccess(),
+              connectionTest: testResult
+            },
+            error: null
           });
         } catch (testError) {
           return NextResponse.json({
             success: true,
-            message: 'NetSuite credentials saved but connection test failed',
-            configured: user.hasNetSuiteAccess(),
-            connectionTest: { success: false, message: testError.message }
+            data: {
+              message: 'NetSuite credentials saved but connection test failed',
+              configured: user.hasNetSuiteAccess(),
+              connectionTest: { success: false, message: testError.message }
+            },
+            error: null
           });
         }
       }
@@ -376,7 +423,8 @@ export async function POST(request) {
         if (!quantity || quantity <= 0) {
           return NextResponse.json({
             success: false,
-            message: 'Quantity is required and must be greater than 0'
+            data: null,
+            error: 'Quantity is required and must be greater than 0'
           }, { status: 400 });
         }
 
@@ -388,7 +436,8 @@ export async function POST(request) {
           if (!batch) {
             return NextResponse.json({
               success: false,
-              message: 'Batch not found'
+              data: null,
+              error: 'Batch not found'
             }, { status: 404 });
           }
 
@@ -431,14 +480,16 @@ export async function POST(request) {
         } else {
           return NextResponse.json({
             success: false,
-            message: 'Either batchId or assemblyItemId is required'
+            data: null,
+            error: 'Either batchId or assemblyItemId is required'
           }, { status: 400 });
         }
 
         return NextResponse.json({
           success: true,
-          message: 'Work order created successfully',
-          data: result
+          data: result,
+          error: null,
+          message: 'Work order created successfully'
         });
       }
 
@@ -448,7 +499,8 @@ export async function POST(request) {
         if (!components || !Array.isArray(components)) {
           return NextResponse.json({
             success: false,
-            message: 'Components array is required'
+            data: null,
+            error: 'Components array is required'
           }, { status: 400 });
         }
 
@@ -465,8 +517,11 @@ export async function POST(request) {
 
         return NextResponse.json({
           success: true,
-          mappingResults,
-          summary,
+          data: {
+            mappingResults,
+            summary
+          },
+          error: null,
           message: `Successfully mapped ${summary.componentsWithMatches}/${summary.totalComponents} components`
         });
       }
@@ -477,7 +532,8 @@ export async function POST(request) {
         if (!bomData || !fileId) {
           return NextResponse.json({
             success: false,
-            message: 'BOM data and file ID are required'
+            data: null,
+            error: 'BOM data and file ID are required'
           }, { status: 400 });
         }
 
@@ -525,13 +581,16 @@ export async function POST(request) {
         
         return NextResponse.json({
           success: true,
-          file: updatedFile,
-          mappingResults,
-          summary: {
-            totalComponents: components.length,
-            mappedComponents: components.filter(c => c.itemId).length,
-            unmappedComponents: components.filter(c => !c.itemId).length
+          data: {
+            file: updatedFile,
+            mappingResults,
+            summary: {
+              totalComponents: components.length,
+              mappedComponents: components.filter(c => c.itemId).length,
+              unmappedComponents: components.filter(c => !c.itemId).length
+            }
           },
+          error: null,
           message: 'BOM imported successfully'
         });
       }
@@ -542,7 +601,8 @@ export async function POST(request) {
         if (!itemId || !netsuiteItemId) {
           return NextResponse.json({
             success: false,
-            message: 'Both itemId and netsuiteItemId are required'
+            data: null,
+            error: 'Both itemId and netsuiteItemId are required'
           }, { status: 400 });
         }
 
@@ -555,7 +615,8 @@ export async function POST(request) {
 
         return NextResponse.json({
           success: true,
-          item: updatedItem,
+          data: updatedItem,
+          error: null,
           message: 'Item synced with NetSuite successfully'
         });
       }
@@ -563,7 +624,8 @@ export async function POST(request) {
       default:
         return NextResponse.json({
           success: false,
-          message: 'Invalid action. Available actions: setup, workorder, mapping, import, sync'
+          data: null,
+          error: 'Invalid action. Available actions: setup, workorder, mapping, import, sync'
         }, { status: 400 });
     }
 
@@ -571,7 +633,8 @@ export async function POST(request) {
     console.error('NetSuite POST API Error:', error);
     return NextResponse.json({
       success: false,
-      message: error.message
+      data: null,
+      error: error.message
     }, { status: 500 });
   }
 }
@@ -591,7 +654,8 @@ export async function PATCH(request) {
       if (!workOrderId) {
         return NextResponse.json({
           success: false,
-          message: 'Work order ID is required'
+          data: null,
+          error: 'Work order ID is required'
         }, { status: 400 });
       }
 
@@ -634,27 +698,31 @@ export async function PATCH(request) {
         default:
           return NextResponse.json({
             success: false,
-            message: 'Invalid action. Supported actions: complete, cancel, sync'
+            data: null,
+            error: 'Invalid action. Supported actions: complete, cancel, sync'
           }, { status: 400 });
       }
 
       return NextResponse.json({
         success: true,
-        message: `Work order ${woAction}${woAction.endsWith('e') ? 'd' : 'ed'} successfully`,
-        data: result
+        data: result,
+        error: null,
+        message: `Work order ${woAction}${woAction.endsWith('e') ? 'd' : 'ed'} successfully`
       });
     }
 
     return NextResponse.json({
       success: false,
-      message: 'Invalid action for PATCH'
+      data: null,
+      error: 'Invalid action for PATCH'
     }, { status: 400 });
 
   } catch (error) {
     console.error('NetSuite PATCH API Error:', error);
     return NextResponse.json({
       success: false,
-      message: error.message
+      data: null,
+      error: error.message
     }, { status: 500 });
   }
 }
