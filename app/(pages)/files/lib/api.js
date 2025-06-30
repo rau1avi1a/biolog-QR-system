@@ -228,16 +228,13 @@ export const filesApi = {
        */
       async getBOM(netsuiteInternalId) {
         return handleApiCall('netsuite.getBOM', async () => {
-          console.log('🔍 Fetching NetSuite BOM for ID:', netsuiteInternalId);
-          
-          // Use the existing API client to call your NetSuite API
           const result = await api.custom.getNetSuiteBOM(netsuiteInternalId);
-          
           if (hasApiError(result)) {
             throw new Error(handleApiError(result, 'Failed to fetch NetSuite BOM'));
           }
-          
-          return result;
+          // UNWRAP the inner data so importBOMWorkflow sees { recipe, components, … }
+          const bomData = extractApiData(result);
+          return bomData;
         });
       },
   

@@ -1,6 +1,7 @@
 // services/netsuite/bom.service.js
 import { createNetSuiteAuth } from './auth.service.js';
 import db from '@/db/index.js';
+import { netsuiteUnits } from '@/db/lib/netsuite-units.js';
 
 /**
  * NetSuite BOM (Bill of Materials) Service
@@ -173,9 +174,19 @@ export class NetSuiteBOMService {
   }
 
   async getBOMRevisionComponents(revisionId) {
+    // fetch & parse the JSON
     const resp = await this.auth.makeRequest(
       `/bomrevision/${revisionId}?expandSubResources=true`
     );
+  
+    // DEBUG: inspect the full parsed response
+    console.log('🐣 getBOMRevisionComponents resp:', resp);
+    // DEBUG: inspect the `component` object
+    console.log('🐣 resp.component:', resp.component);
+    // DEBUG: inspect the array you actually return
+    console.log('🐣 resp.component.items:', resp.component?.items);
+  
+    // return the array (or empty)
     return resp.component?.items || [];
   }
 
@@ -185,8 +196,10 @@ export class NetSuiteBOMService {
       const id = item.id || item.internalId || c.itemId;
       const name = item.refName || item.itemid || 'Unknown';
       const qty = parseFloat(c.quantity || c.bomQuantity || 0);
-      const units = c.units || c.unit || item.units || 'ea';
-      return {
+           // map the Netsuite‐ID to a human symbol (e.g. 35 → mL)
+           const rawUnitId = c.units || c.unit || item.units || '';
+           const unitDef   = netsuiteUnits[rawUnitId];
+           const units     = unitDef?.symbol || rawUnitId || 'ea';      return {
         ingredient: name,
         itemId: id,
         quantity: qty,
