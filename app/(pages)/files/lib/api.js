@@ -221,6 +221,187 @@ export const filesApi = {
     }
   },
 
+    // === ADD NETSUITE OPERATIONS ===
+    netsuite: {
+      /**
+       * Get NetSuite BOM for a solution by its NetSuite Internal ID
+       */
+      async getBOM(netsuiteInternalId) {
+        return handleApiCall('netsuite.getBOM', async () => {
+          console.log('🔍 Fetching NetSuite BOM for ID:', netsuiteInternalId);
+          
+          // Use the existing API client to call your NetSuite API
+          const result = await api.custom.getNetSuiteBOM(netsuiteInternalId);
+          
+          if (hasApiError(result)) {
+            throw new Error(handleApiError(result, 'Failed to fetch NetSuite BOM'));
+          }
+          
+          return result;
+        });
+      },
+  
+      /**
+       * Map NetSuite components to local chemicals/solutions
+       */
+      async mapComponents(components) {
+        return handleApiCall('netsuite.mapComponents', async () => {
+          console.log('🗺️ Mapping NetSuite components:', components.length);
+          
+          const result = await api.custom.mapNetSuiteComponents(components);
+          
+          if (hasApiError(result)) {
+            throw new Error(handleApiError(result, 'Failed to map NetSuite components'));
+          }
+          
+          return result;
+        });
+      },
+  
+      /**
+       * Import NetSuite BOM into a file
+       */
+      async importBOMToFile(fileId, bomData, mappingResults) {
+        return handleApiCall('netsuite.importBOMToFile', async () => {
+          console.log('📥 Importing BOM to file:', fileId);
+          
+          // Transform the mapping results into file components
+          const components = mappingResults.map(result => {
+            const comp = result.netsuiteComponent;
+            const match = result.bestMatch;
+            
+            return {
+              itemId: match?.chemical?._id || null,
+              amount: comp.quantity || comp.bomQuantity || 0,
+              unit: comp.units || 'ea',
+              netsuiteData: {
+                itemId: comp.itemId,
+                itemRefName: comp.itemRefName || comp.ingredient,
+                ingredient: comp.ingredient,
+                bomQuantity: comp.bomQuantity || comp.quantity,
+                componentYield: comp.componentYield || 100,
+                units: comp.units,
+                lineId: comp.lineId,
+                bomComponentId: comp.bomComponentId,
+                itemSource: comp.itemSource,
+                type: 'netsuite'
+              }
+            };
+          });
+  
+          // Prepare the update data
+          const updateData = {
+            components,
+            netsuiteImportData: {
+              bomId: bomData.bomId,
+              bomName: bomData.bomName,
+              revisionId: bomData.revisionId,
+              revisionName: bomData.revisionName,
+              importedAt: new Date(),
+              solutionNetsuiteId: bomData.assemblyItemId,
+              lastSyncAt: new Date()
+            }
+          };
+  
+          // Update the file with the BOM data
+          const result = await filesApi.files.updateMeta(fileId, updateData);
+          
+          if (hasApiError(result)) {
+            throw new Error(handleApiError(result, 'Failed to import BOM to file'));
+          }
+          
+          return result;
+        });
+      },
+  
+      /**
+       * Complete BOM import workflow: fetch BOM, map components, import to file
+       */
+      async importBOMWorkflow(fileId, solutionNetsuiteId) {
+        return handleApiCall('netsuite.importBOMWorkflow', async () => {
+          console.log('🚀 Starting complete BOM import workflow');
+          
+          try {
+            // Step 1: Fetch BOM from NetSuite
+            console.log('📥 Step 1: Fetching BOM from NetSuite...');
+            const bomResult = await this.getBOM(solutionNetsuiteId);
+            const bomData = extractApiData(bomResult);
+            
+            if (!bomData?.recipe || !Array.isArray(bomData.recipe)) {
+              throw new Error('Invalid BOM data received from NetSuite');
+            }
+  
+            // Step 2: Map components to local database
+            console.log('🗺️ Step 2: Mapping components to local database...');
+            const mappingResult = await this.mapComponents(bomData.recipe);
+            const mappingData = extractApiData(mappingResult);
+            
+            if (!mappingData?.mappingResults) {
+              throw new Error('Failed to map NetSuite components');
+            }
+  
+            // Step 3: Import to file
+            console.log('📝 Step 3: Importing to file...');
+            const importResult = await this.importBOMToFile(fileId, bomData, mappingData.mappingResults);
+            
+            // Return comprehensive result
+            return {
+              data: {
+                file: extractApiData(importResult),
+                bomData,
+                mappingResults: mappingData.mappingResults,
+                summary: {
+                  totalComponents: mappingData.mappingResults.length,
+                  mappedComponents: mappingData.mappingResults.filter(r => r.bestMatch).length,
+                  unmappedComponents: mappingData.mappingResults.filter(r => !r.bestMatch).length,
+                  exactMatches: mappingData.mappingResults.filter(r => r.bestMatch?.confidence === 1.0).length,
+                  highConfidenceMatches: mappingData.mappingResults.filter(r => r.bestMatch?.confidence >= 0.8 && r.bestMatch?.confidence < 1.0).length
+                }
+              },
+              error: null
+            };
+            
+          } catch (error) {
+            console.error('💥 BOM import workflow failed:', error);
+            return {
+              data: null,
+              error: error.message
+            };
+          }
+        });
+      },
+  
+      /**
+       * Test NetSuite connection
+       */
+      async testConnection() {
+        return handleApiCall('netsuite.testConnection', async () => {
+          const result = await api.custom.testNetSuite();
+          
+          if (hasApiError(result)) {
+            throw new Error(handleApiError(result, 'NetSuite connection test failed'));
+          }
+          
+          return result;
+        });
+      },
+  
+      /**
+       * Search NetSuite assembly items
+       */
+      async searchAssemblyItems(query) {
+        return handleApiCall('netsuite.searchAssemblyItems', async () => {
+          const result = await api.custom.searchNetSuiteItems(query);
+          
+          if (hasApiError(result)) {
+            throw new Error(handleApiError(result, 'Failed to search NetSuite items'));
+          }
+          
+          return result;
+        });
+      }
+    },
+
   // === WORK ORDER OPERATIONS ===
   workOrders: {
     async getStatus(batchId) {
@@ -328,6 +509,8 @@ export function normalizeFileData(file) {
     // Include all original properties
     ...file
   };
+
+  
 }
 
 // Export individual API modules for focused imports
