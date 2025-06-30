@@ -11,7 +11,7 @@ const NetSuiteBOMImport = ({
   open, 
   onClose, 
   onImport, 
-  solution 
+  solution
 }) => {
   // This would be the SimpleNetSuiteBOMImport component content
   // For now, showing a placeholder that matches the functionality
@@ -39,10 +39,7 @@ const NetSuiteBOMImport = ({
           <ui.Button variant="outline" onClick={onClose}>
             Cancel
           </ui.Button>
-          <ui.Button onClick={() => {
-            // Mock import for now
-            onImport({ components: [], recipeQty: 1, recipeUnit: 'ea' });
-          }}>
+          <ui.Button onClick={onImport}>
             Import Components
           </ui.Button>
         </ui.DialogFooter>

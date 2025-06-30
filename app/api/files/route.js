@@ -1,56 +1,43 @@
-// app/api/files/route.js - FIXED: Consistent wrapped list responses with metadata
+// app/api/files/route.js
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
 
-// Helper to get authenticated user
 async function getAuthUser(request) {
   try {
     const token = request.cookies.get('auth_token')?.value;
     if (!token) return null;
-    
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
-    
+    const { payload } = await jwtVerify(
+      token,
+      new TextEncoder().encode(process.env.JWT_SECRET)
+    );
     await db.connect();
-    const user = await db.models.User.findById(payload.userId).select('-password');
-    
-    return user ? { 
-      _id: user._id, 
-      name: user.name, 
-      email: user.email, 
-      role: user.role 
-    } : null;
-  } catch (error) {
-    console.error('Auth error in files route:', error);
+    const u = await db.models.User.findById(payload.userId).select('-password');
+    return u ? { _id: u._id, name: u.name, email: u.email, role: u.role } : null;
+  } catch {
     return null;
   }
 }
 
 export async function GET(request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const action = searchParams.get('action');
-    const search = searchParams.get('search');
-    const folderId = searchParams.get('folderId');
+    const url      = new URL(request.url);
+    const id       = url.searchParams.get('id');
+    const action   = url.searchParams.get('action');
+    const search   = url.searchParams.get('search');
+    const folderId = url.searchParams.get('folderId') || null;
 
-    // Ensure connection
     await db.connect();
 
+    // ----- single-file routes -----
     if (id) {
+      // 1) Download PDF
       if (action === 'download') {
-        // Handle PDF download: GET /api/files?id=123&action=download
         const batch = await db.services.batchService.getBatchById(id);
         if (!batch?.signedPdf?.data) {
-          return NextResponse.json({ 
-            success: false,
-            data: null,
-            error: 'No PDF found'
-          }, { status: 404 });
+          return NextResponse.json({ success: false, data: null, error: 'No PDF found' }, { status: 404 });
         }
-        
         const fileName = `${batch.fileId?.fileName || 'file'}-${batch.solutionLotNumber || `run-${batch.runNumber}`}.pdf`;
-        
         return new NextResponse(batch.signedPdf.data, {
           headers: {
             'Content-Type': 'application/pdf',
@@ -58,246 +45,109 @@ export async function GET(request) {
           }
         });
       }
-      
+
+      // 2) List batches for this file
       if (action === 'batches') {
-        // Get batches for this file: GET /api/files?id=123&action=batches
-        const batches = await db.services.batchService.listBatches({ 
-          filter: { fileId: id } 
-        });
-        
-        // FIXED: Return consistent wrapper structure
-        return NextResponse.json({ 
-          success: true, 
-          data: {
-            batches: batches || [],
-            count: batches?.length || 0,
-            fileId: id,
-            query: {
-              action: 'batches',
-              fileId: id
-            }
-          },
+        const batches = await db.services.batchService.listBatches({ filter: { fileId: id } });
+        return NextResponse.json({
+          success: true,
+          data: { batches, count: batches.length, fileId: id },
           error: null
         });
-      }
-      
-      if (action === 'stats') {
-        // Get file statistics: GET /api/files?id=123&action=stats
-        const fileStats = await db.services.fileService.getFileStats?.(id);
-        
-        if (fileStats) {
-          return NextResponse.json({ 
-            success: true, 
-            data: fileStats,
-            error: null
-          });
-        } else {
-          // Fallback if getFileStats doesn't exist
-          const file = await db.services.fileService.getFileById(id);
-          const batches = await db.services.batchService.listBatches({ 
-            filter: { fileId: id } 
-          });
-          
-          return NextResponse.json({ 
-            success: true, 
-            data: {
-              file,
-              batchCount: batches.length,
-              completedBatches: batches.filter(b => b.status === 'Completed').length,
-              stats: {
-                totalBatches: batches.length,
-                byStatus: {
-                  draft: batches.filter(b => b.status === 'Draft').length,
-                  inProgress: batches.filter(b => b.status === 'In Progress').length,
-                  review: batches.filter(b => b.status === 'Review').length,
-                  completed: batches.filter(b => b.status === 'Completed').length
-                }
-              }
-            },
-            error: null
-          });
-        }
       }
 
+      // 3) File stats
+      if (action === 'stats') {
+        const stats = await db.services.fileService.getFileStats?.(id)
+          ?? { file: await db.services.fileService.getFileById(id), batchCount: 0 };
+        return NextResponse.json({ success: true, data: stats, error: null });
+      }
+
+      // 4) Get with PDF embedded
       if (action === 'with-pdf') {
-        // Get file with PDF data: GET /api/files?id=123&action=with-pdf
-        const file = await db.services.fileService.getFileById(id, { includePdf: true });
-        if (!file) {
-          return NextResponse.json({ 
-            success: false, 
-            data: null,
-            error: 'File not found'
-          }, { status: 404 });
+        const f = await db.services.fileService.getFileById(id, { includePdf: true });
+        if (!f) {
+          return NextResponse.json({ success: false, data: null, error: 'File not found' }, { status: 404 });
         }
-        
-        return NextResponse.json({ 
-          success: true, 
-          data: file,
+        return NextResponse.json({ success: true, data: f, error: null });
+      }
+
+      // 5) Default “get file metadata”
+      const fileDoc = await db.models.File
+        .findById(id)
+        .populate('solutionRef')
+        .populate({ path: 'components.itemId', model: 'Item' })
+        .lean();
+
+      if (!fileDoc) {
+        return NextResponse.json({ success: false, data: null, error: 'File not found' }, { status: 404 });
+      }
+
+      // reshape for your client
+      const file = {
+        ...fileDoc,
+        components: (fileDoc.components || []).map(c => ({
+          itemId:       c.itemId?._id,
+          item:         c.itemId,               // full populated Item
+          amount:       c.amount,
+          unit:         c.unit,
+          netsuiteData: c.netsuiteData,
+          qty:          String(c.amount)        // for your component form
+        }))
+      };
+
+      return NextResponse.json({ success: true, data: file, error: null });
+    }
+
+    // ----- search -----
+    if (search) {
+      const term = search.trim();
+      if (term.length < 2) {
+        return NextResponse.json({
+          success: true,
+          data: { files: [], count: 0, message: 'Query too short', query: term },
           error: null
         });
       }
-      
-      // Regular file get: GET /api/files?id=123
-      const file = await db.services.fileService.getFileById(id);
-      if (!file) {
-        return NextResponse.json({ 
-          success: false, 
-          data: null,
-          error: 'File not found'
-        }, { status: 404 });
-      }
-      
-      return NextResponse.json({ 
-        success: true, 
-        data: file,
+      const all = await db.services.fileService.searchFiles(term);
+      const original = (all || []).filter(f =>
+        !f.isBatch && !f.runNumber && !f.status && !f.batchId && !f.sourceType
+      );
+      return NextResponse.json({
+        success: true,
+        data: {
+          files: original,
+          count: original.length,
+          totalFound: all.length,
+          query: term
+        },
         error: null
       });
     }
 
-    // Search: GET /api/files?search=eco
-    if (search) {
-      console.log('🔍 Search request:', search);
-      
-      if (!search.trim() || search.trim().length < 2) {
-        // FIXED: Return consistent wrapper structure even for empty results
-        return NextResponse.json({ 
-          success: true, 
-          data: {
-            files: [],
-            count: 0,
-            query: { 
-              search: search, 
-              folderId: null 
-            },
-            searchTerm: search,
-            message: 'Search query too short (minimum 2 characters)'
-          },
-          error: null
-        });
-      }
+    // ----- list files (root or folder) -----
+    const all = await db.services.fileService.listFiles({ folderId });
+    const original = (all || []).filter(f =>
+      !f.isBatch && !f.runNumber && !f.status && !f.batchId && !f.sourceType
+    );
 
-      try {
-        // Search only original files (not batches)
-        const searchTerm = search.trim();
-        
-        // Search in original files only
-        const files = await db.services.fileService.searchFiles(searchTerm);
-        console.log('📄 Found original files:', files?.length || 0);
-        
-        // Filter to ensure only original files are returned
-        const originalFiles = (files || []).filter(file => {
-          // Check that it's NOT a batch file
-          const isNotBatch = !file.isBatch && 
-                            !file.runNumber && 
-                            !file.status && 
-                            !file.batchId &&
-                            !file.sourceType;
-          return isNotBatch;
-        });
-        
-        console.log('✅ Filtered to original files only:', originalFiles.length, 'out of', files?.length || 0);
-        
-        // FIXED: Return consistent wrapper structure
-        return NextResponse.json({ 
-          success: true, 
-          data: {
-            files: originalFiles,
-            count: originalFiles.length,
-            query: { 
-              search: searchTerm, 
-              folderId: null 
-            },
-            searchTerm: searchTerm,
-            totalFound: files?.length || 0,
-            filtered: files?.length !== originalFiles.length
-          },
-          error: null
-        });
-        
-      } catch (error) {
-        console.error('💥 Search error:', error);
-        // FIXED: Return consistent error structure
-        return NextResponse.json({ 
-          success: false, 
-          data: {
-            files: [],
-            count: 0,
-            query: { search, folderId: null }
-          },
-          error: 'Search failed: ' + error.message
-        }, { status: 500 });
-      }
-    }
-
-    // List files: GET /api/files?folderId=abc or GET /api/files
-    const files = await db.services.fileService.listFiles({ 
-      folderId: folderId || null 
-    });
-    
-    console.log('📁 Listed files:', files?.length || 0, 'for folder:', folderId || 'root');
-    
-    // Filter to only return original files (not batches)
-    const originalFiles = (files || []).filter(file => {
-      const isNotBatch = !file.isBatch && 
-                        !file.runNumber && 
-                        !file.status && 
-                        !file.batchId &&
-                        !file.sourceType;
-      return isNotBatch;
-    });
-    
-    console.log('✅ Filtered to original files only:', originalFiles.length, 'out of', files?.length || 0);
-    
-    // FIXED: Always return consistent wrapper structure
-    const responseData = {
-      files: originalFiles,
-      count: originalFiles.length,
-      query: { 
-        folderId: folderId || null,
-        search: null 
+    return NextResponse.json({
+      success: true,
+      data: {
+        files: original,
+        count: original.length,
+        folderId,
+        totalFiles: all.length
       },
-      folder: folderId ? { id: folderId } : null,
-      totalFiles: files?.length || 0,
-      filtered: files?.length !== originalFiles.length
-    };
-    
-    // Add folder metadata if available
-    if (folderId) {
-      try {
-        const folder = await db.models.Folder.findById(folderId).lean();
-        if (folder) {
-          responseData.folder = {
-            id: folder._id,
-            name: folder.name,
-            parentId: folder.parentId,
-            path: folder.path
-          };
-        }
-      } catch (error) {
-        console.warn('Could not fetch folder details:', error);
-      }
-    }
-    
-    return NextResponse.json({ 
-      success: true, 
-      data: responseData,
       error: null
     });
-    
-  } catch (error) {
-    console.error('GET files error:', error);
-    // FIXED: Even errors return consistent structure
-    return NextResponse.json({ 
-      success: false, 
-      data: {
-        files: [],
-        count: 0,
-        query: {
-          folderId: searchParams?.get('folderId') || null,
-          search: searchParams?.get('search') || null
-        }
-      },
-      error: 'Internal server error: ' + error.message
+
+  } catch (err) {
+    console.error('GET /api/files error:', err);
+    return NextResponse.json({
+      success: false,
+      data: null,
+      error: 'Internal server error: ' + err.message
     }, { status: 500 });
   }
 }

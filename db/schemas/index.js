@@ -98,8 +98,8 @@ const fileSchema = new Schema({
   // Recipe metadata
   productRef: { type: Schema.Types.ObjectId, ref: 'Item', default: null },
   solutionRef: { type: Schema.Types.ObjectId, ref: 'Item', default: null },
-  recipeQty: { type: Number },
-  recipeUnit: { type: String },
+  recipeQty: { type: Number, default: 1 },
+  recipeUnit: { type: String, default: 'mL' },
   
   // Components
   components: [{

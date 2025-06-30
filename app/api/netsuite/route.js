@@ -528,7 +528,6 @@ export async function POST(request) {
 
       case 'import': {
         const { bomData, fileId, overwriteExisting = false } = body;
-        
         if (!bomData || !fileId) {
           return NextResponse.json({
             success: false,
@@ -539,11 +538,9 @@ export async function POST(request) {
 
         // Map NetSuite components to local format
         const mappingResults = await db.netsuite.mapNetSuiteComponents(bomData.components || []);
-        
         const components = mappingResults.map(result => {
           const comp = result.netsuiteComponent;
           const match = result.bestMatch;
-          
           return {
             itemId: match?.chemical?._id || null,
             amount: comp.quantity || comp.bomQuantity || 0,
@@ -563,37 +560,40 @@ export async function POST(request) {
           };
         });
 
-        // Update file with BOM data
+        // ←─── HERE: also save recipeQty & recipeUnit ←───
         const updateData = {
+          recipeQty:    1,     // per-mL basis
+          recipeUnit:   'mL',
           components,
           netsuiteImportData: {
-            bomId: bomData.bomId,
-            bomName: bomData.bomName,
-            revisionId: bomData.revisionId,
-            revisionName: bomData.revisionName,
-            importedAt: new Date(),
+            bomId:              bomData.bomId,
+            bomName:            bomData.bomName,
+            revisionId:         bomData.revisionId,
+            revisionName:       bomData.revisionName,
+            importedAt:         new Date(),
             solutionNetsuiteId: bomData.assemblyItemId,
-            lastSyncAt: new Date()
+            lastSyncAt:         new Date()
           }
         };
 
         const updatedFile = await db.services.fileService.updateFileMeta(fileId, updateData);
-        
+
         return NextResponse.json({
           success: true,
           data: {
-            file: updatedFile,
+            file:           updatedFile,
             mappingResults,
             summary: {
-              totalComponents: components.length,
-              mappedComponents: components.filter(c => c.itemId).length,
+              totalComponents:   components.length,
+              mappedComponents:  components.filter(c => c.itemId).length,
               unmappedComponents: components.filter(c => !c.itemId).length
             }
           },
-          error: null,
+          error:   null,
           message: 'BOM imported successfully'
         });
       }
+      
 
       case 'sync': {
         const { itemId, netsuiteItemId } = body;
