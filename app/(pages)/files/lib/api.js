@@ -1,68 +1,25 @@
-// app/(pages)/files/lib/api.js - FIXED: Better response handling and error management
-import { api } from '@/app/apiClient'
+// app/(pages)/files/lib/api.js - FINAL FIX: Correct data extraction
+
+import { api, hasError, extractData, getError } from '@/app/apiClient'
 
 /**
- * Files Page API Client - FIXED
+ * Files Page API Client - FINAL FIX
  * 
- * This module contains all API operations used by the Files page components.
- * Fixed to handle different response formats from the backend and provide
- * consistent error handling.
+ * The issue was: wrapper functions were returning just arrays instead of 
+ * the full { data, error } format expected by the frontend components.
  */
 
-// Helper function to normalize API responses
-function normalizeResponse(result, dataField = 'data') {
-  console.log('🔧 Normalizing API response:', result);
-  
-  // Handle null/undefined responses
-  if (!result) {
-    return { data: null, error: 'No response received' };
-  }
-  
-  // Handle error responses
-  if (result.error) {
-    return { data: null, error: result.error };
-  }
-  
-  // Handle success responses with explicit success field
-  if (result.success === true) {
-    return { 
-      data: result[dataField] || result.data || result, 
-      error: null 
-    };
-  }
-  
-  // Handle success responses with explicit success field = false
-  if (result.success === false) {
-    return { 
-      data: null, 
-      error: result.error || result.message || 'Operation failed' 
-    };
-  }
-  
-  // Handle direct data responses (arrays or objects)
-  if (Array.isArray(result) || (typeof result === 'object' && !result.success && !result.error)) {
-    return { data: result, error: null };
-  }
-  
-  // Handle responses with specific data fields
-  if (result.folders || result.files || result.batches) {
-    return { data: result, error: null };
-  }
-  
-  // Default case - assume it's data
-  return { data: result, error: null };
-}
-
-// Helper function to handle API calls with consistent error handling
+// Helper function to handle API calls with proper error handling
 async function handleApiCall(operation, apiCall) {
   try {
     console.log(`🚀 API Call: ${operation}`);
     const result = await apiCall();
-    const normalized = normalizeResponse(result);
-    console.log(`✅ API Success: ${operation}`, normalized);
-    return normalized;
+    
+    // FIXED: Just return the result as-is, don't extract data
+    return result;
+    
   } catch (error) {
-    console.error(`❌ API Error: ${operation}`, error);
+    console.error(`💥 API Exception: ${operation}`, error);
     return { 
       data: null, 
       error: error.message || 'An error occurred' 
@@ -76,48 +33,29 @@ export const filesApi = {
     async list(parentId = null) {
       return handleApiCall('folders.list', async () => {
         const result = await api.list.folders(parentId);
-        console.log('📁 Raw folders result:', result);
         
-        // Handle different response formats
-        if (result.data && result.data.folders) {
-          return result.data.folders;
-        } else if (result.data && Array.isArray(result.data)) {
-          return result.data;
-        } else if (result.folders) {
-          return result.folders;
-        } else if (Array.isArray(result)) {
-          return result;
-        }
-        
+        // FIXED: Return the full data object, not just the folders array
+        // The frontend expects { data: {...}, error: null }
+        // NOT { data: [...], error: null }
         return result;
       });
     },
 
     async create(name, parentId = null) {
       return handleApiCall('folders.create', async () => {
-        const result = await api.create.folder(name, parentId);
-        return result;
+        return await api.create.folder(name, parentId);
       });
     },
 
     async update(id, name) {
       return handleApiCall('folders.update', async () => {
-        const result = await api.update.folderName(id, name);
-        return result;
+        return await api.update.folderName(id, name);
       });
     },
 
     async remove(id) {
       return handleApiCall('folders.remove', async () => {
-        const result = await api.remove.folder(id);
-        return result;
-      });
-    },
-
-    async getStructure(rootId = null) {
-      return handleApiCall('folders.getStructure', async () => {
-        const result = await api.list.folderStructure(rootId);
-        return result;
+        return await api.remove.folder(id);
       });
     }
   },
@@ -127,82 +65,54 @@ export const filesApi = {
     async list(folderId = null) {
       return handleApiCall('files.list', async () => {
         const result = await api.list.files(folderId);
-        console.log('📄 Raw files result:', result);
         
-        // Handle different response formats
-        if (result.data && result.data.files) {
-          return result.data.files;
-        } else if (result.data && Array.isArray(result.data)) {
-          return result.data;
-        } else if (result.files) {
-          return result.files;
-        } else if (Array.isArray(result)) {
-          return result;
-        }
-        
+        // FIXED: Return the full data object, not just the files array
         return result;
       });
     },
 
     async get(id) {
       return handleApiCall('files.get', async () => {
-        const result = await api.get.file(id);
-        return result;
+        return await api.get.file(id);
       });
     },
 
     async getWithPdf(id) {
       return handleApiCall('files.getWithPdf', async () => {
-        const result = await api.get.fileWithPdf(id);
-        return result;
+        return await api.get.fileWithPdf(id);
       });
     },
 
     async search(query) {
       return handleApiCall('files.search', async () => {
         const result = await api.list.searchFiles(query);
-        console.log('🔍 Raw search result:', result);
         
-        // Handle different response formats
-        if (result.data && result.data.files) {
-          return result.data.files;
-        } else if (result.data && Array.isArray(result.data)) {
-          return result.data;
-        } else if (result.files) {
-          return result.files;
-        } else if (Array.isArray(result)) {
-          return result;
-        }
-        
+        // FIXED: Return the full data object, not just the files array
         return result;
       });
     },
 
     async upload(file, folderId = null, onProgress = null) {
       return handleApiCall('files.upload', async () => {
-        const result = await api.custom.uploadFile(file, folderId, onProgress);
-        return result;
+        return await api.custom.uploadFile(file, folderId, onProgress);
       });
     },
 
     async uploadBatch(fileDataArray, baseFolderId = null, onProgress = null) {
       return handleApiCall('files.uploadBatch', async () => {
-        const result = await api.custom.uploadBatch(fileDataArray, baseFolderId, onProgress);
-        return result;
-      });
-    },
-
-    async uploadFolder(files, baseFolderId = null, onProgress = null) {
-      return handleApiCall('files.uploadFolder', async () => {
-        const result = await api.custom.uploadFolder(files, baseFolderId, onProgress);
-        return result;
+        return await api.custom.uploadBatch(fileDataArray, baseFolderId, onProgress);
       });
     },
 
     async updateMeta(id, metadata) {
       return handleApiCall('files.updateMeta', async () => {
-        const result = await api.update.fileMeta(id, metadata);
-        return result;
+        return await api.update.fileMeta(id, metadata);
+      });
+    },
+
+    async remove(id) {
+      return handleApiCall('files.remove', async () => {
+        return await api.remove.file(id);
       });
     }
   },
@@ -212,15 +122,8 @@ export const filesApi = {
     async list(options = {}) {
       return handleApiCall('batches.list', async () => {
         const result = await api.list.batches(options);
-        console.log('📦 Raw batches result:', result);
         
-        // Handle different response formats
-        if (result.data && Array.isArray(result.data)) {
-          return result.data;
-        } else if (Array.isArray(result)) {
-          return result;
-        }
-        
+        // FIXED: Return the full data object, not just the batches array
         return result;
       });
     },
@@ -228,145 +131,57 @@ export const filesApi = {
     async listByStatus(status) {
       return handleApiCall('batches.listByStatus', async () => {
         const result = await api.list.batchesByStatus(status);
-        console.log(`📦 Raw batches by status (${status}) result:`, result);
         
-        // Handle different response formats
-        if (result.data && Array.isArray(result.data)) {
-          return result.data;
-        } else if (Array.isArray(result)) {
-          return result;
-        }
-        
-        return result;
-      });
-    },
-
-    async listByFile(fileId) {
-      return handleApiCall('batches.listByFile', async () => {
-        const result = await api.list.batchesByFile(fileId);
+        // FIXED: Return the full data object, not just the batches array
         return result;
       });
     },
 
     async get(id) {
       return handleApiCall('batches.get', async () => {
-        const result = await api.get.batch(id);
-        console.log('📦 Raw batch get result:', result);
-        
-        // Handle different response formats
-        if (result.data) {
-          return result.data;
-        }
-        
-        return result;
-      });
-    },
-
-    async getWithWorkOrder(id) {
-      return handleApiCall('batches.getWithWorkOrder', async () => {
-        const result = await api.get.batchWithWorkOrder(id);
-        return result;
+        return await api.get.batch(id);
       });
     },
 
     async create(data) {
       return handleApiCall('batches.create', async () => {
-        const result = await api.create.batch(data);
-        return result;
-      });
-    },
-
-    async createFromFile(fileId, options = {}) {
-      return handleApiCall('batches.createFromFile', async () => {
-        const result = await api.create.batchFromFile(fileId, options);
-        return result;
-      });
-    },
-
-    async createFromEditor(originalFileId, editorData, action = 'save', confirmationData = null) {
-      return handleApiCall('batches.createFromEditor', async () => {
-        const result = await api.create.batchFromEditor(originalFileId, editorData, action, confirmationData);
-        return result;
+        return await api.create.batch(data);
       });
     },
 
     async update(id, data) {
       return handleApiCall('batches.update', async () => {
-        const result = await api.update.batch(id, data);
-        return result;
+        return await api.update.batch(id, data);
       });
     },
 
     async updateStatus(id, status) {
       return handleApiCall('batches.updateStatus', async () => {
-        const result = await api.update.batchStatus(id, status);
-        return result;
+        return await api.update.batchStatus(id, status);
       });
     },
 
     async remove(id) {
       return handleApiCall('batches.remove', async () => {
-        const result = await api.remove.batch(id);
-        return result;
+        return await api.remove.batch(id);
       });
     },
 
     async submitForReview(id, confirmationData = {}) {
       return handleApiCall('batches.submitForReview', async () => {
-        const result = await api.update.submitBatchForReview(id, confirmationData);
-        return result;
+        return await api.update.submitBatchForReview(id, confirmationData);
       });
     },
 
     async complete(id, completionData = {}) {
       return handleApiCall('batches.complete', async () => {
-        const result = await api.update.completeBatch(id, completionData);
-        return result;
+        return await api.update.completeBatch(id, completionData);
       });
     },
 
     async reject(id, rejectionReason) {
       return handleApiCall('batches.reject', async () => {
-        const result = await api.update.rejectBatch(id, rejectionReason);
-        return result;
-      });
-    }
-  },
-
-  // === ARCHIVE OPERATIONS ===
-  archive: {
-    async listFiles() {
-      return handleApiCall('archive.listFiles', async () => {
-        const result = await api.list.archivedFiles();
-        return result;
-      });
-    },
-
-    async listFilesByPath(folderPath) {
-      return handleApiCall('archive.listFilesByPath', async () => {
-        const result = await api.list.archivedFilesByPath(folderPath);
-        return result;
-      });
-    },
-
-    async listFolders() {
-      return handleApiCall('archive.listFolders', async () => {
-        const result = await api.list.archiveFolders();
-        return result;
-      });
-    },
-
-    async getFile(id) {
-      return handleApiCall('archive.getFile', async () => {
-        const result = await api.get.archivedFile(id);
-        return result;
-      });
-    },
-
-    async getStats() {
-      return handleApiCall('archive.getStats', async () => {
-        const result = await api.custom.getArchiveStats();
-        return result;
+        return await api.update.rejectBatch(id, rejectionReason);
       });
     }
   },
@@ -376,61 +191,32 @@ export const filesApi = {
     async search(query, type = null) {
       return handleApiCall('items.search', async () => {
         const result = await api.list.searchItems(query, type);
-        return result;
-      });
-    },
-
-    async searchChemicals(query) {
-      return handleApiCall('items.searchChemicals', async () => {
-        const result = await api.list.searchChemicals(query);
+        
+        // FIXED: Return the full data object, not just the items array
         return result;
       });
     },
 
     async searchSolutions(query) {
       return handleApiCall('items.searchSolutions', async () => {
-        // Call the correct endpoint with proper query parameters
-        const response = await fetch(`/api/items?type=solution&search=${encodeURIComponent(query)}`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include', // Include cookies for auth
-        });
+        const result = await api.list.searchItems(query, 'solution');
         
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        console.log('🔍 searchSolutions API response:', result);
-        
-        // The backend returns { success: true, items: [...] }
-        if (result.success) {
-          return result.items;
-        } else {
-          throw new Error(result.error || 'Failed to search solutions');
-        }
+        // FIXED: Return the full data object, not just the items array
+        return result;
       });
     },
 
     async get(id) {
       return handleApiCall('items.get', async () => {
-        const result = await api.get.item(id);
-        return result;
+        return await api.get.item(id);
       });
     },
 
     async getLots(id) {
       return handleApiCall('items.getLots', async () => {
         const result = await api.get.itemLots(id);
-        return result;
-      });
-    },
-
-    async getTransactions(id, options = {}) {
-      return handleApiCall('items.getTransactions', async () => {
-        const result = await api.get.itemTransactions(id, options);
+        
+        // FIXED: Return the full data object, not just the lots array
         return result;
       });
     }
@@ -440,81 +226,13 @@ export const filesApi = {
   workOrders: {
     async getStatus(batchId) {
       return handleApiCall('workOrders.getStatus', async () => {
-        const result = await api.custom.getWorkOrderStatus(batchId);
-        return result;
+        return await api.get.batchWorkOrderStatus(batchId);
       });
     },
 
     async create(batchId, quantity, options = {}) {
       return handleApiCall('workOrders.create', async () => {
-        const result = await api.create.netsuiteWorkOrderFromBatch(batchId, quantity, options);
-        return result;
-      });
-    },
-
-    async retry(batchId, quantity) {
-      return handleApiCall('workOrders.retry', async () => {
-        const result = await api.custom.retryWorkOrder(batchId, quantity);
-        return result;
-      });
-    },
-
-    async complete(workOrderId, quantityCompleted = null) {
-      return handleApiCall('workOrders.complete', async () => {
-        const result = await api.custom.completeWorkOrder(workOrderId, quantityCompleted);
-        return result;
-      });
-    },
-
-    async cancel(workOrderId) {
-      return handleApiCall('workOrders.cancel', async () => {
-        const result = await api.custom.cancelWorkOrder(workOrderId);
-        return result;
-      });
-    }
-  },
-
-  // === NETSUITE OPERATIONS ===
-  netsuite: {
-    async getBOM(assemblyItemId) {
-      return handleApiCall('netsuite.getBOM', async () => {
-        const result = await api.custom.getNetSuiteBOM(assemblyItemId);
-        return result;
-      });
-    },
-
-    async searchItems(query) {
-      return handleApiCall('netsuite.searchItems', async () => {
-        const result = await api.custom.searchNetSuiteItems(query);
-        return result;
-      });
-    },
-
-    async mapComponents(components) {
-      return handleApiCall('netsuite.mapComponents', async () => {
-        const result = await api.custom.mapNetSuiteComponents(components);
-        return result;
-      });
-    },
-
-    async getHealth() {
-      return handleApiCall('netsuite.getHealth', async () => {
-        const result = await api.custom.getNetSuiteHealth();
-        return result;
-      });
-    },
-
-    async getSetup() {
-      return handleApiCall('netsuite.getSetup', async () => {
-        const result = await api.custom.getNetSuiteSetup();
-        return result;
-      });
-    },
-
-    async test() {
-      return handleApiCall('netsuite.test', async () => {
-        const result = await api.custom.testNetSuite();
-        return result;
+        return await api.create.netsuiteWorkOrderFromBatch(batchId, quantity, options);
       });
     }
   },
@@ -522,7 +240,6 @@ export const filesApi = {
   // === WORKFLOW HELPERS ===
   workflow: {
     async getFilesByStatus(status) {
-      // FIXED: Use filesApi.batches instead of this.batches
       return filesApi.batches.listByStatus(status);
     },
 
@@ -536,37 +253,14 @@ export const filesApi = {
 
     async getCompletedFiles() {
       return filesApi.workflow.getFilesByStatus('Completed');
-    },
-
-    async getDashboardData() {
-      return handleApiCall('workflow.getDashboardData', async () => {
-        const result = await api.list.workflowOverview();
-        return result;
-      });
     }
   },
 
-  // === BULK OPERATIONS ===
-  bulk: {
-    async uploadFiles(files, folderId = null, onProgress = null) {
-      const fileDataArray = Array.from(files).map(file => ({
-        file,
-        relativePath: file.name
-      }));
-      return filesApi.files.uploadBatch(fileDataArray, folderId, onProgress);
-    },
-
-    async deleteBatches(batchIds, options = {}) {
-      return handleApiCall('bulk.deleteBatches', async () => {
-        const result = await api.remove.bulkBatches(batchIds, options);
-        return result;
-      });
-    },
-
-    async updateBatchStatuses(statusUpdates) {
-      return handleApiCall('bulk.updateBatchStatuses', async () => {
-        const result = await api.update.bulkBatchStatuses(statusUpdates);
-        return result;
+  // === EDITOR-SPECIFIC OPERATIONS ===
+  editor: {
+    async saveFromEditor(originalFileId, editorData, action = 'save', confirmationData = null) {
+      return handleApiCall('editor.saveFromEditor', async () => {
+        return await api.custom.saveBatchFromEditor(originalFileId, editorData, action, confirmationData);
       });
     }
   },
@@ -575,59 +269,32 @@ export const filesApi = {
   validation: {
     async validateBatchDelete(id) {
       return handleApiCall('validation.validateBatchDelete', async () => {
-        const result = await api.remove.validateBeforeDelete('batch', id);
-        return result;
+        return await api.remove.validateBeforeDelete('batch', id);
       });
     },
 
     async validateFolderDelete(id) {
       return handleApiCall('validation.validateFolderDelete', async () => {
-        const result = await api.remove.validateBeforeDelete('folder', id);
-        return result;
-      });
-    }
-  },
-
-  // === EDITOR-SPECIFIC OPERATIONS ===
-  editor: {
-    async saveFromEditor(originalFileId, editorData, action = 'save', confirmationData = null) {
-      return handleApiCall('editor.saveFromEditor', async () => {
-        const result = await api.custom.saveBatchFromEditor(originalFileId, editorData, action, confirmationData);
-        return result;
-      });
-    },
-
-    async loadForEditing(id, isBatch = false) {
-      return handleApiCall('editor.loadForEditing', async () => {
-        if (isBatch) {
-          const result = await api.get.batch(id);
-          return result;
-        } else {
-          const result = await api.get.fileWithPdf(id);
-          return result;
-        }
+        return await api.remove.validateBeforeDelete('folder', id);
       });
     }
   }
 };
 
-// === CONVENIENCE FUNCTIONS ===
+// === CONVENIENCE FUNCTIONS (aligned with GUIDE.md) ===
 
 /**
  * Check if a result has an error and handle it consistently
  */
-export function hasError(result) {
-  return result && result.error !== null && result.error !== undefined;
+export function hasApiError(result) {
+  return hasError(result);
 }
 
 /**
  * Extract data from API result, handling both success and error cases
  */
-export function extractData(result, fallback = null) {
-  if (hasError(result)) {
-    return fallback;
-  }
-  return result?.data || fallback;
+export function extractApiData(result, fallback = null) {
+  return extractData(result, fallback);
 }
 
 /**
@@ -635,8 +302,8 @@ export function extractData(result, fallback = null) {
  */
 export function handleApiError(result, defaultMessage = 'An error occurred') {
   if (hasError(result)) {
-    console.error('API Error:', result.error);
-    return result.error || defaultMessage;
+    console.error('API Error:', getError(result));
+    return getError(result) || defaultMessage;
   }
   return null;
 }
@@ -664,22 +331,5 @@ export function normalizeFileData(file) {
   };
 }
 
-/**
- * Normalize folder data for consistent handling
- */
-export function normalizeFolderData(folder) {
-  if (!folder) return null;
-  
-  return {
-    id: folder._id,
-    name: folder.name,
-    parentId: folder.parentId,
-    createdAt: folder.createdAt,
-    updatedAt: folder.updatedAt,
-    // Include all original properties  
-    ...folder
-  };
-}
-
 // Export individual API modules for focused imports
-export const { folders, files, batches, archive, items, workOrders, netsuite, workflow, bulk, validation, editor } = filesApi;
+export const { folders, files, batches, items, workOrders, workflow, editor, validation } = filesApi;

@@ -24,7 +24,7 @@ export function getOperations(apiManager, handleApiCall) {
       },
   
       async fileWithPdf(id) {
-        return this.file(id, { includePdf: true })
+        return this.file(id, { action: 'with-pdf' })
       },
   
       async fileWithBatches(id) {
