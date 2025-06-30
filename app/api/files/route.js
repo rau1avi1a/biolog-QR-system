@@ -65,12 +65,17 @@ export async function GET(request) {
           filter: { fileId: id } 
         });
         
+        // FIXED: Return consistent wrapper structure
         return NextResponse.json({ 
           success: true, 
           data: {
-            batches,
-            count: batches.length,
-            fileId: id
+            batches: batches || [],
+            count: batches?.length || 0,
+            fileId: id,
+            query: {
+              action: 'batches',
+              fileId: id
+            }
           },
           error: null
         });
@@ -98,7 +103,16 @@ export async function GET(request) {
             data: {
               file,
               batchCount: batches.length,
-              completedBatches: batches.filter(b => b.status === 'Completed').length
+              completedBatches: batches.filter(b => b.status === 'Completed').length,
+              stats: {
+                totalBatches: batches.length,
+                byStatus: {
+                  draft: batches.filter(b => b.status === 'Draft').length,
+                  inProgress: batches.filter(b => b.status === 'In Progress').length,
+                  review: batches.filter(b => b.status === 'Review').length,
+                  completed: batches.filter(b => b.status === 'Completed').length
+                }
+              }
             },
             error: null
           });
@@ -145,12 +159,17 @@ export async function GET(request) {
       console.log('🔍 Search request:', search);
       
       if (!search.trim() || search.trim().length < 2) {
+        // FIXED: Return consistent wrapper structure even for empty results
         return NextResponse.json({ 
           success: true, 
           data: {
             files: [],
             count: 0,
-            query: { search, folderId: null },
+            query: { 
+              search: search, 
+              folderId: null 
+            },
+            searchTerm: search,
             message: 'Search query too short (minimum 2 characters)'
           },
           error: null
@@ -178,19 +197,26 @@ export async function GET(request) {
         
         console.log('✅ Filtered to original files only:', originalFiles.length, 'out of', files?.length || 0);
         
+        // FIXED: Return consistent wrapper structure
         return NextResponse.json({ 
           success: true, 
           data: {
             files: originalFiles,
             count: originalFiles.length,
-            query: { search: searchTerm, folderId: null },
-            searchTerm: searchTerm
+            query: { 
+              search: searchTerm, 
+              folderId: null 
+            },
+            searchTerm: searchTerm,
+            totalFound: files?.length || 0,
+            filtered: files?.length !== originalFiles.length
           },
           error: null
         });
         
       } catch (error) {
         console.error('💥 Search error:', error);
+        // FIXED: Return consistent error structure
         return NextResponse.json({ 
           success: false, 
           data: {
@@ -199,7 +225,7 @@ export async function GET(request) {
             query: { search, folderId: null }
           },
           error: 'Search failed: ' + error.message
-        });
+        }, { status: 500 });
       }
     }
 
@@ -222,28 +248,54 @@ export async function GET(request) {
     
     console.log('✅ Filtered to original files only:', originalFiles.length, 'out of', files?.length || 0);
     
+    // FIXED: Always return consistent wrapper structure
+    const responseData = {
+      files: originalFiles,
+      count: originalFiles.length,
+      query: { 
+        folderId: folderId || null,
+        search: null 
+      },
+      folder: folderId ? { id: folderId } : null,
+      totalFiles: files?.length || 0,
+      filtered: files?.length !== originalFiles.length
+    };
+    
+    // Add folder metadata if available
+    if (folderId) {
+      try {
+        const folder = await db.models.Folder.findById(folderId).lean();
+        if (folder) {
+          responseData.folder = {
+            id: folder._id,
+            name: folder.name,
+            parentId: folder.parentId,
+            path: folder.path
+          };
+        }
+      } catch (error) {
+        console.warn('Could not fetch folder details:', error);
+      }
+    }
+    
     return NextResponse.json({ 
       success: true, 
-      data: {
-        files: originalFiles,
-        count: originalFiles.length,
-        query: { 
-          folderId: folderId || null,
-          search: null 
-        },
-        folder: folderId ? { id: folderId } : null
-      },
+      data: responseData,
       error: null
     });
     
   } catch (error) {
     console.error('GET files error:', error);
+    // FIXED: Even errors return consistent structure
     return NextResponse.json({ 
       success: false, 
       data: {
         files: [],
         count: 0,
-        query: null
+        query: {
+          folderId: searchParams?.get('folderId') || null,
+          search: searchParams?.get('search') || null
+        }
       },
       error: 'Internal server error: ' + error.message
     }, { status: 500 });
@@ -313,14 +365,17 @@ export async function POST(request) {
       const successful = results.filter(r => !r.error);
       const failed = results.filter(r => r.error);
       
+      // FIXED: Return consistent wrapper structure
       return NextResponse.json({
         success: true,
         data: {
+          files: successful,
           uploaded: successful.length,
           failed: failed.length,
           results: successful,
           errors: failed,
-          folderId: baseFolderId
+          folderId: baseFolderId,
+          totalAttempted: fileDataArray.length
         },
         error: null,
         message: `Uploaded ${successful.length} files successfully${failed.length ? `, ${failed.length} failed` : ''}`

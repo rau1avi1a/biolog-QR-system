@@ -1,20 +1,20 @@
-// app/apiClient/index.js - Unified Frontend API Client (SIMPLIFIED NORMALIZATION)
+// app/apiClient/index.js - Unified Frontend API Client (FIXED NORMALIZATION)
 import { apiClient, useApi } from '@/app/api'
 
 /**
- * Unified Frontend API Client with Simplified Normalization
+ * Unified Frontend API Client with Enhanced Normalization
  * 
- * Now that all API routes return standardized { success, data, error } format,
- * the normalization logic is greatly simplified and more reliable.
+ * Fixes the inconsistent data structure issues by properly normalizing
+ * the data field content across all API responses.
  */
 
 const isDev = process.env.NODE_ENV === 'development'
 
 /**
- * Simplified response normalization for standardized API responses
+ * Enhanced response normalization that handles nested data structures
  * 
- * All API routes now return: { success: boolean, data: any, error: string|null }
- * This function handles that consistent format and any edge cases.
+ * The issue: API routes return { success, data, error } but the 'data' field
+ * contains inconsistent structures (sometimes wrapped objects, sometimes direct arrays)
  */
 function normalizeResponse(response) {
   // Handle null/undefined responses (network errors, etc.)
@@ -32,8 +32,10 @@ function normalizeResponse(response) {
   // Handle standardized success/error format
   if (response.hasOwnProperty('success')) {
     if (response.success === true) {
+      // FIXED: Properly normalize the data field content
+      const normalizedData = normalizeDataField(response.data)
       return { 
-        data: response.data, 
+        data: normalizedData, 
         error: null 
       }
     } else if (response.success === false) {
@@ -45,7 +47,6 @@ function normalizeResponse(response) {
   }
 
   // Handle legacy direct data responses (should be rare now)
-  // This covers any endpoints we might have missed
   if (isDev) console.warn('🚨 Non-standardized response format detected:', response)
   
   // If it has an error field, treat as error
@@ -55,6 +56,42 @@ function normalizeResponse(response) {
   
   // Otherwise, assume it's data
   return { data: response, error: null }
+}
+
+/**
+ * FIXED: Normalize the content of the data field to ensure consistent structure
+ * 
+ * This addresses the main issue: list endpoints return wrapped objects like
+ * { files: [...], count: 5 } instead of just the array
+ */
+function normalizeDataField(data) {
+  if (!data) return data
+  
+  // For list operations, check if data contains a wrapped structure
+  if (typeof data === 'object' && !Array.isArray(data)) {
+    // Common patterns in your API responses:
+    // - Files: { files: [...], count: n, query: {...} }
+    // - Batches: { batches: [...], count: n, query: {...} }
+    // - Items: { items: [...], count: n, query: {...} }
+    // - Folders: { folders: [...], count: n, query: {...} }
+    
+    // Check for these wrapped structures
+    const listFields = ['files', 'batches', 'items', 'folders', 'users', 'transactions', 'vendors']
+    
+    for (const field of listFields) {
+      if (data.hasOwnProperty(field) && Array.isArray(data[field])) {
+        // Return the entire wrapper object, not just the array
+        // This preserves metadata like count, pagination, etc.
+        return data
+      }
+    }
+    
+    // For single item operations, return as-is
+    return data
+  }
+  
+  // Arrays and primitives return as-is
+  return data
 }
 
 /**
@@ -103,14 +140,83 @@ export function hasError(result) {
 }
 
 /**
- * Convenience function to safely extract data from normalized result
+ * FIXED: Enhanced data extraction that handles wrapped list responses
  */
 export function extractData(result, fallback = null) {
   if (hasError(result)) {
     if (isDev) console.warn('🚨 Attempting to extract data from error result:', result.error)
     return fallback
   }
-  return result?.data ?? fallback
+  
+  const data = result?.data
+  
+  // If no data, return fallback
+  if (!data) return fallback
+  
+  // For wrapped list responses, check if caller expects just the array
+  if (typeof data === 'object' && !Array.isArray(data)) {
+    // Check if this is a wrapped list response
+    const listFields = ['files', 'batches', 'items', 'folders', 'users', 'transactions', 'vendors']
+    
+    for (const field of listFields) {
+      if (data.hasOwnProperty(field) && Array.isArray(data[field])) {
+        // If fallback is an array, assume caller wants just the array
+        if (Array.isArray(fallback)) {
+          return data[field]
+        }
+        // Otherwise return the full wrapper
+        break
+      }
+    }
+  }
+  
+  return data ?? fallback
+}
+
+/**
+ * NEW: Extract list data specifically (for when you just want the array)
+ */
+export function extractList(result, listField, fallback = []) {
+  if (hasError(result)) {
+    return fallback
+  }
+  
+  const data = result?.data
+  if (!data) return fallback
+  
+  // Direct array
+  if (Array.isArray(data)) return data
+  
+  // Wrapped structure
+  if (typeof data === 'object' && data[listField] && Array.isArray(data[listField])) {
+    return data[listField]
+  }
+  
+  return fallback
+}
+
+/**
+ * NEW: Extract metadata from wrapped responses
+ */
+export function extractMetadata(result, fallback = {}) {
+  if (hasError(result)) {
+    return fallback
+  }
+  
+  const data = result?.data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return fallback
+  }
+  
+  // Extract all non-array properties as metadata
+  const metadata = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (!Array.isArray(value)) {
+      metadata[key] = value
+    }
+  }
+  
+  return Object.keys(metadata).length > 0 ? metadata : fallback
 }
 
 /**
@@ -249,7 +355,9 @@ export {
   apiClient, 
   useApi, 
   hasError, 
-  extractData, 
+  extractData,
+  extractList,
+  extractMetadata,
   getError 
 }
 
@@ -262,25 +370,32 @@ if (hasError(result)) {
   console.error('Failed to load files:', getError(result))
   return
 }
-const files = extractData(result, [])
 
-// Direct data extraction with fallback
-const files = extractData(await api.list.files('folder123'), [])
+// Get the full response with metadata
+const fullData = extractData(result)
+console.log('Files:', fullData.files)
+console.log('Count:', fullData.count)
+console.log('Query:', fullData.query)
 
-// Check for errors
-const result = await api.create.batch({ fileId: 'file123' })
-if (hasError(result)) {
-  setError(getError(result))
-} else {
-  setBatch(extractData(result))
-}
+// Or just get the files array
+const files = extractList(result, 'files', [])
+
+// Get metadata separately
+const metadata = extractMetadata(result)
+console.log('Total files:', metadata.count)
+
+// Direct data extraction with fallback (for full wrapper)
+const fileData = extractData(await api.list.files(), { files: [], count: 0 })
+
+// Direct array extraction
+const fileArray = extractList(await api.list.files(), 'files')
 
 // All operations return normalized { data, error } format:
-// - api.list.files() → { data: [...], error: null }
-// - api.get.file(id) → { data: {...}, error: null }  
-// - api.create.batch(data) → { data: {...}, error: null }
-// - api.update.batch(id, data) → { data: {...}, error: null }
-// - api.remove.file(id) → { data: {...}, error: null }
-// - api.custom.uploadFile(file) → { data: {...}, error: null }
+// - api.list.files() → { data: { files: [...], count: n }, error: null }
+// - api.get.file(id) → { data: { _id: ..., fileName: ... }, error: null }  
+// - api.create.batch(data) → { data: { _id: ..., ... }, error: null }
+// - api.update.batch(id, data) → { data: { _id: ..., ... }, error: null }
+// - api.remove.file(id) → { data: { deletedFile: {...} }, error: null }
+// - api.custom.uploadFile(file) → { data: { _id: ..., ... }, error: null }
 
 */
