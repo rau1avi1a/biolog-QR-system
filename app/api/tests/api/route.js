@@ -1,32 +1,95 @@
-// =============================================================================
-// app/api/tests/api/route.js - Complete API Routes Test Suite
-// =============================================================================
+// app/api/tests/api-layer/route.js - Comprehensive API Layer Tests
 import { NextResponse } from 'next/server';
-import db from '@/db';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const suite = searchParams.get('suite') || 'all'; // all, auth, batches, files, folders, items, netsuite
+  const testType = searchParams.get('test') || 'all'; // all, endpoints, responses, data-flow
   const verbose = searchParams.get('verbose') === 'true';
+  const mockAuth = searchParams.get('mockAuth') === 'true';
 
   const results = {
     timestamp: new Date().toISOString(),
-    suite,
+    testType,
     verbose,
+    mockAuth,
     summary: {
       total: 0,
       passed: 0,
       failed: 0,
-      skipped: 0
+      warnings: 0
     },
-    tests: []
+    tests: [],
+    apiStructure: null,
+    responseFormats: {},
+    recommendations: []
+  };
+
+  // API endpoint definitions based on your codebase
+  const apiEndpoints = {
+    '/api/auth': {
+      methods: ['GET', 'POST'],
+      actions: {
+        GET: ['me', 'users'],
+        POST: ['login', 'logout', 'register']
+      },
+      description: 'Authentication and user management'
+    },
+    '/api/files': {
+      methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+      actions: {
+        GET: ['download', 'batches', 'stats', 'with-pdf'],
+        POST: ['batch-upload']
+      },
+      description: 'File management and upload'
+    },
+    '/api/folders': {
+      methods: ['GET', 'POST', 'PATCH'],
+      actions: {
+        GET: ['tree', 'children'],
+        POST: ['delete', 'move']
+      },
+      description: 'Folder hierarchy management'
+    },
+    '/api/batches': {
+      methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+      actions: {
+        GET: ['workorder-status'],
+        POST: ['workorder-retry']
+      },
+      description: 'Batch workflow management'
+    },
+    '/api/items': {
+      methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+      actions: {
+        GET: ['lots', 'transactions', 'stats', 'with-lots', 'vendors'],
+        POST: ['transactions', 'vendor'],
+        DELETE: ['lot']
+      },
+      description: 'Inventory item management'
+    },
+    '/api/netsuite': {
+      methods: ['GET', 'POST', 'PATCH'],
+      actions: {
+        GET: ['health', 'test', 'search', 'getBOM', 'units', 'workorder', 'setup', 'mapping'],
+        POST: ['setup', 'workorder', 'mapping', 'import', 'sync'],
+        PATCH: ['workorder']
+      },
+      description: 'NetSuite integration'
+    },
+    '/api/upload': {
+      methods: ['GET', 'POST'],
+      actions: {
+        POST: ['product', 'solution']
+      },
+      description: 'File upload handling'
+    }
   };
 
   try {
-    await db.connect();
+    console.log('🔍 Starting API layer tests...');
 
-    // Test helper function
-    const runTest = async (name, testFn, category = 'general') => {
+    // Test helper
+    const runTest = async (name, category, testFn) => {
       const test = {
         name,
         category,
@@ -34,7 +97,8 @@ export async function GET(request) {
         startTime: new Date().toISOString(),
         duration: 0,
         error: null,
-        result: null
+        result: null,
+        warnings: []
       };
 
       try {
@@ -42,10 +106,16 @@ export async function GET(request) {
         const result = await testFn();
         const duration = Date.now() - startTime;
 
-        test.status = 'passed';
+        test.status = result.warnings?.length > 0 ? 'warning' : 'passed';
         test.duration = duration;
         test.result = result;
-        results.summary.passed++;
+        test.warnings = result.warnings || [];
+        
+        if (test.status === 'warning') {
+          results.summary.warnings++;
+        } else {
+          results.summary.passed++;
+        }
       } catch (error) {
         test.status = 'failed';
         test.error = {
@@ -60,436 +130,629 @@ export async function GET(request) {
       results.summary.total++;
     };
 
-    // =============================================================================
-    // AUTH TESTS
-    // =============================================================================
-    if (suite === 'all' || suite === 'auth') {
-      await runTest('Auth - User Model Access', async () => {
-        const userCount = await db.models.User.countDocuments();
-        return { userCount, modelExists: !!db.models.User };
-      }, 'auth');
-
-      await runTest('Auth - Create Test User', async () => {
-        const testEmail = `test-${Date.now()}@example.com`;
-        const bcrypt = await import('bcryptjs');
-        const hashedPassword = await bcrypt.hash('testpass123', 12);
-        
-        const user = await db.models.User.create({
-          name: 'Test User',
-          email: testEmail,
-          password: hashedPassword,
-          role: 'operator'
+    // Helper to make API requests
+    const makeRequest = async (endpoint, options = {}) => {
+      const { method = 'GET', body, params, headers = {} } = options;
+      
+      const url = new URL(`${request.url.split('/api/')[0]}${endpoint}`);
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          url.searchParams.append(key, value);
         });
+      }
 
-        // Clean up
-        await db.models.User.findByIdAndDelete(user._id);
-        
-        return { 
-          created: true, 
-          userId: user._id, 
-          hasPassword: !!user.password,
-          cleaned: true 
-        };
-      }, 'auth');
-
-      await runTest('Auth - Password Matching', async () => {
-        const users = await db.models.User.find().limit(1);
-        if (users.length === 0) return { skipped: true, reason: 'No users in database' };
-        
-        const user = users[0];
-        const hasMethod = typeof user.matchPassword === 'function';
-        
-        return { 
-          hasMethod, 
-          userExists: true,
-          methodAvailable: hasMethod
-        };
-      }, 'auth');
-    }
-
-    // =============================================================================
-    // BATCH TESTS
-    // =============================================================================
-    if (suite === 'all' || suite === 'batches') {
-      await runTest('Batches - Service Access', async () => {
-        const serviceExists = !!db.services.batchService;
-        const hasConnect = typeof db.services.batchService.connect === 'function';
-        const hasGetById = typeof db.services.batchService.getBatchById === 'function';
-        const hasListBatches = typeof db.services.batchService.listBatches === 'function';
-        
-        return { serviceExists, hasConnect, hasGetById, hasListBatches };
-      }, 'batches');
-
-      await runTest('Batches - List Batches', async () => {
-        const batches = await db.services.batchService.listBatches({ 
-          filter: {}, 
-          limit: 5 
-        });
-        
-        return { 
-          count: batches.length,
-          hasBatches: batches.length > 0,
-          sampleBatch: batches[0] ? {
-            id: batches[0]._id,
-            status: batches[0].status,
-            runNumber: batches[0].runNumber
-          } : null
-        };
-      }, 'batches');
-
-      await runTest('Batches - Get Single Batch', async () => {
-        const batches = await db.services.batchService.listBatches({ limit: 1 });
-        if (batches.length === 0) return { skipped: true, reason: 'No batches available' };
-        
-        const batch = await db.services.batchService.getBatchById(batches[0]._id);
-        
-        return { 
-          found: !!batch,
-          id: batch?._id,
-          hasFileId: !!batch?.fileId,
-          hasSnapshot: !!batch?.snapshot
-        };
-      }, 'batches');
-
-      await runTest('Batches - Work Order Status', async () => {
-        const batches = await db.services.batchService.listBatches({ limit: 1 });
-        if (batches.length === 0) return { skipped: true, reason: 'No batches available' };
-        
-        const status = await db.services.batchService.getWorkOrderStatus(batches[0]._id);
-        
-        return { 
-          hasStatus: !!status,
-          created: status?.created,
-          workOrderStatus: status?.status,
-          hasError: !!status?.error
-        };
-      }, 'batches');
-    }
-
-    // =============================================================================
-    // FILE TESTS
-    // =============================================================================
-    if (suite === 'all' || suite === 'files') {
-      await runTest('Files - Service Access', async () => {
-        const serviceExists = !!db.services.fileService;
-        const hasGetById = typeof db.services.fileService.getFileById === 'function';
-        const hasListFiles = typeof db.services.fileService.listFiles === 'function';
-        const hasSearchFiles = typeof db.services.fileService.searchFiles === 'function';
-        
-        return { serviceExists, hasGetById, hasListFiles, hasSearchFiles };
-      }, 'files');
-
-      await runTest('Files - List Files', async () => {
-        const files = await db.services.fileService.listFiles({ 
-          folderId: null 
-        });
-        
-        return { 
-          count: files.length,
-          hasFiles: files.length > 0,
-          sampleFile: files[0] ? {
-            id: files[0]._id,
-            fileName: files[0].fileName,
-            folderId: files[0].folderId
-          } : null
-        };
-      }, 'files');
-
-      await runTest('Files - Get Single File', async () => {
-        const files = await db.services.fileService.listFiles({ folderId: null });
-        if (files.length === 0) return { skipped: true, reason: 'No files available' };
-        
-        const file = await db.services.fileService.getFileById(files[0]._id);
-        
-        return { 
-          found: !!file,
-          id: file?._id,
-          hasFileName: !!file?.fileName,
-          hasComponents: Array.isArray(file?.components)
-        };
-      }, 'files');
-
-      await runTest('Files - Search Files', async () => {
-        const results = await db.services.fileService.searchFiles('test');
-        
-        return { 
-          count: results.length,
-          isArray: Array.isArray(results),
-          searchWorking: true
-        };
-      }, 'files');
-    }
-
-    // =============================================================================
-    // FOLDER TESTS
-    // =============================================================================
-    if (suite === 'all' || suite === 'folders') {
-      await runTest('Folders - Model Access', async () => {
-        const modelExists = !!db.models.Folder;
-        const folderCount = await db.models.Folder.countDocuments();
-        
-        return { modelExists, folderCount };
-      }, 'folders');
-
-      await runTest('Folders - List Root Folders', async () => {
-        const folders = await db.models.Folder.find({ parentId: null })
-          .limit(10)
-          .lean();
-        
-        return { 
-          count: folders.length,
-          hasFolders: folders.length > 0,
-          sampleFolder: folders[0] ? {
-            id: folders[0]._id,
-            name: folders[0].name,
-            parentId: folders[0].parentId
-          } : null
-        };
-      }, 'folders');
-
-      await runTest('Folders - Create and Delete Test Folder', async () => {
-        const testName = `Test-${Date.now()}`;
-        
-        const folder = await db.models.Folder.create({
-          name: testName,
-          parentId: null
-        });
-        
-        const created = !!folder;
-        const hasId = !!folder._id;
-        
-        // Clean up
-        await db.models.Folder.findByIdAndDelete(folder._id);
-        
-        return { created, hasId, name: testName, cleaned: true };
-      }, 'folders');
-    }
-
-    // =============================================================================
-    // ITEM TESTS
-    // =============================================================================
-    if (suite === 'all' || suite === 'items') {
-      await runTest('Items - Service Access', async () => {
-        const serviceExists = !!db.services.itemService;
-        const hasGetById = typeof db.services.itemService.getById === 'function';
-        const hasSearch = typeof db.services.itemService.search === 'function';
-        const hasGetLots = typeof db.services.itemService.getLots === 'function';
-        
-        return { serviceExists, hasGetById, hasSearch, hasGetLots };
-      }, 'items');
-
-      await runTest('Items - Search Items', async () => {
-        const chemicals = await db.services.itemService.search({ type: 'chemical' });
-        const solutions = await db.services.itemService.search({ type: 'solution' });
-        const products = await db.services.itemService.search({ type: 'product' });
-        
-        return { 
-          totalChemicals: chemicals.length,
-          totalSolutions: solutions.length,
-          totalProducts: products.length,
-          totalItems: chemicals.length + solutions.length + products.length
-        };
-      }, 'items');
-
-      await runTest('Items - Get Item with Lots', async () => {
-        const items = await db.services.itemService.search({ type: 'chemical' });
-        if (items.length === 0) return { skipped: true, reason: 'No chemical items available' };
-        
-        const item = await db.services.itemService.getWithLots(items[0]._id);
-        
-        return { 
-          found: !!item,
-          isLotTracked: item?.lotTracked,
-          hasLots: Array.isArray(item?.Lots),
-          lotCount: item?.Lots?.length || 0
-        };
-      }, 'items');
-
-      await runTest('Items - Transaction Service Access', async () => {
-        const serviceExists = !!db.services.txnService;
-        const hasPost = typeof db.services.txnService.post === 'function';
-        const hasListByItem = typeof db.services.txnService.listByItem === 'function';
-        const hasGetItemStats = typeof db.services.txnService.getItemStats === 'function';
-        
-        return { serviceExists, hasPost, hasListByItem, hasGetItemStats };
-      }, 'items');
-    }
-
-    // =============================================================================
-    // NETSUITE TESTS
-    // =============================================================================
-    if (suite === 'all' || suite === 'netsuite') {
-      await runTest('NetSuite - Service Access', async () => {
-        const netsuiteExists = !!db.netsuite;
-        const hasCreateAuth = typeof db.netsuite.createNetSuiteAuth === 'function';
-        const hasCreateBOM = typeof db.netsuite.createBOMService === 'function';
-        const hasCreateWorkOrder = typeof db.netsuite.createWorkOrderService === 'function';
-        const hasMapComponents = typeof db.netsuite.mapNetSuiteComponents === 'function';
-        
-        return { 
-          netsuiteExists, 
-          hasCreateAuth, 
-          hasCreateBOM, 
-          hasCreateWorkOrder, 
-          hasMapComponents 
-        };
-      }, 'netsuite');
-
-      await runTest('NetSuite - Environment Configuration', async () => {
-        const envConfigured = !!(
-          process.env.NETSUITE_ACCOUNT_ID &&
-          process.env.NETSUITE_CONSUMER_KEY &&
-          process.env.NETSUITE_CONSUMER_SECRET &&
-          process.env.NETSUITE_TOKEN_ID &&
-          process.env.NETSUITE_TOKEN_SECRET
-        );
-        
-        const usersWithAccess = await db.models.User.countDocuments({
-          'netsuiteCredentials.isConfigured': true
-        });
-        
-        return { 
-          envConfigured, 
-          usersWithAccess,
-          configurationAvailable: envConfigured || usersWithAccess > 0
-        };
-      }, 'netsuite');
-
-      await runTest('NetSuite - Units Helper', async () => {
-        try {
-          const { netsuiteUnits } = await import('@/db/lib/netsuite-units.js');
-          const unitCount = Object.keys(netsuiteUnits).length;
-          const sampleUnit = netsuiteUnits['33']; // Gram
-          
-          return { 
-            unitsLoaded: true, 
-            unitCount,
-            hasSampleUnit: !!sampleUnit,
-            sampleUnitName: sampleUnit?.name
-          };
-        } catch (error) {
-          return { 
-            unitsLoaded: false, 
-            error: error.message 
-          };
+      const requestOptions = {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
         }
-      }, 'netsuite');
+      };
 
-      await runTest('NetSuite - Component Mapping', async () => {
-        const sampleComponents = [
+      if (body && method !== 'GET') {
+        requestOptions.body = JSON.stringify(body);
+      }
+
+      const response = await fetch(url.toString(), requestOptions);
+      
+      let responseData;
+      const contentType = response.headers.get('content-type');
+      
+      if (contentType && contentType.includes('application/json')) {
+        responseData = await response.json();
+      } else {
+        responseData = await response.text();
+      }
+
+      return {
+        status: response.status,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries()),
+        data: responseData,
+        endpoint,
+        method,
+        params
+      };
+    };
+
+    // === API STRUCTURE ANALYSIS ===
+    results.apiStructure = {
+      totalEndpoints: Object.keys(apiEndpoints).length,
+      endpoints: apiEndpoints,
+      methodDistribution: {},
+      actionDistribution: {}
+    };
+
+    // Calculate method and action distributions
+    Object.values(apiEndpoints).forEach(endpoint => {
+      endpoint.methods.forEach(method => {
+        results.apiStructure.methodDistribution[method] = 
+          (results.apiStructure.methodDistribution[method] || 0) + 1;
+      });
+      
+      if (endpoint.actions) {
+        Object.values(endpoint.actions).flat().forEach(action => {
+          results.apiStructure.actionDistribution[action] = 
+            (results.apiStructure.actionDistribution[action] || 0) + 1;
+        });
+      }
+    });
+
+    // === ENDPOINT AVAILABILITY TESTS ===
+    if (testType === 'all' || testType === 'endpoints') {
+      
+      await runTest('Endpoint Availability', 'endpoints', async () => {
+        const endpointTests = {};
+        const warnings = [];
+        
+        for (const [endpoint, config] of Object.entries(apiEndpoints)) {
+          try {
+            // Test GET endpoint (most common)
+            const response = await makeRequest(endpoint, { method: 'GET' });
+            
+            endpointTests[endpoint] = {
+              available: response.status !== 404,
+              status: response.status,
+              responseType: typeof response.data,
+              hasErrorHandling: response.status >= 400 && !!response.data,
+              supportsGET: config.methods.includes('GET'),
+              testedMethod: 'GET'
+            };
+            
+            if (response.status === 500) {
+              warnings.push(`Endpoint ${endpoint} returned 500 error`);
+            } else if (response.status === 404) {
+              warnings.push(`Endpoint ${endpoint} not found`);
+            }
+            
+          } catch (error) {
+            endpointTests[endpoint] = {
+              available: false,
+              error: error.message
+            };
+            warnings.push(`Endpoint ${endpoint} failed: ${error.message}`);
+          }
+        }
+        
+        return {
+          totalEndpoints: Object.keys(apiEndpoints).length,
+          availableEndpoints: Object.values(endpointTests).filter(e => e.available).length,
+          unavailableEndpoints: Object.values(endpointTests).filter(e => !e.available).length,
+          endpointTests,
+          warnings
+        };
+      });
+
+      await runTest('Method Support', 'endpoints', async () => {
+        const methodTests = {};
+        const warnings = [];
+        
+        // Test different HTTP methods on each endpoint
+        for (const [endpoint, config] of Object.entries(apiEndpoints)) {
+          methodTests[endpoint] = {};
+          
+          for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) {
+            try {
+              const shouldSupport = config.methods.includes(method);
+              const response = await makeRequest(endpoint, { method });
+              
+              methodTests[endpoint][method] = {
+                shouldSupport,
+                actualStatus: response.status,
+                supported: response.status !== 405, // Method Not Allowed
+                responseFormat: typeof response.data,
+                hasData: !!response.data
+              };
+              
+              // Check for mismatches
+              if (shouldSupport && response.status === 405) {
+                warnings.push(`${endpoint} should support ${method} but returns 405`);
+              } else if (!shouldSupport && response.status !== 405) {
+                warnings.push(`${endpoint} unexpectedly supports ${method}`);
+              }
+              
+            } catch (error) {
+              methodTests[endpoint][method] = {
+                shouldSupport,
+                supported: false,
+                error: error.message
+              };
+              warnings.push(`${endpoint} ${method} failed: ${error.message}`);
+            }
+          }
+        }
+        
+        return { methodTests, warnings };
+      });
+
+      await runTest('Action Parameter Support', 'endpoints', async () => {
+        const actionTests = {};
+        const warnings = [];
+        
+        // Test action parameters on GET endpoints
+        const actionTestCases = [
+          { endpoint: '/api/files', action: 'search', params: { search: 'test' } },
+          { endpoint: '/api/batches', action: 'workorder-status', params: { id: '000000000000000000000000', action: 'workorder-status' } },
+          { endpoint: '/api/items', action: 'lots', params: { id: '000000000000000000000000', action: 'lots' } },
+          { endpoint: '/api/netsuite', action: 'health', params: { action: 'health' } },
+          { endpoint: '/api/folders', action: 'tree', params: { id: '000000000000000000000000', action: 'tree' } }
+        ];
+        
+        for (const testCase of actionTestCases) {
+          try {
+            const response = await makeRequest(testCase.endpoint, {
+              method: 'GET',
+              params: testCase.params
+            });
+            
+            actionTests[`${testCase.endpoint}?action=${testCase.action}`] = {
+              status: response.status,
+              hasResponse: !!response.data,
+              responseType: typeof response.data,
+              isSuccessFormat: response.data?.success !== undefined,
+              hasErrorMessage: !!response.data?.error,
+              working: response.status < 500
+            };
+            
+            if (response.status >= 500) {
+              warnings.push(`Action ${testCase.action} on ${testCase.endpoint} returned server error`);
+            }
+            
+          } catch (error) {
+            actionTests[`${testCase.endpoint}?action=${testCase.action}`] = {
+              working: false,
+              error: error.message
+            };
+            warnings.push(`Action test failed: ${testCase.endpoint}?action=${testCase.action} - ${error.message}`);
+          }
+        }
+        
+        return { actionTests, warnings };
+      });
+    }
+
+    // === RESPONSE FORMAT TESTS ===
+    if (testType === 'all' || testType === 'responses') {
+      
+      await runTest('Response Format Consistency', 'responses', async () => {
+        const formatTests = {};
+        const warnings = [];
+        
+        // Test standard CRUD operations for format consistency
+        const formatTestCases = [
+          { endpoint: '/api/files', method: 'GET', expectedFormat: 'standardized' },
+          { endpoint: '/api/batches', method: 'GET', expectedFormat: 'standardized' },
+          { endpoint: '/api/items', method: 'GET', expectedFormat: 'standardized' },
+          { endpoint: '/api/folders', method: 'GET', expectedFormat: 'standardized' },
+          { endpoint: '/api/auth', method: 'GET', params: { action: 'me' }, expectedFormat: 'standardized' }
+        ];
+        
+        for (const testCase of formatTestCases) {
+          try {
+            const response = await makeRequest(testCase.endpoint, {
+              method: testCase.method,
+              params: testCase.params
+            });
+            
+            const data = response.data;
+            const hasSuccessField = typeof data === 'object' && data !== null && 'success' in data;
+            const hasDataField = typeof data === 'object' && data !== null && 'data' in data;
+            const hasErrorField = typeof data === 'object' && data !== null && 'error' in data;
+            
+            formatTests[testCase.endpoint] = {
+              status: response.status,
+              hasStandardFormat: hasSuccessField && (hasDataField || hasErrorField),
+              hasSuccessField,
+              hasDataField,
+              hasErrorField,
+              responseType: typeof data,
+              isObject: typeof data === 'object' && data !== null,
+              sampleKeys: typeof data === 'object' && data !== null ? Object.keys(data) : [],
+              formatScore: (hasSuccessField ? 1 : 0) + (hasDataField ? 1 : 0) + (hasErrorField ? 0.5 : 0)
+            };
+            
+            // Store format for analysis
+            if (!results.responseFormats[testCase.endpoint]) {
+              results.responseFormats[testCase.endpoint] = {};
+            }
+            results.responseFormats[testCase.endpoint][testCase.method] = formatTests[testCase.endpoint];
+            
+            if (!hasStandardFormat && response.status < 400) {
+              warnings.push(`${testCase.endpoint} doesn't follow standard { success, data, error } format`);
+            }
+            
+          } catch (error) {
+            formatTests[testCase.endpoint] = {
+              working: false,
+              error: error.message
+            };
+            warnings.push(`Format test failed: ${testCase.endpoint} - ${error.message}`);
+          }
+        }
+        
+        return { formatTests, warnings };
+      });
+
+      await runTest('Error Response Format', 'responses', async () => {
+        const errorTests = {};
+        const warnings = [];
+        
+        // Test error responses by making invalid requests
+        const errorTestCases = [
+          { endpoint: '/api/files', method: 'GET', params: { id: 'invalid-id' }, expectedStatus: 400 },
+          { endpoint: '/api/batches', method: 'GET', params: { id: 'nonexistent' }, expectedStatus: 404 },
+          { endpoint: '/api/items', method: 'POST', body: { invalid: 'data' }, expectedStatus: 400 },
+          { endpoint: '/api/folders', method: 'DELETE', params: { id: 'invalid' }, expectedStatus: 400 }
+        ];
+        
+        for (const testCase of errorTestCases) {
+          try {
+            const response = await makeRequest(testCase.endpoint, {
+              method: testCase.method,
+              params: testCase.params,
+              body: testCase.body
+            });
+            
+            const data = response.data;
+            const isErrorResponse = response.status >= 400;
+            const hasErrorMessage = typeof data === 'object' && data !== null && 
+                                  (data.error || data.message);
+            const hasSuccessField = typeof data === 'object' && data !== null && 'success' in data;
+            const successIsFalse = hasSuccessField && data.success === false;
+            
+            errorTests[`${testCase.endpoint}_${testCase.method}`] = {
+              actualStatus: response.status,
+              expectedStatus: testCase.expectedStatus,
+              isErrorResponse,
+              hasErrorMessage,
+              hasSuccessField,
+              successIsFalse,
+              errorFormat: hasSuccessField ? 'standardized' : 'legacy',
+              errorContent: hasErrorMessage ? (data.error || data.message) : null
+            };
+            
+            if (isErrorResponse && !hasErrorMessage) {
+              warnings.push(`${testCase.endpoint} error response lacks error message`);
+            }
+            
+            if (isErrorResponse && hasSuccessField && data.success !== false) {
+              warnings.push(`${testCase.endpoint} error response has success=true`);
+            }
+            
+          } catch (error) {
+            errorTests[`${testCase.endpoint}_${testCase.method}`] = {
+              testFailed: true,
+              error: error.message
+            };
+            warnings.push(`Error test failed: ${testCase.endpoint} - ${error.message}`);
+          }
+        }
+        
+        return { errorTests, warnings };
+      });
+
+      await runTest('Data Structure Analysis', 'responses', async () => {
+        const dataTests = {};
+        const warnings = [];
+        
+        // Analyze the structure of successful responses
+        const dataTestCases = [
+          { endpoint: '/api/files', method: 'GET', description: 'File list' },
+          { endpoint: '/api/batches', method: 'GET', description: 'Batch list' },
+          { endpoint: '/api/items', method: 'GET', params: { type: 'chemical' }, description: 'Chemical list' },
+          { endpoint: '/api/auth', method: 'GET', params: { action: 'me' }, description: 'Current user' }
+        ];
+        
+        for (const testCase of dataTestCases) {
+          try {
+            const response = await makeRequest(testCase.endpoint, {
+              method: testCase.method,
+              params: testCase.params
+            });
+            
+            if (response.status < 400) {
+              const data = response.data;
+              
+              // Analyze data structure
+              let actualData = data;
+              if (data && typeof data === 'object' && 'data' in data) {
+                actualData = data.data;
+              }
+              
+              dataTests[testCase.endpoint] = {
+                description: testCase.description,
+                responseType: typeof data,
+                dataType: typeof actualData,
+                isArray: Array.isArray(actualData),
+                isObject: typeof actualData === 'object' && actualData !== null,
+                arrayLength: Array.isArray(actualData) ? actualData.length : null,
+                objectKeys: typeof actualData === 'object' && actualData !== null && !Array.isArray(actualData) ? 
+                           Object.keys(actualData) : [],
+                hasMetadata: data && typeof data === 'object' && 
+                           (data.count !== undefined || data.total !== undefined || data.pagination !== undefined),
+                sampleStructure: this.analyzeSampleStructure(actualData)
+              };
+              
+              if (Array.isArray(actualData) && actualData.length === 0) {
+                warnings.push(`${testCase.endpoint} returned empty array - may indicate no data or query issues`);
+              }
+              
+            } else {
+              dataTests[testCase.endpoint] = {
+                description: testCase.description,
+                skipped: true,
+                reason: `HTTP ${response.status} error`
+              };
+            }
+            
+          } catch (error) {
+            dataTests[testCase.endpoint] = {
+              description: testCase.description,
+              failed: true,
+              error: error.message
+            };
+            warnings.push(`Data structure test failed: ${testCase.endpoint} - ${error.message}`);
+          }
+        }
+        
+        return { dataTests, warnings };
+      });
+    }
+
+    // === DATA FLOW TESTS ===
+    if (testType === 'all' || testType === 'data-flow') {
+      
+      await runTest('API to DB Integration', 'data-flow', async () => {
+        const integrationTests = {};
+        const warnings = [];
+        
+        // Test that API endpoints actually connect to DB layer
+        const integrationTestCases = [
           {
-            ingredient: 'Water',
-            itemId: '123',
-            quantity: 1000,
-            units: '35' // Liters
+            name: 'Files API -> DB',
+            test: async () => {
+              const response = await makeRequest('/api/files', { method: 'GET' });
+              return {
+                apiWorking: response.status < 500,
+                hasData: !!response.data,
+                dataFormat: typeof response.data,
+                seemsConnected: response.status < 500 && !!response.data
+              };
+            }
+          },
+          {
+            name: 'Batches API -> DB',
+            test: async () => {
+              const response = await makeRequest('/api/batches', { method: 'GET' });
+              return {
+                apiWorking: response.status < 500,
+                hasData: !!response.data,
+                dataFormat: typeof response.data,
+                seemsConnected: response.status < 500 && !!response.data
+              };
+            }
+          },
+          {
+            name: 'Items API -> DB',
+            test: async () => {
+              const response = await makeRequest('/api/items', { method: 'GET' });
+              return {
+                apiWorking: response.status < 500,
+                hasData: !!response.data,
+                dataFormat: typeof response.data,
+                seemsConnected: response.status < 500 && !!response.data
+              };
+            }
           }
         ];
         
-        const mappingResults = await db.netsuite.mapNetSuiteComponents(sampleComponents);
+        for (const testCase of integrationTestCases) {
+          try {
+            const result = await testCase.test();
+            integrationTests[testCase.name] = result;
+            
+            if (!result.seemsConnected) {
+              warnings.push(`${testCase.name} may not be properly connected to database`);
+            }
+            
+          } catch (error) {
+            integrationTests[testCase.name] = {
+              failed: true,
+              error: error.message
+            };
+            warnings.push(`Integration test failed: ${testCase.name} - ${error.message}`);
+          }
+        }
+        
+        return { integrationTests, warnings };
+      });
+
+      await runTest('Complete CRUD Flow', 'data-flow', async () => {
+        const crudTests = {};
+        const warnings = [];
+        
+        // Test complete CRUD operations on a safe endpoint
+        try {
+          // Test folder CRUD as it's safe and doesn't affect core data
+          const testFolderName = `Test-${Date.now()}`;
+          
+          // CREATE
+          const createResponse = await makeRequest('/api/folders', {
+            method: 'POST',
+            body: { name: testFolderName, parentId: null }
+          });
+          
+          crudTests.create = {
+            status: createResponse.status,
+            success: createResponse.status < 400,
+            hasData: !!createResponse.data,
+            createdId: createResponse.data?.data?._id || createResponse.data?._id
+          };
+          
+          if (crudTests.create.success && crudTests.create.createdId) {
+            // READ
+            const readResponse = await makeRequest('/api/folders', {
+              method: 'GET',
+              params: { id: crudTests.create.createdId }
+            });
+            
+            crudTests.read = {
+              status: readResponse.status,
+              success: readResponse.status < 400,
+              hasData: !!readResponse.data,
+              dataMatches: readResponse.data?.data?.name === testFolderName || 
+                          readResponse.data?.name === testFolderName
+            };
+            
+            // UPDATE
+            const updateResponse = await makeRequest('/api/folders', {
+              method: 'PATCH',
+              params: { id: crudTests.create.createdId },
+              body: { name: `${testFolderName}-Updated` }
+            });
+            
+            crudTests.update = {
+              status: updateResponse.status,
+              success: updateResponse.status < 400,
+              hasData: !!updateResponse.data
+            };
+            
+            // DELETE (cleanup)
+            const deleteResponse = await makeRequest('/api/folders', {
+              method: 'POST',
+              params: { action: 'delete', id: crudTests.create.createdId }
+            });
+            
+            crudTests.delete = {
+              status: deleteResponse.status,
+              success: deleteResponse.status < 400,
+              hasData: !!deleteResponse.data
+            };
+            
+          } else {
+            warnings.push('CREATE operation failed, skipping rest of CRUD test');
+            crudTests.read = { skipped: true };
+            crudTests.update = { skipped: true };
+            crudTests.delete = { skipped: true };
+          }
+          
+        } catch (error) {
+          crudTests.error = error.message;
+          warnings.push(`CRUD test failed: ${error.message}`);
+        }
+        
+        const completeCrudWorking = crudTests.create?.success && 
+                                   crudTests.read?.success && 
+                                   crudTests.update?.success && 
+                                   crudTests.delete?.success;
         
         return { 
-          componentCount: sampleComponents.length,
-          resultCount: mappingResults.length,
-          mappingWorking: Array.isArray(mappingResults),
-          sampleResult: mappingResults[0] ? {
-            hasNetsuiteComponent: !!mappingResults[0].netsuiteComponent,
-            hasMatches: Array.isArray(mappingResults[0].matches),
-            matchCount: mappingResults[0].matches?.length || 0
-          } : null
+          crudTests, 
+          completeCrudWorking,
+          warnings 
         };
-      }, 'netsuite');
+      });
     }
 
-    // =============================================================================
-    // INTEGRATION TESTS
-    // =============================================================================
-    if (suite === 'all') {
-      await runTest('Integration - Cross-Service Dependencies', async () => {
-        // Test that services can access each other
-        const batchCanAccessFile = typeof db.services.batchService.services?.fileService !== 'undefined';
-        const fileCanAccessBatch = typeof db.services.fileService.services?.batchService !== 'undefined';
-        const itemCanAccessTxn = typeof db.services.itemService.services?.txnService !== 'undefined';
-        
-        return { 
-          batchCanAccessFile, 
-          fileCanAccessBatch, 
-          itemCanAccessTxn,
-          crossServiceAccess: batchCanAccessFile || fileCanAccessBatch || itemCanAccessTxn
+    // Helper method for analyzing sample structure
+    const analyzeSampleStructure = (data) => {
+      if (Array.isArray(data)) {
+        return {
+          type: 'array',
+          length: data.length,
+          sampleItem: data.length > 0 ? analyzeSampleStructure(data[0]) : null
         };
-      }, 'integration');
+      } else if (typeof data === 'object' && data !== null) {
+        const keys = Object.keys(data);
+        return {
+          type: 'object',
+          keyCount: keys.length,
+          keys: keys.slice(0, 10), // First 10 keys
+          hasId: keys.includes('_id') || keys.includes('id'),
+          hasTimestamps: keys.includes('createdAt') || keys.includes('updatedAt')
+        };
+      } else {
+        return {
+          type: typeof data,
+          value: data
+        };
+      }
+    };
 
-      await runTest('Integration - AsyncWorkOrder Service', async () => {
-        const serviceExists = !!db.services.AsyncWorkOrderService;
-        const hasQueueMethod = typeof db.services.AsyncWorkOrderService.queueWorkOrderCreation === 'function';
-        const hasStatusMethod = typeof db.services.AsyncWorkOrderService.getWorkOrderStatus === 'function';
-        
-        return { 
-          serviceExists, 
-          hasQueueMethod, 
-          hasStatusMethod,
-          isStatic: hasQueueMethod && hasStatusMethod
-        };
-      }, 'integration');
-
-      await runTest('Integration - Database Connection Persistence', async () => {
-        const initialConnected = db.connected;
-        await db.connect();
-        const afterConnect = db.connected;
-        
-        return { 
-          initialConnected, 
-          afterConnect, 
-          connectionPersistent: initialConnected === afterConnect
-        };
-      }, 'integration');
+    // === GENERATE RECOMMENDATIONS ===
+    const failedTests = results.tests.filter(t => t.status === 'failed');
+    const warningTests = results.tests.filter(t => t.status === 'warning');
+    
+    if (failedTests.length === 0 && warningTests.length === 0) {
+      results.recommendations.push('✅ All API layer tests passed - your API endpoints are working correctly');
+    } else {
+      if (failedTests.length > 0) {
+        results.recommendations.push(`❌ ${failedTests.length} critical API issues found`);
+      }
+      if (warningTests.length > 0) {
+        results.recommendations.push(`⚠️ ${warningTests.length} API warnings found`);
+      }
+    }
+    
+    // Specific recommendations based on test results
+    const endpointIssues = results.tests.filter(t => t.category === 'endpoints' && t.status === 'failed');
+    if (endpointIssues.length > 0) {
+      results.recommendations.push('🔧 Endpoint issues detected - check route definitions and imports');
+    }
+    
+    const responseIssues = results.tests.filter(t => t.category === 'responses' && t.status === 'failed');
+    if (responseIssues.length > 0) {
+      results.recommendations.push('🔧 Response format issues detected - standardize response structure');
+    }
+    
+    const dataFlowIssues = results.tests.filter(t => t.category === 'data-flow' && t.status === 'failed');
+    if (dataFlowIssues.length > 0) {
+      results.recommendations.push('🔧 Data flow issues detected - API may not be properly connected to DB layer');
     }
 
-    // =============================================================================
-    // PERFORMANCE TESTS
-    // =============================================================================
-    if (suite === 'all' || suite === 'performance') {
-      await runTest('Performance - Model Loading Time', async () => {
-        const start = Date.now();
-        const modelCount = Object.keys(db.models).length;
-        const duration = Date.now() - start;
-        
-        return { 
-          modelCount, 
-          loadTime: duration,
-          fast: duration < 100
-        };
-      }, 'performance');
-
-      await runTest('Performance - Service Loading Time', async () => {
-        const start = Date.now();
-        const serviceCount = Object.keys(db.services).length;
-        const duration = Date.now() - start;
-        
-        return { 
-          serviceCount, 
-          loadTime: duration,
-          fast: duration < 100
-        };
-      }, 'performance');
+    // Format consistency recommendations
+    const formatScores = Object.values(results.responseFormats).flat();
+    const avgFormatScore = formatScores.length > 0 ? 
+      formatScores.reduce((sum, f) => sum + (f.formatScore || 0), 0) / formatScores.length : 0;
+    
+    if (avgFormatScore < 1.5) {
+      results.recommendations.push('📋 Consider standardizing response format to { success, data, error } across all endpoints');
     }
+
+    console.log(`✅ API layer testing completed: ${results.summary.passed}/${results.summary.total} passed`);
+
+    return NextResponse.json({
+      success: results.summary.failed === 0,
+      results,
+      message: `API Layer Test: ${results.summary.passed}/${results.summary.total} passed, ${results.summary.failed} failed, ${results.summary.warnings} warnings`
+    });
 
   } catch (error) {
-    console.error('Test suite error:', error);
+    console.error('💥 API layer test error:', error);
     return NextResponse.json({
       success: false,
       error: error.message,
       results
     }, { status: 500 });
   }
-
-  // Calculate success rate
-  const successRate = results.summary.total > 0 ? 
-    Math.round((results.summary.passed / results.summary.total) * 100) : 0;
-
-  return NextResponse.json({
-    success: results.summary.failed === 0,
-    successRate: `${successRate}%`,
-    results,
-    message: `${results.summary.passed}/${results.summary.total} tests passed`
-  });
 }

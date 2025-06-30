@@ -1,4 +1,4 @@
-// app/api/files/route.js - FIXED: Better original file filtering and PDF handling
+// app/api/files/route.js - FIXED: Consistent wrapped list responses with metadata
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
@@ -44,8 +44,8 @@ export async function GET(request) {
         if (!batch?.signedPdf?.data) {
           return NextResponse.json({ 
             success: false,
-            error: 'No PDF found',
-            data: null
+            data: null,
+            error: 'No PDF found'
           }, { status: 404 });
         }
         
@@ -69,7 +69,8 @@ export async function GET(request) {
           success: true, 
           data: {
             batches,
-            count: batches.length
+            count: batches.length,
+            fileId: id
           },
           error: null
         });
@@ -105,13 +106,13 @@ export async function GET(request) {
       }
 
       if (action === 'with-pdf') {
-        // FIXED: Get file with PDF data: GET /api/files?id=123&action=with-pdf
+        // Get file with PDF data: GET /api/files?id=123&action=with-pdf
         const file = await db.services.fileService.getFileById(id, { includePdf: true });
         if (!file) {
           return NextResponse.json({ 
             success: false, 
-            error: 'File not found',
-            data: null
+            data: null,
+            error: 'File not found'
           }, { status: 404 });
         }
         
@@ -127,8 +128,8 @@ export async function GET(request) {
       if (!file) {
         return NextResponse.json({ 
           success: false, 
-          error: 'File not found',
-          data: null
+          data: null,
+          error: 'File not found'
         }, { status: 404 });
       }
       
@@ -146,22 +147,25 @@ export async function GET(request) {
       if (!search.trim() || search.trim().length < 2) {
         return NextResponse.json({ 
           success: true, 
-          data: [], 
-          count: 0,
-          query: search,
+          data: {
+            files: [],
+            count: 0,
+            query: { search, folderId: null },
+            message: 'Search query too short (minimum 2 characters)'
+          },
           error: null
         });
       }
 
       try {
-        // FIXED: Search only original files (not batches)
+        // Search only original files (not batches)
         const searchTerm = search.trim();
         
         // Search in original files only
         const files = await db.services.fileService.searchFiles(searchTerm);
         console.log('📄 Found original files:', files?.length || 0);
         
-        // FIXED: Filter to ensure only original files are returned
+        // Filter to ensure only original files are returned
         const originalFiles = (files || []).filter(file => {
           // Check that it's NOT a batch file
           const isNotBatch = !file.isBatch && 
@@ -176,9 +180,12 @@ export async function GET(request) {
         
         return NextResponse.json({ 
           success: true, 
-          data: originalFiles,
-          count: originalFiles.length,
-          query: search,
+          data: {
+            files: originalFiles,
+            count: originalFiles.length,
+            query: { search: searchTerm, folderId: null },
+            searchTerm: searchTerm
+          },
           error: null
         });
         
@@ -186,22 +193,24 @@ export async function GET(request) {
         console.error('💥 Search error:', error);
         return NextResponse.json({ 
           success: false, 
-          error: 'Search failed: ' + error.message,
-          data: [],
-          count: 0,
-          query: search
+          data: {
+            files: [],
+            count: 0,
+            query: { search, folderId: null }
+          },
+          error: 'Search failed: ' + error.message
         });
       }
     }
 
-    // List files: GET /api/files?folderId=abc
+    // List files: GET /api/files?folderId=abc or GET /api/files
     const files = await db.services.fileService.listFiles({ 
       folderId: folderId || null 
     });
     
     console.log('📁 Listed files:', files?.length || 0, 'for folder:', folderId || 'root');
     
-    // FIXED: Filter to only return original files (not batches)
+    // Filter to only return original files (not batches)
     const originalFiles = (files || []).filter(file => {
       const isNotBatch = !file.isBatch && 
                         !file.runNumber && 
@@ -215,9 +224,15 @@ export async function GET(request) {
     
     return NextResponse.json({ 
       success: true, 
-      data: originalFiles,
-      count: originalFiles.length,
-      folderId: folderId || null,
+      data: {
+        files: originalFiles,
+        count: originalFiles.length,
+        query: { 
+          folderId: folderId || null,
+          search: null 
+        },
+        folder: folderId ? { id: folderId } : null
+      },
       error: null
     });
     
@@ -225,9 +240,12 @@ export async function GET(request) {
     console.error('GET files error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: {
+        files: [],
+        count: 0,
+        query: null
+      },
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }
@@ -242,8 +260,8 @@ export async function POST(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -258,8 +276,8 @@ export async function POST(request) {
       if (!files || files.length === 0) {
         return NextResponse.json({ 
           success: false,
-          error: 'No files provided',
-          data: null
+          data: null,
+          error: 'No files provided'
         }, { status: 400 });
       }
       
@@ -282,8 +300,8 @@ export async function POST(request) {
       if (fileDataArray.length === 0) {
         return NextResponse.json({ 
           success: false,
-          error: 'No valid files to upload',
-          data: null
+          data: null,
+          error: 'No valid files to upload'
         }, { status: 400 });
       }
       
@@ -301,10 +319,11 @@ export async function POST(request) {
           uploaded: successful.length,
           failed: failed.length,
           results: successful,
-          errors: failed
+          errors: failed,
+          folderId: baseFolderId
         },
-        message: `Uploaded ${successful.length} files successfully${failed.length ? `, ${failed.length} failed` : ''}`,
-        error: null
+        error: null,
+        message: `Uploaded ${successful.length} files successfully${failed.length ? `, ${failed.length} failed` : ''}`
       });
     }
     
@@ -315,8 +334,8 @@ export async function POST(request) {
     if (!fileBlob) {
       return NextResponse.json({ 
         success: false,
-        error: 'No file provided',
-        data: null
+        data: null,
+        error: 'No file provided'
       }, { status: 400 });
     }
 
@@ -324,8 +343,8 @@ export async function POST(request) {
     if (fileBlob.type && !fileBlob.type.includes('pdf')) {
       return NextResponse.json({ 
         success: false,
-        error: 'Only PDF files are supported',
-        data: null
+        data: null,
+        error: 'Only PDF files are supported'
       }, { status: 400 });
     }
 
@@ -338,8 +357,8 @@ export async function POST(request) {
     if (!fileName) {
       return NextResponse.json({ 
         success: false,
-        error: 'File name is required',
-        data: null
+        data: null,
+        error: 'File name is required'
       }, { status: 400 });
     }
 
@@ -354,17 +373,16 @@ export async function POST(request) {
     return NextResponse.json({ 
       success: true, 
       data: file,
-      message: 'File uploaded successfully',
-      error: null
+      error: null,
+      message: 'File uploaded successfully'
     }, { status: 201 });
     
   } catch (error) {
     console.error('POST files error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: null,
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }
@@ -377,8 +395,8 @@ export async function PATCH(request) {
     if (!id) {
       return NextResponse.json({ 
         success: false,
-        error: 'File ID required',
-        data: null
+        data: null,
+        error: 'File ID required'
       }, { status: 400 });
     }
 
@@ -387,8 +405,8 @@ export async function PATCH(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -399,8 +417,8 @@ export async function PATCH(request) {
     if (!existingFile) {
       return NextResponse.json({ 
         success: false, 
-        error: 'File not found',
-        data: null
+        data: null,
+        error: 'File not found'
       }, { status: 404 });
     }
     
@@ -422,17 +440,16 @@ export async function PATCH(request) {
     return NextResponse.json({ 
       success: true, 
       data: file,
-      message: 'File updated successfully',
-      error: null
+      error: null,
+      message: 'File updated successfully'
     });
     
   } catch (error) {
     console.error('PATCH files error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: null,
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }
@@ -445,8 +462,8 @@ export async function DELETE(request) {
     if (!id) {
       return NextResponse.json({ 
         success: false,
-        error: 'File ID required',
-        data: null
+        data: null,
+        error: 'File ID required'
       }, { status: 400 });
     }
 
@@ -455,8 +472,8 @@ export async function DELETE(request) {
     if (!user) {
       return NextResponse.json({ 
         success: false,
-        error: 'Unauthorized',
-        data: null
+        data: null,
+        error: 'Unauthorized'
       }, { status: 401 });
     }
 
@@ -467,8 +484,8 @@ export async function DELETE(request) {
     if (!existingFile) {
       return NextResponse.json({ 
         success: false, 
-        error: 'File not found',
-        data: null
+        data: null,
+        error: 'File not found'
       }, { status: 404 });
     }
 
@@ -480,8 +497,8 @@ export async function DELETE(request) {
     if (batches.length > 0 && user.role !== 'admin') {
       return NextResponse.json({ 
         success: false,
-        error: `Cannot delete file with ${batches.length} associated batches. Admin access required.`,
-        data: null
+        data: null,
+        error: `Cannot delete file with ${batches.length} associated batches. Admin access required.`
       }, { status: 403 });
     }
 
@@ -493,17 +510,16 @@ export async function DELETE(request) {
         deletedFile: existingFile,
         deletedBatches: batches.length
       },
-      message: 'File deleted successfully',
-      error: null
+      error: null,
+      message: 'File deleted successfully'
     });
     
   } catch (error) {
     console.error('DELETE files error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: 'Internal server error',
-      message: error.message,
-      data: null
+      data: null,
+      error: 'Internal server error: ' + error.message
     }, { status: 500 });
   }
 }
