@@ -1,4 +1,4 @@
-// app/(pages)/files/components/FileNavigator/render/component.jsx - Enhanced with expandable folder tree
+// app/(pages)/files/components/FileNavigator/render/component.jsx - CLEANED UP
 'use client';
 
 import React, { useRef, useEffect, useState } from 'react';
@@ -61,17 +61,13 @@ export default function FileNavigator(props) {
         
         try {
           // Load both subfolders and files for this folder
-          const [foldersResult, filesResult] = await Promise.all([
-            core?.loadFolderChildren ? core.loadFolderChildren(folderId) : { folders: [], files: [] },
-            // You might want to add a method to load files for a specific folder
-            Promise.resolve({ files: [] })
-          ]);
+          const result = await core?.loadFolderChildren(folderId);
           
           setFolderChildren(prev => new Map([
             ...prev,
             [folderId, {
-              folders: foldersResult.folders || [],
-              files: foldersResult.files || []
+              folders: result?.folders || [],
+              files: result?.files || []
             }]
           ]));
         } catch (error) {
@@ -260,7 +256,11 @@ export default function FileNavigator(props) {
                       <ui.icons.Search size={16} />
                     </div>
                     <ui.Input
-                      placeholder="Search files..."
+                      placeholder={
+                        props.view === 'folders' ? "Search files..." : 
+                        props.view === 'status' ? "Search batches..." : 
+                        "Search archive..."
+                      }
                       value={state.searchInputValue}
                       onFocus={state.handleSearchFocus}
                       onBlur={state.handleSearchBlur}
@@ -284,6 +284,21 @@ export default function FileNavigator(props) {
                       )}
                     </div>
                   </div>
+                  
+                  {/* Show search results count */}
+                  {core?.searchResults && core.searchResults.length > 0 && (
+                    <div className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                      Found {core.searchResults.length} {props.view === 'folders' ? 'files' : 'items'}
+                      {state.searchInputValue && ` for "${state.searchInputValue}"`}
+                    </div>
+                  )}
+                  
+                  {/* Show "no results" message */}
+                  {core?.searchResults && core.searchResults.length === 0 && state.searchInputValue.length >= 2 && !core.searchBusy && (
+                    <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      No {props.view === 'folders' ? 'files' : 'items'} found for "{state.searchInputValue}"
+                    </div>
+                  )}
                 </div>
 
                 {/* Breadcrumb */}
@@ -355,6 +370,9 @@ export default function FileNavigator(props) {
                             onNavigateToFolder={navigateToFolder}
                             onEditFolder={state.openEditFolderDialog}
                             onDeleteFolder={state.openDeleteFolderDialog}
+                            onFileClick={core?.openFileAndClose}
+                            getFileIcon={state.getFileIcon}
+                            getFileBadgeClass={state.getFileBadgeClass}
                             level={0}
                           />
                         )}
@@ -453,7 +471,7 @@ export default function FileNavigator(props) {
   );
 }
 
-// ===== NEW: EXPANDABLE FOLDER TREE COMPONENT =====
+// ===== EXPANDABLE FOLDER TREE COMPONENT =====
 function ExpandableFolderTree({ 
   folders, 
   expandedFolders, 
@@ -463,6 +481,9 @@ function ExpandableFolderTree({
   onNavigateToFolder, 
   onEditFolder, 
   onDeleteFolder,
+  onFileClick,
+  getFileIcon,
+  getFileBadgeClass,
   level = 0 
 }) {
   return (
@@ -492,6 +513,9 @@ function ExpandableFolderTree({
                 onNavigateToFolder={onNavigateToFolder}
                 onEditFolder={onEditFolder}
                 onDeleteFolder={onDeleteFolder}
+                onFileClick={onFileClick}
+                getFileIcon={getFileIcon}
+                getFileBadgeClass={getFileBadgeClass}
                 level={level + 1}
               />
               
@@ -500,9 +524,9 @@ function ExpandableFolderTree({
                 <div key={file._id} className="ml-4">
                   <FileCard
                     file={file}
-                    onClick={() => {/* handle file click */}}
-                    getFileIcon={() => ({ name: 'FileIcon', className: 'text-slate-500' })}
-                    getFileBadgeClass={() => 'bg-slate-100 text-slate-800 border-slate-200'}
+                    onClick={() => onFileClick(file)}
+                    getFileIcon={getFileIcon}
+                    getFileBadgeClass={getFileBadgeClass}
                     compact
                   />
                 </div>
@@ -599,8 +623,7 @@ function FolderItemExpandable({
   );
 }
 
-// ===== EXISTING COMPONENT HELPERS (keeping the same) =====
-
+// ===== EXISTING COMPONENT HELPERS =====
 function FileCard({ file, onClick, getFileIcon, getFileBadgeClass, compact = false }) {
   const icon = getFileIcon(file);
   

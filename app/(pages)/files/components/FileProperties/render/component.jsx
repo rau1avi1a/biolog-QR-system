@@ -342,26 +342,6 @@ const ComponentsTab = ({ core, state }) => (
       )}
     </div>
 
-    {/* Components Stats */}
-    <div className="grid grid-cols-4 gap-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-        <div className="text-2xl font-bold text-blue-600">{state.statsData.totalComponents}</div>
-        <div className="text-sm text-blue-700">Total Components</div>
-      </div>
-      <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-        <div className="text-2xl font-bold text-green-600">{state.statsData.mappedComponents}</div>
-        <div className="text-sm text-green-700">Mapped</div>
-      </div>
-      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-        <div className="text-2xl font-bold text-purple-600">{state.statsData.chemicals}</div>
-        <div className="text-sm text-purple-700">Chemicals</div>
-      </div>
-      <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-        <div className="text-2xl font-bold text-orange-600">{state.statsData.solutions}</div>
-        <div className="text-sm text-orange-700">Solutions</div>
-      </div>
-    </div>
-
     {/* Components List */}
     {state.componentDisplayData.length > 0 ? (
       <div className="space-y-3">

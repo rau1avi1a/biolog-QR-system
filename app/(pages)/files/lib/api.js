@@ -199,9 +199,8 @@ export const filesApi = {
 
     async searchSolutions(query) {
       return handleApiCall('items.searchSolutions', async () => {
+        // Try this first - search all items and filter for solutions
         const result = await api.list.searchItems(query, 'solution');
-        
-        // FIXED: Return the full data object, not just the items array
         return result;
       });
     },

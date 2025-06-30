@@ -1,7 +1,8 @@
-// app/files/components/FileNavigator/hooks/state.js - Fixed UI Logic/Event Handlers
+// app/files/components/FileNavigator/hooks/state.js - SEARCH STATE FIX
+
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export function useComponentState(core, props) {
@@ -15,12 +16,27 @@ export function useComponentState(core, props) {
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [editFolderName, setEditFolderName] = useState('');
+  // FIXED: Search input state now synced with core search query
   const [searchInputValue, setSearchInputValue] = useState('');
   const [searchDropdownOpen, setSearchDropdownOpen] = useState(false);
 
   /* ── REFS ───────────────────────────────────────────────────── */
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
+
+  /* ── SYNC SEARCH INPUT WITH CORE STATE ─────────────────────── */
+  // Keep search input in sync with core search query
+  useEffect(() => {
+    if (core?.searchQuery !== searchInputValue) {
+      setSearchInputValue(core?.searchQuery || '');
+    }
+  }, [core?.searchQuery]);
+
+  // Clear search input when view changes
+  useEffect(() => {
+    setSearchInputValue('');
+    setSearchDropdownOpen(false);
+  }, [view]);
 
   /* ── EVENT HANDLERS ─────────────────────────────────────────── */
   const handleHomeClick = useCallback(() => {
@@ -34,6 +50,7 @@ export function useComponentState(core, props) {
       console.warn('props.setView is not a function');
     }
     
+    // Clear search when changing views
     if (core && typeof core.clearSearch === 'function') {
       core.clearSearch();
     }
@@ -108,6 +125,17 @@ export function useComponentState(core, props) {
     }
   }, [core]);
 
+  // FIXED: Search input change handler
+  const handleSearchInputChange = useCallback((value) => {
+    console.log('🔍 Search input changed:', value);
+    setSearchInputValue(value);
+    
+    // Update core search query
+    if (core && typeof core.setSearchQuery === 'function') {
+      core.setSearchQuery(value);
+    }
+  }, [core]);
+
   const handleSearchSubmit = useCallback((e) => {
     e.preventDefault();
     if (core && typeof core.performSearch === 'function') {
@@ -116,7 +144,9 @@ export function useComponentState(core, props) {
     setSearchDropdownOpen(false);
   }, [searchInputValue, core]);
 
+  // FIXED: Search clear handler
   const handleSearchClear = useCallback(() => {
+    console.log('🧹 Clearing search');
     setSearchInputValue('');
     if (core && typeof core.clearSearch === 'function') {
       core.clearSearch();
@@ -315,18 +345,8 @@ export function useComponentState(core, props) {
     onCreateFolder: openCreateFolderDialog,
     onEditFolder: openEditFolderDialog,
     onDeleteFolder: openDeleteFolderDialog,
-    onSearch: (query) => {
-      setSearchInputValue(query);
-      if (core && typeof core.setSearchQuery === 'function') {
-        core.setSearchQuery(query);
-      }
-    },
-    onClearSearch: () => {
-      setSearchInputValue('');
-      if (core && typeof core.clearSearch === 'function') {
-        core.clearSearch();
-      }
-    },
+    onSearch: handleSearchInputChange,
+    onClearSearch: handleSearchClear,
     onFilesUpload: handleFileUpload,
     dragAndDropProps: {
       onDragEnter: core?.handleDragEnter || (() => {}),
@@ -334,7 +354,7 @@ export function useComponentState(core, props) {
       onDragOver: core?.handleDragOver || (() => {}),
       onDrop: core?.handleDrop || (() => {})
     }
-  }), [props, core, handleFileUpload, openCreateFolderDialog, openEditFolderDialog, openDeleteFolderDialog]);
+  }), [props, core, handleFileUpload, handleSearchInputChange, handleSearchClear, openCreateFolderDialog, openEditFolderDialog, openDeleteFolderDialog]);
 
   /* ── DIALOG PROPS ───────────────────────────────────────────── */
   const createFolderDialogProps = useMemo(() => ({
@@ -369,7 +389,7 @@ export function useComponentState(core, props) {
   return {
     // UI State
     searchInputValue,
-    setSearchInputValue,
+    setSearchInputValue: handleSearchInputChange, // FIXED: Use the proper handler
     
     // Refs
     fileInputRef,
