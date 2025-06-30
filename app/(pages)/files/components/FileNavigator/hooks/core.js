@@ -1,9 +1,10 @@
-// app/(pages)/files/components/FileNavigator/hooks/core.js - FIXED: Search only original files
+// app/(pages)/files/components/FileNavigator/hooks/core.js - FINAL FIX
+
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { filesApi } from '../../../lib/api';
+import { filesApi, hasApiError, extractApiData, handleApiError } from '../../../lib/api';
 
 export function useCore(props) {
   const {
@@ -52,7 +53,7 @@ export function useCore(props) {
   const searchTimerRef = useRef(null);
   const blurTimerRef = useRef(null);
 
-  /* ── STATUS TAB QUERIES ─────────────────────────────────────── */
+  /* ── STATUS TAB QUERIES - FINAL FIX ─────────────────────────── */
   const statuses = ['In Progress', 'Review'];
   const statusQueries = useQueries({
     queries: statuses.map(status => ({
@@ -61,23 +62,27 @@ export function useCore(props) {
         try {
           console.log(`🔍 Loading ${status} files...`);
           const result = await filesApi.workflow.getFilesByStatus(status);
+          
           console.log(`📊 ${status} files result:`, result);
           
-          let data = [];
-          if (result.error) {
-            console.error(`❌ Error loading ${status} files:`, result.error);
+          // FINAL FIX: Handle the new API response format properly
+          if (hasApiError(result)) {
+            console.error(`❌ Error loading ${status} files:`, handleApiError(result));
             return [];
-          } else if (result.data && Array.isArray(result.data)) {
-            data = result.data;
-          } else if (Array.isArray(result)) {
-            data = result;
           }
           
-          return data.map(file => ({
-            ...file,
-            fileName: file.fileName || 
-                     (file.fileId?.fileName ? `${file.fileId.fileName.replace('.pdf', '')}-Run-${file.runNumber}.pdf` : null) ||
-                     `Batch Run ${file.runNumber}` ||
+          // Extract the full data object first, then get the batches array
+          const fullData = extractApiData(result, { batches: [] });
+          const batches = fullData.batches || [];
+          
+          console.log(`📦 ${status} batches extracted:`, batches.length);
+          
+          // Transform batches to have proper fileName for display
+          return batches.map(batch => ({
+            ...batch,
+            fileName: batch.fileName || 
+                     (batch.fileId?.fileName ? `${batch.fileId.fileName.replace('.pdf', '')}-Run-${batch.runNumber}.pdf` : null) ||
+                     `Batch Run ${batch.runNumber}` ||
                      'Untitled'
           }));
         } catch (error) {
@@ -106,7 +111,7 @@ export function useCore(props) {
     }
   };
 
-  /* ── ARCHIVE TAB QUERY ──────────────────────────────────────── */
+  /* ── ARCHIVE TAB QUERY - FINAL FIX ──────────────────────────── */
   const {
     data: archivedBatches = [],
     isFetching: archiveLoading,
@@ -117,22 +122,24 @@ export function useCore(props) {
       try {
         console.log('🔍 Loading archived files...');
         const result = await filesApi.workflow.getFilesByStatus('Completed');
-        console.log('📚 Archive files result (using completed batches):', result);
+        console.log('📚 Archive files result:', result);
         
-        let data = [];
-        if (result.error) {
-          console.error('❌ Error loading archived files:', result.error);
+        // FINAL FIX: Handle the new API response format properly
+        if (hasApiError(result)) {
+          console.error('❌ Error loading archived files:', handleApiError(result));
           return [];
-        } else if (result.data && Array.isArray(result.data)) {
-          data = result.data;
-        } else if (Array.isArray(result)) {
-          data = result;
         }
         
-        return data.map(file => ({
-          ...file,
-          fileName: file.fileName || 
-                   `Batch Run ${file.runNumber}` ||
+        // Extract the full data object first, then get the batches array
+        const fullData = extractApiData(result, { batches: [] });
+        const batches = fullData.batches || [];
+        
+        console.log('📦 Archive batches extracted:', batches.length);
+        
+        return batches.map(batch => ({
+          ...batch,
+          fileName: batch.fileName || 
+                   `Batch Run ${batch.runNumber}` ||
                    'Archived File',
           isArchived: true
         }));
@@ -194,7 +201,7 @@ export function useCore(props) {
     return currentArchiveFolder.children || [];
   }, [currentArchiveFolder, archiveStructure.folders]);
 
-  /* ── SEARCH OPERATIONS (FIXED: Only search original files for Files tab) ──────────── */
+  /* ── SEARCH OPERATIONS - FINAL FIX ──────────────────────────── */
   const performSearch = useCallback(async (query) => {
     if (!query?.trim()) {
       setSearchResults(null);
@@ -211,27 +218,28 @@ export function useCore(props) {
       console.log('🔍 Performing search for:', query, 'in view:', view);
       
       if (view === 'folders') {
-        // FIXED: For Files tab, only search original files (not batches)
+        // FINAL FIX: For Files tab, search original files using the standardized API
         console.log('📄 Searching original files only...');
         
-        // Use the files API search which should return original files
-        const response = await fetch(`/api/files?search=${encodeURIComponent(query.trim())}`);
-        const result = await response.json();
+        const result = await filesApi.files.search(query);
         
         console.log('🔍 Files API search result:', result);
         
-        let searchData = [];
-        if (result.error) {
-          console.error('❌ Search error:', result.error);
-          searchData = [];
-        } else if (result.data && Array.isArray(result.data)) {
-          searchData = result.data;
-        } else if (Array.isArray(result)) {
-          searchData = result;
+        // FINAL FIX: Handle the new API response format properly
+        if (hasApiError(result)) {
+          console.error('❌ Search error:', handleApiError(result));
+          setSearchResults([]);
+          return;
         }
         
-        // FIXED: Filter to ensure only original files (no batches)
-        const originalFilesOnly = searchData.filter(file => {
+        // Extract the full data object first, then get the files array
+        const fullData = extractApiData(result, { files: [] });
+        const files = fullData.files || [];
+        
+        console.log('📄 Search files extracted:', files.length);
+        
+        // Filter to ensure only original files (no batches)
+        const originalFilesOnly = files.filter(file => {
           const isOriginalFile = !file.isBatch && 
                                 !file.runNumber && 
                                 !file.status && 
@@ -240,28 +248,28 @@ export function useCore(props) {
           return isOriginalFile;
         });
         
-        console.log('✅ Filtered to original files only:', originalFilesOnly.length, 'out of', searchData.length);
+        console.log('✅ Filtered to original files only:', originalFilesOnly.length, 'out of', files.length);
         setSearchResults(originalFilesOnly);
         
       } else {
-        // For Status and Archive tabs, use the existing search logic
-        const response = await fetch(`/api/files?search=${encodeURIComponent(query.trim())}`);
-        const result = await response.json();
+        // For Status and Archive tabs, search batches
+        const result = await filesApi.files.search(query);
         
         console.log('🔍 Search result:', result);
         
-        let searchData = [];
-        if (result.error) {
-          console.error('❌ Search error:', result.error);
-          searchData = [];
-        } else if (result.data && Array.isArray(result.data)) {
-          searchData = result.data;
-        } else if (Array.isArray(result)) {
-          searchData = result;
+        // FINAL FIX: Handle the new API response format properly
+        if (hasApiError(result)) {
+          console.error('❌ Search error:', handleApiError(result));
+          setSearchResults([]);
+          return;
         }
         
+        // Extract the full data object first, then get the files array
+        const fullData = extractApiData(result, { files: [] });
+        const allResults = fullData.files || [];
+        
         // Ensure all search results have proper fileName for display
-        const enrichedResults = searchData.map(file => ({
+        const enrichedResults = allResults.map(file => ({
           ...file,
           fileName: file.fileName || 
                    (file.fileId?.fileName ? `${file.fileId.fileName.replace('.pdf', '')}-Run-${file.runNumber}.pdf` : null) ||
@@ -362,13 +370,16 @@ export function useCore(props) {
   /* ── FILE STATUS OPERATIONS ─────────────────────────────────── */
   const changeFileStatus = useCallback(async (fileId, status) => {
     try {
-      await filesApi.batches.updateStatus(fileId, status);
+      const result = await filesApi.batches.updateStatus(fileId, status);
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
+      }
     } catch (error) {
       console.error('Failed to update file status:', error);
     }
   }, []);
 
-  /* ── FOLDER TREE OPERATIONS ─────────────────────────────────── */
+  /* ── FOLDER TREE OPERATIONS - FINAL FIX ─────────────────────── */
   const loadFolderChildren = useCallback(async (folderId) => {
     try {
       console.log('🔍 Loading children for folder:', folderId);
@@ -381,20 +392,22 @@ export function useCore(props) {
       
       console.log('📁 Folder children result:', { foldersResult, filesResult });
       
-      // Handle folders result
+      // FINAL FIX: Handle folders result with new API format
       let folders = [];
-      if (foldersResult.error) {
-        console.error('❌ Error loading subfolders:', foldersResult.error);
-      } else if (foldersResult.data) {
-        folders = Array.isArray(foldersResult.data) ? foldersResult.data : [];
+      if (hasApiError(foldersResult)) {
+        console.error('❌ Error loading subfolders:', handleApiError(foldersResult));
+      } else {
+        const fullData = extractApiData(foldersResult, { folders: [] });
+        folders = fullData.folders || [];
       }
       
-      // Handle files result - FIXED: Filter to only original files
+      // FINAL FIX: Handle files result with new API format - Filter to only original files
       let files = [];
-      if (filesResult.error) {
-        console.error('❌ Error loading folder files:', filesResult.error);
-      } else if (filesResult.data) {
-        const allFiles = Array.isArray(filesResult.data) ? filesResult.data : [];
+      if (hasApiError(filesResult)) {
+        console.error('❌ Error loading folder files:', handleApiError(filesResult));
+      } else {
+        const fullData = extractApiData(filesResult, { files: [] });
+        const allFiles = fullData.files || [];
         // Filter to only include original files (not batches)
         files = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
       }

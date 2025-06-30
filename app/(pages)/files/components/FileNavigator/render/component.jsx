@@ -1,7 +1,7 @@
 // app/(pages)/files/components/FileNavigator/render/component.jsx - Enhanced with expandable folder tree
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { ui } from '@/components/ui';
 import { useCore } from '../hooks/core';
 import { useComponentState } from '../hooks/state';
@@ -61,7 +61,7 @@ export default function FileNavigator(props) {
         
         try {
           // Load both subfolders and files for this folder
-          const [foldersResult] = await Promise.all([
+          const [foldersResult, filesResult] = await Promise.all([
             core?.loadFolderChildren ? core.loadFolderChildren(folderId) : { folders: [], files: [] },
             // You might want to add a method to load files for a specific folder
             Promise.resolve({ files: [] })
@@ -264,20 +264,7 @@ export default function FileNavigator(props) {
                       value={state.searchInputValue}
                       onFocus={state.handleSearchFocus}
                       onBlur={state.handleSearchBlur}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        state.setSearchInputValue(value);
-                        // Trigger search through core hook
-                        if (core?.setSearchQuery) {
-                          core.setSearchQuery(value);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          state.handleSearchSubmit(e);
-                        }
-                      }}
+                      onChange={(e) => state.setSearchInputValue(e.target.value)}
                       className="pl-10 pr-12 h-9 bg-white/80 dark:bg-slate-800/80 border-slate-200/60 dark:border-slate-700/60 focus:border-primary/60 transition-colors"
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">

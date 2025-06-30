@@ -1,13 +1,18 @@
-# ApiClient Usage Guide - Frontend Integration
+# ApiClient Usage Guide
 
-## 📋 Overview
+## Overview
 
-This guide explains how to use the **standardized ApiClient** in your frontend components. All API endpoints have been normalized to return consistent data structures, making frontend integration predictable and reliable.
+The ApiClient provides a unified interface for all API operations with consistent error handling and response normalization. All API responses follow the standardized format: `{ success, data, error }`.
 
-## 🎯 Core Response Format
+## Import and Setup
 
-**Every API operation returns this standardized format:**
+```javascript
+import { api, hasError, extractData, extractList, extractMetadata, getError } from '@/app/apiClient'
+```
 
+## Response Format
+
+All API responses are normalized to:
 ```javascript
 {
   data: any,           // The actual response data (null on error)
@@ -15,102 +20,241 @@ This guide explains how to use the **standardized ApiClient** in your frontend c
 }
 ```
 
-## 🚀 Basic Usage
-
-### Import and Setup
+### List Responses
+List endpoints return wrapped objects with metadata:
 ```javascript
-import { api, hasError, extractData, getError } from '@/app/apiClient'
-
-// Or for React hooks
-import { useApi } from '@/app/apiClient'
+{
+  data: {
+    files: [...],      // The actual array of items
+    count: 5,          // Total count
+    query: {...},      // Query parameters used
+    pagination: {...}, // Pagination info (if applicable)
+    // ... other metadata
+  },
+  error: null
+}
 ```
 
-### Error Checking Pattern
+### Single Item Responses
+Single item endpoints return the object directly:
 ```javascript
-const result = await api.list.files('folder123')
+{
+  data: {
+    _id: "123",
+    fileName: "document.pdf",
+    // ... other fields
+  },
+  error: null
+}
+```
 
+## Helper Functions
+
+### `hasError(result)`
+Check if a response has an error:
+```javascript
+const result = await api.list.files()
 if (hasError(result)) {
-  console.error('Failed to load files:', getError(result))
-  setError(getError(result))
+  console.error('Error:', getError(result))
   return
 }
-
-const files = extractData(result, [])
-setFiles(files.files)
-setCount(files.count)
 ```
 
-### One-liner with Fallback
+### `extractData(result, fallback)`
+Extract the full data object with fallback:
 ```javascript
-// Extract data with fallback if error occurs
-const files = extractData(await api.list.files(), { files: [], count: 0 })
+// For wrapped list responses - returns the full wrapper
+const fileData = extractData(await api.list.files(), { files: [], count: 0 })
+console.log(fileData.files)   // Array of files
+console.log(fileData.count)   // Total count
+
+// For single item responses - returns the item
+const file = extractData(await api.get.file(id), null)
 ```
 
-## 📂 Files API
-
-### List Files
+### `extractList(result, listField, fallback)`
+Extract just the array from wrapped list responses:
 ```javascript
-// Root files
+// Get just the files array
+const files = extractList(await api.list.files(), 'files', [])
+
+// Get just the batches array
+const batches = extractList(await api.list.batches(), 'batches', [])
+```
+
+### `extractMetadata(result, fallback)`
+Extract metadata from wrapped responses:
+```javascript
+const metadata = extractMetadata(await api.list.files())
+console.log(metadata.count)      // Total files
+console.log(metadata.query)      // Query parameters
+console.log(metadata.pagination) // Pagination info
+```
+
+### `getError(result)`
+Get the error message from a failed response:
+```javascript
+const result = await api.create.file(data)
+if (hasError(result)) {
+  alert(`Failed to create file: ${getError(result)}`)
+}
+```
+
+## Common Patterns
+
+### List Operations
+
+```javascript
+// List files with full metadata
 const result = await api.list.files()
-// result.data = {
-//   files: [...],
-//   count: 5,
-//   query: { folderId: null, search: null },
-//   folder: null
-// }
+if (!hasError(result)) {
+  const data = extractData(result)
+  console.log(`Found ${data.count} files`)
+  data.files.forEach(file => console.log(file.fileName))
+}
 
-// Files in specific folder
-const result = await api.list.files('folder123')
-// result.data = {
-//   files: [...],
-//   count: 3,
-//   query: { folderId: "folder123", search: null },
-//   folder: { id: "folder123" }
-// }
+// List files - just get the array
+const files = extractList(await api.list.files(), 'files')
+files.forEach(file => console.log(file.fileName))
 
-// Search files
-const result = await api.list.searchFiles('eco')
-// result.data = {
-//   files: [...],
-//   count: 2,
-//   query: { search: "eco", folderId: null },
-//   searchTerm: "eco"
-// }
+// List with parameters
+const searchResult = await api.list.searchFiles('test')
+const searchedFiles = extractList(searchResult, 'files')
+
+// List batches by status
+const reviewBatches = extractList(
+  await api.list.batchesByStatus('Review'), 
+  'batches'
+)
 ```
 
-### Single File Operations
+### Single Item Operations
+
 ```javascript
-// Get file details
-const result = await api.get.file('file123')
-// result.data = { _id: "file123", fileName: "...", ... }
+// Get a single file
+const result = await api.get.file(fileId)
+if (hasError(result)) {
+  console.error('File not found:', getError(result))
+} else {
+  const file = extractData(result)
+  console.log('File:', file.fileName)
+}
 
-// Get file with PDF data
-const result = await api.get.fileWithPdf('file123')
-// result.data = { _id: "file123", pdf: "data:application/pdf;base64...", ... }
-
-// Get file's batches
-const result = await api.get.fileWithBatches('file123')
-// result.data = { batches: [...], count: 3, fileId: "file123" }
+// Get with additional data
+const fileWithPdf = extractData(
+  await api.get.fileWithPdf(fileId)
+)
 ```
 
-### Component Example
+### Create Operations
+
+```javascript
+// Create a folder
+const result = await api.create.folder('New Folder', parentId)
+if (hasError(result)) {
+  alert(`Failed to create folder: ${getError(result)}`)
+} else {
+  const folder = extractData(result)
+  console.log('Created folder:', folder._id)
+}
+
+// Create a batch
+const batchResult = await api.create.batch({
+  fileId: file._id,
+  status: 'Draft'
+})
+const newBatch = extractData(batchResult)
+```
+
+### Update Operations
+
+```javascript
+// Update file metadata
+const result = await api.update.file(fileId, {
+  description: 'Updated description',
+  components: updatedComponents
+})
+
+if (!hasError(result)) {
+  const updated = extractData(result)
+  console.log('File updated:', updated)
+}
+
+// Update batch status
+await api.update.batchStatus(batchId, 'Review')
+```
+
+### Delete Operations
+
+```javascript
+// Delete a file
+const result = await api.remove.file(fileId)
+if (hasError(result)) {
+  alert(`Cannot delete: ${getError(result)}`)
+} else {
+  const deleted = extractData(result)
+  console.log('Deleted file:', deleted.deletedFile)
+  console.log('Deleted batches:', deleted.deletedBatches)
+}
+```
+
+### File Upload
+
+```javascript
+// Single file upload
+const file = document.getElementById('fileInput').files[0]
+const result = await api.custom.uploadFile(file, folderId, (progress) => {
+  console.log(`Upload progress: ${progress}%`)
+})
+
+if (!hasError(result)) {
+  const uploaded = extractData(result)
+  console.log('File uploaded:', uploaded._id)
+}
+
+// Batch upload
+const files = Array.from(document.getElementById('filesInput').files)
+const uploadResult = await api.custom.uploadBatch(
+  files.map(f => ({ file: f, relativePath: f.webkitRelativePath })),
+  baseFolderId
+)
+const uploadData = extractData(uploadResult)
+console.log(`Uploaded ${uploadData.uploaded} files, ${uploadData.failed} failed`)
+```
+
+## React Component Examples
+
+### File List Component
 ```javascript
 function FileList({ folderId }) {
   const [files, setFiles] = useState([])
+  const [metadata, setMetadata] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     async function loadFiles() {
       setLoading(true)
+      setError(null)
+      
       const result = await api.list.files(folderId)
       
       if (hasError(result)) {
         setError(getError(result))
+        setFiles([])
       } else {
-        const data = extractData(result)
-        setFiles(data.files)
+        // Option 1: Get just the array
+        setFiles(extractList(result, 'files'))
+        
+        // Option 2: Get full data with metadata
+        const fullData = extractData(result)
+        setFiles(fullData.files)
+        setMetadata({
+          count: fullData.count,
+          folder: fullData.folder
+        })
       }
+      
       setLoading(false)
     }
     
@@ -122,6 +266,7 @@ function FileList({ folderId }) {
   
   return (
     <div>
+      <h2>Files ({metadata.count || files.length})</h2>
       {files.map(file => (
         <div key={file._id}>{file.fileName}</div>
       ))}
@@ -130,356 +275,50 @@ function FileList({ folderId }) {
 }
 ```
 
-## 📦 Batches API
-
-### List Batches
+### Search Component
 ```javascript
-// All batches (with pagination)
-const result = await api.list.batches()
-// result.data = {
-//   batches: [...],
-//   count: 25,
-//   totalCount: 150,
-//   pagination: {
-//     limit: 50,
-//     skip: 0,
-//     hasMore: true,
-//     page: 1,
-//     totalPages: 3
-//   },
-//   query: { filter: {...}, pagination: {...} }
-// }
+function SearchFiles() {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
 
-// Batches by status
-const result = await api.list.batchesByStatus('Review')
-// result.data = {
-//   batches: [...],
-//   count: 8,
-//   statusFilter: {
-//     status: "Review",
-//     description: "Batches with status: Review"
-//   },
-//   ...
-// }
+  const handleSearch = async () => {
+    if (query.length < 2) {
+      alert('Search query must be at least 2 characters')
+      return
+    }
 
-// Batches for specific file
-const result = await api.list.batchesByFile('file123')
-// result.data = {
-//   batches: [...],
-//   count: 3,
-//   fileContext: {
-//     fileId: "file123",
-//     fileName: "EcoPlate Substrate.pdf",
-//     description: "Batches for file: EcoPlate Substrate.pdf"
-//   },
-//   ...
-// }
-```
-
-### Single Batch Operations
-```javascript
-// Get batch details
-const result = await api.get.batch('batch123')
-// result.data = { _id: "batch123", runNumber: 5, status: "Review", ... }
-
-// Get work order status
-const result = await api.get.batchWorkOrderStatus('batch123')
-// result.data = {
-//   created: true,
-//   workOrderId: "WO-123",
-//   workOrderNumber: "WO-123",
-//   displayId: "WO-123",
-//   description: "NetSuite Work Order WO-123"
-// }
-```
-
-### Pagination Example
-```javascript
-function BatchList() {
-  const [batches, setBatches] = useState([])
-  const [pagination, setPagination] = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  async function loadPage(page = 1, limit = 20) {
-    setLoading(true)
-    const skip = (page - 1) * limit
+    setSearching(true)
+    const result = await api.custom.searchFiles(query)
     
-    const result = await api.list.batches({ limit, skip })
-    
-    if (!hasError(result)) {
+    if (hasError(result)) {
+      alert(`Search failed: ${getError(result)}`)
+      setResults([])
+    } else {
+      // Get the full response to access metadata
       const data = extractData(result)
-      setBatches(data.batches)
-      setPagination(data.pagination)
-    }
-    setLoading(false)
-  }
-
-  return (
-    <div>
-      {batches.map(batch => (
-        <div key={batch._id}>
-          {batch.fileName} - Run {batch.runNumber}
-        </div>
-      ))}
+      setResults(data.files)
       
-      {pagination && (
-        <div>
-          Page {pagination.page} of {pagination.totalPages}
-          {pagination.hasMore && (
-            <button onClick={() => loadPage(pagination.page + 1)}>
-              Next Page
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-```
-
-## 📁 Folders API
-
-### List Folders
-```javascript
-// Root folders
-const result = await api.list.folders()
-// result.data = {
-//   folders: [...],
-//   count: 3,
-//   summary: {
-//     totalFolders: 3,
-//     totalFiles: 45,
-//     emptyFolders: 0
-//   },
-//   hierarchy: { isRoot: true, level: "root" },
-//   description: "Root level folders"
-// }
-
-// Subfolders
-const result = await api.list.folders('parent123')
-// result.data = {
-//   folders: [...],
-//   count: 5,
-//   parentContext: {
-//     id: "parent123",
-//     name: "MFG Documents",
-//     isRoot: true
-//   },
-//   description: "Subfolders of \"MFG Documents\""
-// }
-```
-
-### Folder Navigation
-```javascript
-// Get breadcrumbs/path
-const result = await api.get.folderTree('folder123')
-// result.data = {
-//   folder: {...},
-//   path: [...],
-//   breadcrumbs: [
-//     { _id: "root", name: "Root" },
-//     { _id: "parent", name: "Parent" }
-//   ],
-//   depth: 2,
-//   isRoot: false
-// }
-
-// Get folder contents
-const result = await api.get.folderChildren('folder123')
-// result.data = {
-//   subfolders: [...],
-//   files: [...],
-//   counts: { subfolders: 3, files: 7, total: 10 },
-//   isEmpty: false
-// }
-```
-
-## 🧪 Items API
-
-### Search Items
-```javascript
-// All items
-const result = await api.list.items()
-// result.data = {
-//   items: [...],
-//   count: 3792,
-//   query: { type: null, search: "", netsuiteId: null }
-// }
-
-// By type
-const result = await api.list.itemsByType('chemical')
-// result.data = {
-//   items: [...],
-//   count: 50,
-//   query: { type: "chemical", search: "", netsuiteId: null },
-//   pagination: { limit: 50, skip: 0 }
-// }
-
-// Search with query
-const result = await api.list.searchItems('water', 'chemical')
-// result.data = {
-//   items: [...],
-//   count: 4,
-//   query: { type: "chemical", search: "water", netsuiteId: null }
-// }
-```
-
-### Single Item Operations
-```javascript
-// Get item with lots
-const result = await api.get.itemWithLots('item123')
-// result.data = {
-//   _id: "item123",
-//   sku: "1030 A1",
-//   displayName: "GEN III A1 Solution",
-//   lotTracked: true,
-//   qtyOnHand: 56,
-//   Lots: [...],
-//   bom: [...]
-// }
-
-// Get item lots only
-const result = await api.get.itemLots('item123')
-// result.data = {
-//   lots: [...],
-//   count: 5,
-//   itemId: "item123"
-// }
-
-// Get item transactions
-const result = await api.get.itemTransactions('item123')
-// result.data = {
-//   transactions: [...],
-//   count: 25,
-//   itemId: "item123",
-//   options: { status: "posted", limit: 100, page: 1 }
-// }
-```
-
-## 🔧 Custom Operations
-
-### File Uploads
-```javascript
-// Single file upload
-const result = await api.custom.uploadFile(file, folderId, onProgress)
-// result.data = { _id: "file123", fileName: "...", ... }
-
-// Batch upload
-const result = await api.custom.uploadBatch(fileDataArray, folderId, onProgress)
-// result.data = {
-//   uploaded: 5,
-//   failed: 1,
-//   results: [...],
-//   errors: [...],
-//   folderId: "folder123"
-// }
-```
-
-### NetSuite Operations
-```javascript
-// Search NetSuite items
-const result = await api.custom.searchNetSuiteItems('assembly')
-// result.data = { items: [...], query: "assembly", count: 15 }
-
-// Get BOM
-const result = await api.custom.getNetSuiteBOM('assembly123')
-// result.data = {
-//   bom: {...},
-//   recipe: [...],
-//   components: [...],
-//   assemblyItemId: "assembly123"
-// }
-```
-
-## ⚠️ Error Handling Best Practices
-
-### 1. Always Check for Errors
-```javascript
-// ❌ DON'T do this
-const files = await api.list.files()
-setFiles(files.data.files) // Could crash if files.data is null
-
-// ✅ DO this
-const result = await api.list.files()
-if (hasError(result)) {
-  setError(getError(result))
-  return
-}
-setFiles(extractData(result).files)
-```
-
-### 2. Use Fallbacks
-```javascript
-// ✅ Safe with fallback
-const files = extractData(await api.list.files(), { files: [], count: 0 })
-setFiles(files.files)
-setCount(files.count)
-```
-
-### 3. Handle Loading States
-```javascript
-// ✅ Complete error handling
-async function loadData() {
-  setLoading(true)
-  setError(null)
-  
-  const result = await api.list.files()
-  
-  if (hasError(result)) {
-    setError(getError(result))
-    setFiles([])
-  } else {
-    const data = extractData(result)
-    setFiles(data.files)
-    setCount(data.count)
-  }
-  
-  setLoading(false)
-}
-```
-
-## 🎨 React Hook Pattern
-
-```javascript
-function useFiles(folderId) {
-  const [data, setData] = useState({ files: [], count: 0 })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      setError(null)
-      
-      const result = await api.list.files(folderId)
-      
-      if (hasError(result)) {
-        setError(getError(result))
-        setData({ files: [], count: 0 })
-      } else {
-        setData(extractData(result))
+      if (data.filtered) {
+        console.log(`Showing ${data.count} of ${data.totalFound} results`)
       }
-      
-      setLoading(false)
     }
     
-    load()
-  }, [folderId])
+    setSearching(false)
+  }
 
-  return { data, loading, error, reload: () => load() }
-}
-
-// Usage in component
-function MyComponent() {
-  const { data, loading, error } = useFiles('folder123')
-  
-  if (loading) return <div>Loading...</div>
-  if (error) return <div>Error: {error}</div>
-  
   return (
     <div>
-      <h2>Files ({data.count})</h2>
-      {data.files.map(file => (
+      <input 
+        value={query} 
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search files..."
+      />
+      <button onClick={handleSearch} disabled={searching}>
+        Search
+      </button>
+      
+      {results.map(file => (
         <div key={file._id}>{file.fileName}</div>
       ))}
     </div>
@@ -487,25 +326,74 @@ function MyComponent() {
 }
 ```
 
-## 📝 Summary
+### Error Handling Pattern
+```javascript
+async function performOperation() {
+  try {
+    // Multiple operations with consistent error handling
+    const fileResult = await api.create.file(fileData)
+    if (hasError(fileResult)) {
+      throw new Error(`File creation failed: ${getError(fileResult)}`)
+    }
+    const file = extractData(fileResult)
 
-### Key Points:
-1. **All operations return `{ data, error }`** - Check for errors first
-2. **Use helper functions** - `hasError()`, `extractData()`, `getError()`
-3. **List operations return wrapped objects** - `{ items: [], count: 0, ... }`
-4. **Single operations return objects directly** - `{ _id: "123", name: "..." }`
-5. **Always provide fallbacks** - Handle error states gracefully
-6. **Rich metadata available** - Count, pagination, query info, context
+    const batchResult = await api.create.batch({ fileId: file._id })
+    if (hasError(batchResult)) {
+      throw new Error(`Batch creation failed: ${getError(batchResult)}`)
+    }
+    const batch = extractData(batchResult)
 
-### Helper Functions:
-- `hasError(result)` - Check if operation failed
-- `extractData(result, fallback)` - Get data with fallback
-- `getError(result)` - Get error message
-- `api.list.*` - List operations (wrapped objects)
-- `api.get.*` - Single item operations (direct objects)
-- `api.create.*` - Create operations
-- `api.update.*` - Update operations
-- `api.remove.*` - Delete operations
-- `api.custom.*` - Custom operations
+    return { file, batch }
+  } catch (error) {
+    console.error('Operation failed:', error.message)
+    throw error
+  }
+}
+```
 
-This standardized approach ensures predictable, reliable frontend integration across your entire application!
+## Available Operations
+
+### List Operations
+- `api.list.files(folderId?)` - List files
+- `api.list.folders(parentId?)` - List folders
+- `api.list.batches(options?)` - List batches
+- `api.list.items(options?)` - List inventory items
+- `api.list.searchFiles(query)` - Search files
+- `api.list.batchesByStatus(status)` - List batches by status
+- `api.list.chemicals()` - List chemical items
+- `api.list.solutions()` - List solution items
+- `api.list.products()` - List product items
+
+### Get Operations
+- `api.get.file(id)` - Get file details
+- `api.get.fileWithPdf(id)` - Get file with PDF data
+- `api.get.batch(id)` - Get batch details
+- `api.get.item(id)` - Get item details
+- `api.get.folder(id)` - Get folder details
+
+### Create Operations
+- `api.create.file(data)` - Create file
+- `api.create.folder(name, parentId?)` - Create folder
+- `api.create.batch(data)` - Create batch
+- `api.create.item(data)` - Create item
+- `api.create.chemical(data)` - Create chemical
+- `api.create.solution(data)` - Create solution
+
+### Update Operations
+- `api.update.file(id, data)` - Update file
+- `api.update.batch(id, data)` - Update batch
+- `api.update.item(id, data)` - Update item
+- `api.update.folder(id, data)` - Update folder
+
+### Delete Operations
+- `api.remove.file(id)` - Delete file
+- `api.remove.batch(id)` - Delete batch
+- `api.remove.item(id)` - Delete item
+- `api.remove.folder(id)` - Delete folder
+
+### Custom Operations
+- `api.custom.uploadFile(file, folderId?, onProgress?)` - Upload file
+- `api.custom.uploadBatch(files, folderId?, onProgress?)` - Batch upload
+- `api.custom.searchNetSuiteItems(query)` - Search NetSuite
+- `api.custom.getNetSuiteBOM(assemblyItemId)` - Get BOM
+- `api.custom.retryWorkOrder(batchId, quantity)` - Retry work order

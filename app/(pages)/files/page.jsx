@@ -1,10 +1,11 @@
-// app/(pages)/files/page.jsx - FIXED: File opening and search filtering
+// app/(pages)/files/page.jsx - FINAL FIX: Proper data extraction
+
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { ui } from '@/components/ui';
-import { filesApi } from './lib/api';
+import { filesApi, hasApiError, extractApiData, handleApiError } from './lib/api';
 
 // Dynamic imports for better performance
 const FileNavigator = dynamic(() => import('./components/FileNavigator'), { ssr: false });
@@ -34,15 +35,15 @@ export default function FilesPage() {
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
-  // === ENHANCED FOLDER LOADING LOGIC ===
+  // === ENHANCED FOLDER LOADING LOGIC - FINAL FIX ===
   useEffect(() => {
     const loadFolderData = async () => {
       try {
+        console.log('🔍 Page: Starting loadFolderData...');
         setDataLoading(true);
         setError(null);
         
         if (currentFolder) {
-          // Load data for a specific folder
           console.log('🔍 Page: Loading data for folder:', currentFolder.name);
           
           const [foldersResult, filesResult] = await Promise.all([
@@ -52,70 +53,76 @@ export default function FilesPage() {
           
           console.log('📁 Page: Folder data results:', { foldersResult, filesResult });
           
-          // Handle folders
+          // FIXED: Handle folders with proper data extraction
           let foldersData = [];
-          if (foldersResult.error) {
-            console.error('❌ Error loading subfolders:', foldersResult.error);
-          } else if (foldersResult.data) {
-            foldersData = Array.isArray(foldersResult.data) ? foldersResult.data : [];
+          if (hasApiError(foldersResult)) {
+            console.error('❌ Error loading subfolders:', handleApiError(foldersResult));
+          } else {
+            // Extract the full data object first, then get the folders array
+            const fullData = extractApiData(foldersResult, { folders: [] });
+            foldersData = fullData.folders || [];
+            console.log('📂 Page: Extracted folders:', foldersData);
           }
           
-          // Handle files - ONLY original files (filter out batches)
+          // FIXED: Handle files with proper data extraction - ONLY original files
           let filesData = [];
-          if (filesResult.error) {
-            console.error('❌ Error loading folder files:', filesResult.error);
-          } else if (filesResult.data) {
-            const allFiles = Array.isArray(filesResult.data) ? filesResult.data : [];
+          if (hasApiError(filesResult)) {
+            console.error('❌ Error loading folder files:', handleApiError(filesResult));
+          } else {
+            // Extract the full data object first, then get the files array
+            const fullData = extractApiData(filesResult, { files: [] });
+            const allFiles = fullData.files || [];
+            console.log('📄 Page: All files from API:', allFiles);
             // Filter to only include original files (not batches)
             filesData = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
+            console.log('📄 Page: Filtered original files:', filesData);
           }
           
           setRoot(foldersData);
           setFiles(filesData);
           
-          console.log('✅ Page: Loaded folder data:', {
-            subfolders: foldersData.length,
-            files: filesData.length
-          });
-          
         } else {
-          // Load root folders and files
           console.log('🔍 Page: Loading root data...');
           
           const [foldersResult, filesResult] = await Promise.all([
-            filesApi.folders.list(), // No parent = root folders
-            filesApi.files.list()    // No folder = root files
+            filesApi.folders.list(),
+            filesApi.files.list()
           ]);
           
           console.log('📁 Page: Root data results:', { foldersResult, filesResult });
           
-          // Handle root folders
+          // FIXED: Handle root folders with proper data extraction
           let foldersData = [];
-          if (foldersResult.error) {
-            throw new Error(foldersResult.error);
-          } else if (foldersResult.data) {
-            foldersData = Array.isArray(foldersResult.data) ? foldersResult.data : [];
+          if (hasApiError(foldersResult)) {
+            const errorMsg = handleApiError(foldersResult);
+            console.error('❌ Error loading root folders:', errorMsg);
+            throw new Error(errorMsg);
+          } else {
+            // Extract the full data object first, then get the folders array
+            const fullData = extractApiData(foldersResult, { folders: [] });
+            foldersData = fullData.folders || [];
+            console.log('📂 Page: Extracted root folders:', foldersData);
           }
           
-          // Handle root files - ONLY original files (filter out batches)
+          // FIXED: Handle root files with proper data extraction - ONLY original files
           let filesData = [];
-          if (filesResult.error) {
-            console.error('❌ Error loading root files:', filesResult.error);
-            // Don't fail completely for file errors
-          } else if (filesResult.data) {
-            const allFiles = Array.isArray(filesResult.data) ? filesResult.data : [];
+          if (hasApiError(filesResult)) {
+            console.error('❌ Error loading root files:', handleApiError(filesResult));
+          } else {
+            // Extract the full data object first, then get the files array
+            const fullData = extractApiData(filesResult, { files: [] });
+            const allFiles = fullData.files || [];
+            console.log('📄 Page: All root files from API:', allFiles);
             // Filter to only include original files (not batches)
             filesData = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
+            console.log('📄 Page: Filtered root original files:', filesData);
           }
           
           setRoot(foldersData);
           setFiles(filesData);
-          
-          console.log('✅ Page: Loaded root data:', {
-            folders: foldersData.length,
-            files: filesData.length
-          });
         }
+        
+        console.log('✅ Page: Data loading completed successfully');
         
       } catch (error) {
         console.error('❌ Page: Failed to load folder data:', error);
@@ -130,14 +137,14 @@ export default function FilesPage() {
     loadFolderData();
   }, [currentFolder, refreshTrigger, view]);
 
-  // === FOLDER OPERATIONS ===
+  // === FOLDER OPERATIONS - FIXED ===
   const createFolder = useCallback(async (name) => {
     try {
       console.log('🔍 Page: Creating folder:', name, 'in:', currentFolder?.name || 'root');
       const result = await filesApi.folders.create(name, currentFolder?._id);
       
-      if (result.error) {
-        throw new Error(result.error);
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
       
       console.log('✅ Page: Created folder successfully');
@@ -154,8 +161,8 @@ export default function FilesPage() {
       console.log('🔍 Page: Updating folder:', id, 'to:', name);
       const result = await filesApi.folders.update(id, name);
       
-      if (result.error) {
-        throw new Error(result.error);
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
       
       console.log('✅ Page: Updated folder successfully');
@@ -172,8 +179,8 @@ export default function FilesPage() {
       console.log('🔍 Page: Deleting folder:', id);
       const result = await filesApi.folders.remove(id);
       
-      if (result.error) {
-        throw new Error(result.error);
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
       
       console.log('✅ Page: Deleted folder successfully');
@@ -190,7 +197,7 @@ export default function FilesPage() {
     }
   }, [currentFolder, triggerRefresh]);
 
-  // === FILE UPLOAD OPERATIONS ===
+  // === FILE UPLOAD OPERATIONS - FIXED ===
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList.length) return;
     
@@ -204,8 +211,8 @@ export default function FilesPage() {
         console.log(`🔍 Page: Uploading file ${i + 1}/${fileList.length}:`, file.name);
         const result = await filesApi.files.upload(file, currentFolder?._id);
         
-        if (result.error) {
-          throw new Error(`Failed to upload ${file.name}: ${result.error}`);
+        if (hasApiError(result)) {
+          throw new Error(`Failed to upload ${file.name}: ${handleApiError(result)}`);
         }
         
         setUploadProgress({ current: i + 1, total: fileList.length });
@@ -240,8 +247,8 @@ export default function FilesPage() {
 
       const result = await filesApi.files.uploadBatch(fileDataArray, currentFolder?._id);
       
-      if (result.error) {
-        throw new Error(result.error);
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
 
       console.log('✅ Page: Batch upload completed successfully');
@@ -256,163 +263,258 @@ export default function FilesPage() {
     }
   }, [currentFolder, triggerRefresh]);
 
-  // === ENHANCED FILE OPENING LOGIC (FIXED) ===
-  const openFile = useCallback(async (file) => {
-    try {
-      console.log('🔍 Page: Opening file:', file);
+// === ENHANCED FILE OPENING LOGIC - FIXED ===
+const openFile = useCallback(async (file) => {
+  try {
+    console.log('🔍 Page: Opening file:', file);
+    
+    if (!file || !file._id) {
+      throw new Error('Invalid file data');
+    }
+
+    // Show loading state
+    setError(null);
+
+    // FIXED: Better detection of file type
+    const isBatchFile = file.sourceType === 'batch' || 
+                       file.isBatch || 
+                       file.status || 
+                       file.runNumber ||
+                       file.batchId;
+
+    if (isBatchFile) {
+      // This is a batch file
+      console.log('📦 Page: Opening batch file:', file._id);
       
-      if (!file || !file._id) {
-        throw new Error('Invalid file data');
+      const result = await filesApi.batches.get(file._id);
+      
+      if (hasApiError(result)) {
+        throw new Error('Failed to load batch: ' + handleApiError(result));
       }
-
-      // Show loading state
-      setError(null);
-
-      // FIXED: Better detection of file type
-      const isBatchFile = file.sourceType === 'batch' || 
-                         file.isBatch || 
-                         file.status || 
-                         file.runNumber ||
-                         file.batchId;
-
-      if (isBatchFile) {
-        // This is a batch file
-        console.log('📦 Page: Opening batch file:', file._id);
+      
+      const batch = extractApiData(result);
+      console.log('📦 Batch data loaded:', batch);
+      
+      if (batch) {
+        let pdfData = null;
         
-        const result = await filesApi.batches.get(file._id);
-        
-        if (result.error) {
-          throw new Error('Failed to load batch: ' + result.error);
-        }
-        
-        if (result.data) {
-          const batch = result.data;
-          
-          let pdfData = null;
-          
-          // Try different PDF sources in order of preference
-          if (batch.signedPdf && batch.signedPdf.data) {
-            // Use the baked PDF that has overlays burned in
-            pdfData = `data:${batch.signedPdf.contentType || 'application/pdf'};base64,${batch.signedPdf.data.toString('base64')}`;
-            console.log('📄 Using signed PDF');
-          } else if (batch.pdf) {
-            // Use stored PDF data
-            pdfData = batch.pdf;
-            console.log('📄 Using batch PDF data');
-          } else if (batch.fileId) {
-            // Fallback: load from original file
-            const originalFileId = typeof batch.fileId === 'object' ? batch.fileId._id : batch.fileId;
-            console.log('📄 Loading PDF from original file:', originalFileId);
-            
-            try {
-              const originalResult = await filesApi.files.getWithPdf(originalFileId);
-              if (!originalResult.error && originalResult.data?.pdf) {
-                pdfData = originalResult.data.pdf;
-                console.log('📄 Using original file PDF');
-              }
-            } catch (err) {
-              console.error('Failed to load original file PDF:', err);
-            }
-          }
-          
-          if (!pdfData) {
-            throw new Error('No PDF data found for this batch');
-          }
-          
-          const docData = { 
-            ...batch, 
-            pdf: pdfData,
-            isBatch: true,
-            originalFileId: typeof batch.fileId === 'object' ? batch.fileId._id : batch.fileId,
-            // Don't pass overlays if we have a baked PDF
-            overlays: batch.signedPdf ? null : (batch.overlays || null),
-            // Ensure we have a fileName for display
-            fileName: batch.fileId?.fileName || file.fileName || `Batch Run ${batch.runNumber}`,
-            runNumber: batch.runNumber
-          };
-          
-          console.log('✅ Page: Batch loaded successfully');
-          setCurrentDoc(docData);
-        }
-        
-      } else if (file.isArchived) {
-        // This is an archived file
-        console.log('🗄️ Page: Opening archived file:', file._id);
-        
-        const result = await filesApi.archive.getFile(file._id);
-        if (result.error) {
-          throw new Error('Failed to load archived file: ' + result.error);
-        }
-        
-        if (result.data) {
-          const docData = { 
-            ...result.data, 
-            pdf: result.data.pdf,
-            isBatch: true,
-            isArchived: true,
-            originalFileId: result.data.originalFileId || result.data.fileId,
-            fileName: result.data.fileName || file.fileName || 'Archived File'
-          };
-          
-          console.log('✅ Page: Archived file loaded successfully');
-          setCurrentDoc(docData);
-        }
-        
-      } else {
-        // FIXED: This is an original file - call API correctly for PDF data
-        console.log('📄 Page: Opening original file:', file._id);
-        
-        // Use the direct fetch approach to ensure action parameter is sent correctly
-        const response = await fetch(`/api/files?id=${encodeURIComponent(file._id)}&action=with-pdf`);
-        const result = await response.json();
-        
-        console.log('📄 Page: API result:', { 
-          success: result.success, 
-          hasPdf: !!result.data?.pdf, 
-          error: result.error,
-          pdfType: typeof result.data?.pdf,
-          pdfLength: result.data?.pdf?.length
+        console.log('📄 Checking PDF sources for batch:', {
+          hasSignedPdf: !!batch.signedPdf,
+          hasSignedPdfData: !!(batch.signedPdf?.data),
+          hasPdf: !!batch.pdf,
+          hasFileId: !!batch.fileId,
+          hasFileIdPdf: !!(batch.fileId?.pdf)
         });
         
-        if (result.error) {
-          throw new Error('Failed to load file: ' + result.error);
+        // FIXED: Check PDF sources in priority order
+        if (batch.signedPdf && batch.signedPdf.data) {
+          // Use the baked PDF that has overlays burned in
+          try {
+            let pdfDataString = batch.signedPdf.data;
+            if (Buffer.isBuffer(pdfDataString)) {
+              pdfDataString = pdfDataString.toString('base64');
+            }
+            pdfData = `data:${batch.signedPdf.contentType || 'application/pdf'};base64,${pdfDataString}`;
+            console.log('📄 Using signed PDF with overlays');
+          } catch (err) {
+            console.error('Error processing signed PDF:', err);
+          }
+        } 
+        else if (batch.pdf) {
+          // Use stored PDF data
+          pdfData = batch.pdf;
+          console.log('📄 Using batch PDF data');
         }
-        
-        if (!result.data) {
-          throw new Error('No data returned from API');
+        // FIXED: Check fileId.pdf BEFORE making API call
+        else if (batch.fileId && batch.fileId.pdf && batch.fileId.pdf.data) {
+          // Use PDF data from populated fileId object
+          console.log('📄 Processing fileId PDF object:', {
+            hasData: !!batch.fileId.pdf.data,
+            dataType: typeof batch.fileId.pdf.data,
+            isBuffer: Buffer.isBuffer(batch.fileId.pdf.data),
+            contentType: batch.fileId.pdf.contentType
+          });
+          
+          try {
+            const pdfObj = batch.fileId.pdf;
+            
+            if (pdfObj.data && Buffer.isBuffer(pdfObj.data)) {
+              // Convert Buffer to base64 data URL
+              const base64String = pdfObj.data.toString('base64');
+              const contentType = pdfObj.contentType || 'application/pdf';
+              pdfData = `data:${contentType};base64,${base64String}`;
+              console.log('📄 Using fileId embedded PDF data (converted from Buffer)');
+            } else if (typeof pdfObj.data === 'string') {
+              // Already a string, might be base64 or data URL
+              if (pdfObj.data.startsWith('data:')) {
+                pdfData = pdfObj.data;
+              } else {
+                // Assume it's base64, add data URL prefix
+                const contentType = pdfObj.contentType || 'application/pdf';
+                pdfData = `data:${contentType};base64,${pdfObj.data}`;
+              }
+              console.log('📄 Using fileId embedded PDF data (string format)');
+            } else {
+              console.error('📄 Unknown PDF data type:', typeof pdfObj.data);
+            }
+          } catch (err) {
+            console.error('Error processing fileId PDF:', err);
+          }
         }
-        
-        const pdfData = result.data.pdf;
+        else if (batch.fileId) {
+          // Fallback: load from original file API
+          const originalFileId = typeof batch.fileId === 'object' ? batch.fileId._id : batch.fileId;
+          console.log('📄 Loading PDF from original file API:', originalFileId);
+          
+          try {
+            const originalResult = await filesApi.files.getWithPdf(originalFileId);
+            if (!hasApiError(originalResult)) {
+              const originalData = extractApiData(originalResult);
+              if (originalData?.pdf) {
+                pdfData = originalData.pdf;
+                console.log('📄 Using original file PDF from API');
+              } else {
+                console.warn('📄 Original file API returned no PDF data');
+              }
+            } else {
+              console.error('📄 Original file API error:', handleApiError(originalResult));
+            }
+          } catch (err) {
+            console.error('Failed to load original file PDF:', err);
+          }
+        }
         
         if (!pdfData) {
-          console.error('📄 Page: No PDF data in response. Full response:', result);
-          throw new Error('No PDF data found in file - check server logs for file service errors');
+          // FIXED: More detailed error logging
+          console.error('📄 No PDF data found anywhere. Full batch analysis:', {
+            batchId: batch._id,
+            hasSignedPdf: !!batch.signedPdf,
+            signedPdfKeys: batch.signedPdf ? Object.keys(batch.signedPdf) : [],
+            hasPdf: !!batch.pdf,
+            hasFileId: !!batch.fileId,
+            fileIdType: typeof batch.fileId,
+            fileIdKeys: batch.fileId && typeof batch.fileId === 'object' ? Object.keys(batch.fileId) : [],
+            fileIdPdfExists: !!(batch.fileId?.pdf),
+            allBatchKeys: Object.keys(batch)
+          });
+          throw new Error(`No PDF data found for this batch. The batch exists but contains no accessible PDF data.`);
         }
         
-        // Verify PDF data format
-        if (typeof pdfData !== 'string' || !pdfData.startsWith('data:')) {
-          console.error('📄 Page: Invalid PDF data format:', { type: typeof pdfData, starts: pdfData?.substring(0, 20) });
+        // Validate PDF data format
+        if (typeof pdfData !== 'string') {
+          console.error('📄 PDF data is not a string:', typeof pdfData);
+          throw new Error('PDF data is not in the correct format');
+        }
+        
+        if (!pdfData.startsWith('data:')) {
+          console.error('📄 PDF data does not start with data URL format:', pdfData.substring(0, 50));
           throw new Error('PDF data is not in the correct base64 data URL format');
         }
         
-        // The file service should have already converted PDF to base64 data URL format
         const docData = { 
-          ...result.data, 
+          ...batch, 
           pdf: pdfData,
-          isBatch: false,
-          fileName: result.data.fileName || file.fileName || 'Untitled File'
+          isBatch: true,
+          originalFileId: typeof batch.fileId === 'object' ? batch.fileId._id : batch.fileId,
+          // Don't pass overlays if we have a baked PDF
+          overlays: batch.signedPdf?.data ? null : (batch.overlays || null),
+          // Ensure we have a fileName for display
+          fileName: batch.fileId?.fileName || file.fileName || `Batch Run ${batch.runNumber}`,
+          runNumber: batch.runNumber
         };
         
-        console.log('✅ Page: Original file loaded successfully with PDF data');
+        console.log('✅ Page: Batch loaded successfully with PDF data');
         setCurrentDoc(docData);
+      } else {
+        throw new Error('No batch data returned from API');
       }
       
-    } catch (error) {
-      console.error('❌ Page: Failed to open file:', error);
-      setError(`Failed to open file: ${error.message}`);
-      // Don't throw - just show error message
+    } else if (file.isArchived) {
+      // This is an archived file
+      console.log('🗄️ Page: Opening archived file:', file._id);
+      throw new Error('Archived file support not yet implemented');
+      
+    } else {
+      // This is an original file
+      console.log('📄 Page: Opening original file:', file._id);
+      
+      // DEBUG: Test the raw API first
+      const rawResponse = await fetch(`/api/files?id=${file._id}&action=with-pdf`);
+      const rawData = await rawResponse.json();
+      console.log('📡 RAW API Response for original file:', rawData);
+      console.log('📡 RAW API has PDF:', !!rawData.data?.pdf);
+      
+      // DEBUG: Test the low-level apiClient call directly
+      console.log('🔍 Testing low-level apiClient call...');
+      const { apiClient } = await import('@/app/api');
+      const lowLevelResult = await apiClient('files').get(file._id, { action: 'with-pdf' });
+      console.log('📡 Low-level apiClient result:', lowLevelResult);
+      console.log('📡 Low-level has PDF:', !!lowLevelResult.data?.pdf);
+      
+      // Now test the wrapper with debug enabled
+      const result = await filesApi.files.getWithPdf(file._id);
+      
+      console.log('📄 Page: Original file API result:', result);
+      
+      if (hasApiError(result)) {
+        throw new Error('Failed to load file: ' + handleApiError(result));
+      }
+      
+      const fileData = extractApiData(result);
+      
+      // DEBUG: Let's see what extractApiData is doing
+      console.log('🔍 DEBUG extractApiData:', {
+        resultData: result.data,
+        extractedData: fileData,
+        resultDataPdf: result.data?.pdf,
+        extractedDataPdf: fileData?.pdf,
+        resultKeys: result.data ? Object.keys(result.data) : [],
+        extractedKeys: fileData ? Object.keys(fileData) : []
+      });
+      
+      if (!fileData) {
+        throw new Error('No data returned from file API');
+      }
+      
+      const pdfData = fileData.pdf;
+      
+      if (!pdfData) {
+        console.error('📄 Page: No PDF data in original file response. Full response:', {
+          fileId: fileData._id,
+          fileName: fileData.fileName,
+          keys: Object.keys(fileData),
+          hasPdf: !!fileData.pdf,
+          pdfType: typeof fileData.pdf
+        });
+        throw new Error('No PDF data found in original file - check that the file was uploaded correctly');
+      }
+      
+      // Validate PDF data format
+      if (typeof pdfData !== 'string' || !pdfData.startsWith('data:')) {
+        console.error('📄 Page: Invalid PDF data format in original file:', { 
+          type: typeof pdfData, 
+          starts: pdfData?.substring(0, 20) 
+        });
+        throw new Error('PDF data is not in the correct base64 data URL format');
+      }
+      
+      const docData = { 
+        ...fileData, 
+        pdf: pdfData,
+        isBatch: false,
+        fileName: fileData.fileName || file.fileName || 'Untitled File'
+      };
+      
+      console.log('✅ Page: Original file loaded successfully with PDF data');
+      setCurrentDoc(docData);
     }
-  }, []);
+    
+  } catch (error) {
+    console.error('❌ Page: Failed to open file:', error);
+    setError(`Failed to open file: ${error.message}`);
+    // Don't throw - just show error message
+  }
+}, []);
 
   // === DRAWER HANDLERS ===
   const handleToggleDrawer = useCallback(() => setDrawer(true), []);

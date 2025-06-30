@@ -1,25 +1,18 @@
-// app/files/components/FileProperties/hooks/core.js
+// app/(pages)/files/components/FileProperties/hooks/core.js - FIXED: API integration
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { filesApi } from '../../../lib/api';
+import { filesApi, hasApiError, extractApiData, handleApiError } from '../../../lib/api';
 
 /**
- * FileProperties Core Hook
+ * FileProperties Core Hook - FIXED
  * 
- * Pure state and data logic for file properties management:
- * - File metadata management
- * - Component management (chemicals/solutions)
- * - NetSuite BOM import functionality
- * - Search and autocomplete logic
- * - Save operations and validation
- * - File deletion workflow
+ * Fixed to use the standardized API client and handle the new response format
  */
 export function useCore(props) {
   const { file, onSaved, onFileDeleted, readOnly = false } = props;
 
   // === CORE FILE STATE ===
-  // Always call hooks first, regardless of file state
   const [fileName, setFileName] = useState('');
   const [description, setDescription] = useState('');
   const [recipeQty, setRecipeQty] = useState('');
@@ -72,7 +65,7 @@ export function useCore(props) {
     return fileName?.trim()?.length > 0 && file?._id;
   }, [fileName, file?._id]);
 
-  // === COMPONENT SEARCH ===
+  // === COMPONENT SEARCH - FIXED ===
   const searchComponents = useCallback(async (query) => {
     if (!query || query.length < 2) {
       setSearchResults([]);
@@ -82,10 +75,13 @@ export function useCore(props) {
     setIsSearching(true);
     try {
       const result = await filesApi.items.search(query);
-      if (!result?.error) {
-        setSearchResults(result?.data || []);
-      } else {
+      
+      if (hasApiError(result)) {
+        console.error('Error searching components:', handleApiError(result));
         setSearchResults([]);
+      } else {
+        const items = extractApiData(result, []);
+        setSearchResults(Array.isArray(items) ? items : []);
       }
     } catch (error) {
       console.error('Error searching components:', error);
@@ -104,7 +100,7 @@ export function useCore(props) {
     }, 300);
   }, [searchComponents]);
 
-  // === SOLUTION SEARCH ===
+  // === SOLUTION SEARCH - FIXED ===
   const searchSolutions = useCallback(async (query) => {
     if (!query || query.length < 2) {
       setSolutionResults([]);
@@ -114,10 +110,13 @@ export function useCore(props) {
     setIsSearchingSolutions(true);
     try {
       const result = await filesApi.items.searchSolutions(query);
-      if (!result?.error) {
-        setSolutionResults(result?.data || []);
-      } else {
+      
+      if (hasApiError(result)) {
+        console.error('Error searching solutions:', handleApiError(result));
         setSolutionResults([]);
+      } else {
+        const items = extractApiData(result, []);
+        setSolutionResults(Array.isArray(items) ? items : []);
       }
     } catch (error) {
       console.error('Error searching solutions:', error);
@@ -264,7 +263,7 @@ export function useCore(props) {
     }
   }, [canEdit, file?._id]);
 
-  // === SAVE OPERATIONS WITH DEFENSIVE CHECKS ===
+  // === SAVE OPERATIONS WITH DEFENSIVE CHECKS - FIXED ===
   const save = useCallback(async () => {
     if (!isValid || !canEdit || !file?._id) {
       console.warn('Cannot save: invalid state or missing file ID');
@@ -293,12 +292,13 @@ export function useCore(props) {
 
       const result = await filesApi.files.updateMeta(file._id, updateData);
       
-      if (result?.error) {
-        throw new Error(result.error);
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
 
       setHasChanges(false);
-      onSaved?.(result?.data);
+      const updatedFile = extractApiData(result);
+      onSaved?.(updatedFile);
     } catch (error) {
       console.error('Error saving file:', error);
       setError(error?.message || 'Failed to save file');
@@ -311,7 +311,7 @@ export function useCore(props) {
     components, solutionRef, selectedSolution, file?._id, onSaved
   ]);
 
-  // === DELETE OPERATIONS WITH NULL SAFETY ===
+  // === DELETE OPERATIONS WITH NULL SAFETY - FIXED ===
   const deleteFile = useCallback(async () => {
     if (!file?._id || readOnly) {
       console.warn('Cannot delete: missing file ID or read-only mode');
@@ -324,14 +324,14 @@ export function useCore(props) {
     try {
       // Validate deletion is allowed
       const validation = await filesApi.validation.validateFolderDelete(file._id);
-      if (validation?.error) {
-        throw new Error(validation.error);
+      if (hasApiError(validation)) {
+        throw new Error(handleApiError(validation));
       }
 
       // Perform deletion
       const result = await filesApi.files.remove(file._id);
-      if (result?.error) {
-        throw new Error(result.error);
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
 
       onFileDeleted?.(file);
@@ -414,7 +414,6 @@ export function useCore(props) {
   }, []);
 
   // === CONDITIONAL RETURN LOGIC ===
-  // Now that all hooks are called, we can conditionally return different values
   if (!file) {
     return {
       // Return a safe default state when no file is provided
