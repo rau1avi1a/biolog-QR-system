@@ -1,10 +1,10 @@
-// app/(pages)/files/components/FileNavigator/hooks/core.js - FINAL FIX
+// app/(pages)/files/components/FileNavigator/hooks/core.js - SEARCH FIX
 
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { filesApi, hasApiError, extractApiData, handleApiError } from '../../../lib/api';
+import { api, hasError, extractData, extractList, getError } from '@/app/apiClient'; // Using your standardized API client
 
 export function useCore(props) {
   const {
@@ -53,28 +53,22 @@ export function useCore(props) {
   const searchTimerRef = useRef(null);
   const blurTimerRef = useRef(null);
 
-  /* ── STATUS TAB QUERIES - FINAL FIX ─────────────────────────── */
+  /* ── STATUS TAB QUERIES ─────────────────────────────────────── */
   const statuses = ['In Progress', 'Review'];
   const statusQueries = useQueries({
     queries: statuses.map(status => ({
       queryKey: ['filesByStatus', status, refreshTrigger],
       queryFn: async () => {
         try {
-          console.log(`🔍 Loading ${status} files...`);
-          const result = await filesApi.workflow.getFilesByStatus(status);
+          console.log(`🔍 Loading ${status} batches...`);
+          const result = await api.list.batchesByStatus(status);
           
-          console.log(`📊 ${status} files result:`, result);
-          
-          // FINAL FIX: Handle the new API response format properly
-          if (hasApiError(result)) {
-            console.error(`❌ Error loading ${status} files:`, handleApiError(result));
+          if (hasError(result)) {
+            console.error(`❌ Error loading ${status} batches:`, getError(result));
             return [];
           }
           
-          // Extract the full data object first, then get the batches array
-          const fullData = extractApiData(result, { batches: [] });
-          const batches = fullData.batches || [];
-          
+          const batches = extractList(result, 'batches', []);
           console.log(`📦 ${status} batches extracted:`, batches.length);
           
           // Transform batches to have proper fileName for display
@@ -86,7 +80,7 @@ export function useCore(props) {
                      'Untitled'
           }));
         } catch (error) {
-          console.error(`💥 Failed to load ${status} files:`, error);
+          console.error(`💥 Failed to load ${status} batches:`, error);
           return [];
         }
       },
@@ -111,7 +105,7 @@ export function useCore(props) {
     }
   };
 
-  /* ── ARCHIVE TAB QUERY - FINAL FIX ──────────────────────────── */
+  /* ── ARCHIVE TAB QUERY ──────────────────────────────────────── */
   const {
     data: archivedBatches = [],
     isFetching: archiveLoading,
@@ -120,20 +114,15 @@ export function useCore(props) {
     queryKey: ['archivedBatches', refreshTrigger],
     queryFn: async () => {
       try {
-        console.log('🔍 Loading archived files...');
-        const result = await filesApi.workflow.getFilesByStatus('Completed');
-        console.log('📚 Archive files result:', result);
+        console.log('🔍 Loading archived batches...');
+        const result = await api.list.batchesByStatus('Completed');
         
-        // FINAL FIX: Handle the new API response format properly
-        if (hasApiError(result)) {
-          console.error('❌ Error loading archived files:', handleApiError(result));
+        if (hasError(result)) {
+          console.error('❌ Error loading archived batches:', getError(result));
           return [];
         }
         
-        // Extract the full data object first, then get the batches array
-        const fullData = extractApiData(result, { batches: [] });
-        const batches = fullData.batches || [];
-        
+        const batches = extractList(result, 'batches', []);
         console.log('📦 Archive batches extracted:', batches.length);
         
         return batches.map(batch => ({
@@ -144,7 +133,7 @@ export function useCore(props) {
           isArchived: true
         }));
       } catch (error) {
-        console.error('💥 Failed to load archived files:', error);
+        console.error('💥 Failed to load archived batches:', error);
         return [];
       }
     },
@@ -201,7 +190,7 @@ export function useCore(props) {
     return currentArchiveFolder.children || [];
   }, [currentArchiveFolder, archiveStructure.folders]);
 
-  /* ── SEARCH OPERATIONS - FINAL FIX ──────────────────────────── */
+  /* ── SEARCH OPERATIONS - FIXED FOR FILES TAB ───────────────── */
   const performSearch = useCallback(async (query) => {
     if (!query?.trim()) {
       setSearchResults(null);
@@ -218,58 +207,59 @@ export function useCore(props) {
       console.log('🔍 Performing search for:', query, 'in view:', view);
       
       if (view === 'folders') {
-        // FINAL FIX: For Files tab, search original files using the standardized API
+        // FIXED: For Files tab, use dedicated searchFiles API to only get original files
         console.log('📄 Searching original files only...');
         
-        const result = await filesApi.files.search(query);
+        const result = await api.list.searchFiles(query);
         
-        console.log('🔍 Files API search result:', result);
+        console.log('🔍 Files search result:', result);
         
-        // FINAL FIX: Handle the new API response format properly
-        if (hasApiError(result)) {
-          console.error('❌ Search error:', handleApiError(result));
+        if (hasError(result)) {
+          console.error('❌ Search error:', getError(result));
           setSearchResults([]);
           return;
         }
         
-        // Extract the full data object first, then get the files array
-        const fullData = extractApiData(result, { files: [] });
-        const files = fullData.files || [];
+        // Extract files array using the helper function
+        const files = extractList(result, 'files', []);
         
         console.log('📄 Search files extracted:', files.length);
         
-        // Filter to ensure only original files (no batches)
+        // Additional filtering to ensure only original files (not batches)
         const originalFilesOnly = files.filter(file => {
           const isOriginalFile = !file.isBatch && 
                                 !file.runNumber && 
                                 !file.status && 
                                 !file.sourceType && 
-                                !file.batchId;
+                                !file.batchId &&
+                                file.fileName; // Must have a fileName
           return isOriginalFile;
         });
         
         console.log('✅ Filtered to original files only:', originalFilesOnly.length, 'out of', files.length);
         setSearchResults(originalFilesOnly);
         
-      } else {
-        // For Status and Archive tabs, search batches
-        const result = await filesApi.files.search(query);
+      } else if (view === 'status') {
+        // For Status tab, search within batches of specific statuses
+        console.log('📊 Searching status batches...');
         
-        console.log('🔍 Search result:', result);
+        const result = await api.list.searchFiles(query);
         
-        // FINAL FIX: Handle the new API response format properly
-        if (hasApiError(result)) {
-          console.error('❌ Search error:', handleApiError(result));
+        if (hasError(result)) {
+          console.error('❌ Search error:', getError(result));
           setSearchResults([]);
           return;
         }
         
-        // Extract the full data object first, then get the files array
-        const fullData = extractApiData(result, { files: [] });
-        const allResults = fullData.files || [];
+        const allResults = extractList(result, 'files', []);
+        
+        // Filter to only batches with In Progress or Review status
+        const statusBatches = allResults.filter(file => 
+          file.status && ['In Progress', 'Review'].includes(file.status)
+        );
         
         // Ensure all search results have proper fileName for display
-        const enrichedResults = allResults.map(file => ({
+        const enrichedResults = statusBatches.map(file => ({
           ...file,
           fileName: file.fileName || 
                    (file.fileId?.fileName ? `${file.fileId.fileName.replace('.pdf', '')}-Run-${file.runNumber}.pdf` : null) ||
@@ -277,7 +267,37 @@ export function useCore(props) {
                    'Untitled'
         }));
         
-        console.log('✅ Search completed:', enrichedResults.length, 'results');
+        console.log('✅ Status search completed:', enrichedResults.length, 'results');
+        setSearchResults(enrichedResults);
+        
+      } else if (view === 'archive') {
+        // For Archive tab, search within completed batches
+        console.log('📚 Searching archive batches...');
+        
+        const result = await api.list.searchFiles(query);
+        
+        if (hasError(result)) {
+          console.error('❌ Search error:', getError(result));
+          setSearchResults([]);
+          return;
+        }
+        
+        const allResults = extractList(result, 'files', []);
+        
+        // Filter to only completed/archived batches
+        const archivedBatches = allResults.filter(file => 
+          file.status === 'Completed' || file.isArchived
+        );
+        
+        // Ensure all search results have proper fileName for display
+        const enrichedResults = archivedBatches.map(file => ({
+          ...file,
+          fileName: file.fileName || 
+                   `Batch Run ${file.runNumber}` ||
+                   'Archived File'
+        }));
+        
+        console.log('✅ Archive search completed:', enrichedResults.length, 'results');
         setSearchResults(enrichedResults);
       }
       
@@ -370,44 +390,42 @@ export function useCore(props) {
   /* ── FILE STATUS OPERATIONS ─────────────────────────────────── */
   const changeFileStatus = useCallback(async (fileId, status) => {
     try {
-      const result = await filesApi.batches.updateStatus(fileId, status);
-      if (hasApiError(result)) {
-        throw new Error(handleApiError(result));
+      const result = await api.update.batchStatus(fileId, status);
+      if (hasError(result)) {
+        throw new Error(getError(result));
       }
     } catch (error) {
       console.error('Failed to update file status:', error);
     }
   }, []);
 
-  /* ── FOLDER TREE OPERATIONS - FINAL FIX ─────────────────────── */
+  /* ── FOLDER TREE OPERATIONS ─────────────────────────────────── */
   const loadFolderChildren = useCallback(async (folderId) => {
     try {
       console.log('🔍 Loading children for folder:', folderId);
       
       // Load both subfolders and files for this folder
       const [foldersResult, filesResult] = await Promise.all([
-        filesApi.folders.list(folderId),
-        filesApi.files.list(folderId)
+        api.list.folders(folderId),
+        api.list.files(folderId)
       ]);
       
       console.log('📁 Folder children result:', { foldersResult, filesResult });
       
-      // FINAL FIX: Handle folders result with new API format
+      // Handle folders result
       let folders = [];
-      if (hasApiError(foldersResult)) {
-        console.error('❌ Error loading subfolders:', handleApiError(foldersResult));
+      if (hasError(foldersResult)) {
+        console.error('❌ Error loading subfolders:', getError(foldersResult));
       } else {
-        const fullData = extractApiData(foldersResult, { folders: [] });
-        folders = fullData.folders || [];
+        folders = extractList(foldersResult, 'folders', []);
       }
       
-      // FINAL FIX: Handle files result with new API format - Filter to only original files
+      // Handle files result - Filter to only original files
       let files = [];
-      if (hasApiError(filesResult)) {
-        console.error('❌ Error loading folder files:', handleApiError(filesResult));
+      if (hasError(filesResult)) {
+        console.error('❌ Error loading folder files:', getError(filesResult));
       } else {
-        const fullData = extractApiData(filesResult, { files: [] });
-        const allFiles = fullData.files || [];
+        const allFiles = extractList(filesResult, 'files', []);
         // Filter to only include original files (not batches)
         files = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
       }
@@ -427,7 +445,9 @@ export function useCore(props) {
     console.log('🧭 Navigating to folder:', folder?.name || 'root');
     setCurrentFolder(folder);
     setSearch?.(null);
-  }, [setCurrentFolder, setSearch]);
+    // Clear search when navigating
+    clearSearch();
+  }, [setCurrentFolder, setSearch, clearSearch]);
 
   const navigateToArchiveFolder = useCallback((folder) => {
     setCurrentArchiveFolder(folder);
@@ -447,9 +467,13 @@ export function useCore(props) {
     };
   }, []);
 
-  // Handle search query changes
+  // Handle search query changes with debouncing
   useEffect(() => {
-    debouncedSearch(searchQuery);
+    if (searchQuery.trim()) {
+      debouncedSearch(searchQuery);
+    } else {
+      setSearchResults(null);
+    }
   }, [searchQuery, debouncedSearch]);
 
   // Update external search state when internal search results change

@@ -578,3 +578,63 @@ export async function DELETE(request) {
     }, { status: 500 });
   }
 }
+
+export async function PUT(request) {
+  try {
+    const body = await request.json();
+    const { id, ...updateData } = body;
+    
+    if (!id) {
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'File ID required in request body'
+      }, { status: 400 });
+    }
+
+    // Get authenticated user
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ 
+        success: false,
+        data: null,
+        error: 'Unauthorized'
+      }, { status: 401 });
+    }
+
+    await db.connect();
+
+    // Check if file exists
+    const existingFile = await db.services.fileService.getFileById(id);
+    if (!existingFile) {
+      return NextResponse.json({ 
+        success: false, 
+        data: null,
+        error: 'File not found'
+      }, { status: 404 });
+    }
+
+    console.log('🔄 API: Updating file:', id, 'with data:', updateData);
+
+    // Update file metadata using your service
+    const updatedFile = await db.services.fileService.updateFileMeta(id, updateData);
+    
+    console.log('✅ API: File updated successfully');
+    console.log('🔗 API: Returned file has solution:', !!updatedFile?.solution);
+    
+    return NextResponse.json({ 
+      success: true, 
+      data: updatedFile,
+      error: null,
+      message: 'File metadata updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('💥 PUT files error:', error);
+    return NextResponse.json({ 
+      success: false, 
+      data: null,
+      error: 'Internal server error: ' + error.message
+    }, { status: 500 });
+  }
+}

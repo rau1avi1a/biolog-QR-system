@@ -185,23 +185,56 @@ class FileService extends CoreService {
 
   async updateFileMeta(id, payload = {}) {
     await this.connect();
-
+  
+    console.log('📝 FileService: Updating file metadata:', id, payload);
+  
     const $set = {
+      // FIXED: Include fileName in updates
+      fileName: payload.fileName ?? undefined,
       description: payload.description ?? '',
       productRef: payload.productRef ?? null,
-      solutionRef: payload.solutionRef ?? null,
       recipeQty: payload.recipeQty ?? null,
       recipeUnit: payload.recipeUnit ?? null,
     };
-
+  
+    // FIXED: Handle solutionRef properly - convert to ObjectId if needed
+    if (payload.solutionRef !== undefined) {
+      if (payload.solutionRef === null || payload.solutionRef === '') {
+        $set.solutionRef = null;
+      } else if (typeof payload.solutionRef === 'string') {
+        // Ensure it's a valid ObjectId
+        if (mongoose.Types.ObjectId.isValid(payload.solutionRef)) {
+          $set.solutionRef = new mongoose.Types.ObjectId(payload.solutionRef);
+        } else {
+          console.error('Invalid ObjectId for solutionRef:', payload.solutionRef);
+          $set.solutionRef = null;
+        }
+      } else if (payload.solutionRef && payload.solutionRef._id) {
+        // If it's an object with _id, extract the ID
+        $set.solutionRef = new mongoose.Types.ObjectId(payload.solutionRef._id);
+      }
+    }
+  
+    // Remove undefined values to avoid overwriting with undefined
+    Object.keys($set).forEach(key => {
+      if ($set[key] === undefined) {
+        delete $set[key];
+      }
+    });
+  
     // Handle components with NetSuite data
     if (Array.isArray(payload.components)) {
       $set.components = payload.components.map(c => {
         const component = {
-          itemId: c.itemId,
-          amount: Number(c.amount),
+          itemId: c.itemId || c.item, // Handle both itemId and item fields
+          amount: Number(c.amount || c.qty || 0),
           unit: c.unit || 'g'
         };
+        
+        // FIXED: Also handle qty field for amount
+        if (c.qty !== undefined) {
+          component.amount = Number(c.qty);
+        }
         
         if (c.netsuiteData) {
           component.netsuiteData = {
@@ -221,7 +254,7 @@ class FileService extends CoreService {
         return component;
       });
     }
-
+  
     // Handle NetSuite import metadata
     if (payload.netsuiteImportData) {
       $set.netsuiteImportData = {
@@ -234,9 +267,43 @@ class FileService extends CoreService {
         lastSyncAt: new Date()
       };
     }
-
-    await this.File.findByIdAndUpdate(id, $set, { runValidators: true });
-    return this.getFileById(id);
+  
+    console.log('📝 FileService: Final update object:', $set);
+  
+    // FIXED: Update and get the populated result in one operation
+    const updatedFile = await this.File.findByIdAndUpdate(
+      id, 
+      $set, 
+      { 
+        new: true, // Return the updated document
+        runValidators: true 
+      }
+    )
+    .populate('productRef', 'displayName sku netsuiteInternalId itemType')
+    .populate('solutionRef', 'displayName sku netsuiteInternalId itemType') // FIXED: Populate solutionRef
+    .populate('components.itemId', 'displayName sku netsuiteInternalId itemType')
+    .lean();
+  
+    if (!updatedFile) {
+      throw new Error('File not found');
+    }
+  
+    console.log('✅ FileService: File updated successfully');
+    console.log('🔗 FileService: Solution populated:', !!updatedFile.solutionRef);
+  
+    // FIXED: Add solution field for frontend compatibility
+    const result = { ...updatedFile };
+    
+    // If solutionRef was populated, also set it as 'solution' field
+    if (result.solutionRef && typeof result.solutionRef === 'object' && result.solutionRef._id) {
+      result.solution = result.solutionRef;
+      console.log('✅ FileService: Added solution field for frontend:', result.solution.displayName);
+    }
+  
+    // Remove PDF data from response (metadata updates shouldn't include PDF)
+    delete result.pdf;
+  
+    return result;
   }
 
   async updateFileStatus(id, status) {
