@@ -2,6 +2,7 @@
 import { createNetSuiteAuth } from './auth.service.js';
 import { createBOMService } from './bom.service.js';
 import db from '@/db/index.js';
+import { getNetSuiteUnitId, isValidNetSuiteUnit } from '@/db/lib/netsuite-units.js';
 
 /**
  * NetSuite Work Order Service

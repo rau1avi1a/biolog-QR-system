@@ -151,47 +151,103 @@ export function useCore(props) {
     if (!file?._id || !selectedSolution?.netsuiteInternalId) return;
     setIsImportingBOM(true);
     setError(null);
-
+  
     try {
+      // Use your existing working API call
       const result = await filesApi.netsuite.importBOMWorkflow(
         file._id,
         selectedSolution.netsuiteInternalId
       );
       if (hasApiError(result)) throw new Error(handleApiError(result));
-
+  
       // pull updated file + mappingResults
       const { file: updatedFile, mappingResults } = extractApiData(result);
-
-      // build enriched components
+  
+      // FIXED: Don't map units again - they're already mapped by BOM service
       const enriched = mappingResults.map((mr, idx) => {
         const nsComp = mr.netsuiteComponent;
-        const local  = mr.bestMatch?.chemical || {};
+        const local = mr.bestMatch?.chemical || {};
+        
+        // Units are already mapped from '35' → 'mL' by the BOM service
+        // So nsComp.units is already 'mL', not '35'
+        console.log('🔧 Unit debug - already mapped:', {
+          componentName: nsComp.ingredient,
+          unitsFromBOMService: nsComp.units, // This should be 'mL'
+          typeof: typeof nsComp.units
+        });
+        
         return {
           id: nsComp.bomComponentId ?? `ns-${idx}`,
           item: local,
           itemId: local._id || nsComp.itemId,
           qty: String(nsComp.quantity ?? nsComp.bomQuantity ?? ''),
-          unit: mapNetSuiteUnit(nsComp.units),
+          unit: nsComp.units, // ← Use directly, already mapped to 'mL'
           amount: parseFloat(nsComp.quantity ?? nsComp.bomQuantity ?? 0),
-          netsuiteData: nsComp
+          netsuiteData: {
+            ...nsComp,
+            originalUnits: nsComp.units,
+            mappedUnit: nsComp.units
+          }
         };
       });
-
+  
+      // Prepare components for database update using your existing structure
+      const validComponents = enriched
+        .filter(c => {
+          const hasValidId = c?.itemId || c?.item?._id;
+          const hasValidQty = c?.qty || c?.amount;
+          return hasValidId && hasValidQty;
+        })
+        .map(c => ({
+          item: c.itemId || c.item?._id,  // Keep your existing field name structure
+          qty: c.qty || String(c.amount || 0),
+          unit: c.unit, // ← This should now be 'mL' from BOM service
+          amount: c.amount || parseFloat(c.qty) || 0,
+          netsuiteData: {
+            ...c.netsuiteData,
+            originalNetSuiteUnitId: c.netsuiteData?.originalUnits || c.netsuiteData?.units,
+            mappedUnitSymbol: c.unit
+          }
+        }));
+  
+      console.log('🔧 BOM Import - Final components with units:', validComponents.map(c => ({
+        itemId: c.item,
+        unit: c.unit, // This should show 'mL' not 'ea'
+        originalNetSuiteId: c.netsuiteData?.originalNetSuiteUnitId,
+        amount: c.amount
+      })));
+  
+      // Update the file using your existing API structure
+      const fileUpdateResult = await filesApi.files.updateMeta(file._id, {
+        recipeQty: 1,
+        recipeUnit: 'mL',
+        components: validComponents
+      });
+  
+      if (hasApiError(fileUpdateResult)) {
+        throw new Error(handleApiError(fileUpdateResult));
+      }
+  
+      const finalUpdatedFile = extractApiData(fileUpdateResult);
+  
+      // Update UI state
       setComponents(enriched);
       setRecipeQty('1');
       setRecipeUnit('mL');
       setHasChanges(false);
       setShowBOMImport(false);
-      onSaved?.(updatedFile);
-
+      onSaved?.(finalUpdatedFile);
+  
+      console.log('✅ BOM Import completed successfully with mapped units');
+  
     } catch (err) {
-      console.error(err);
+      console.error('❌ BOM Import failed:', err);
       setError(err.message || 'Error importing BOM');
     } finally {
       setIsImportingBOM(false);
     }
   }, [file, selectedSolution, onSaved]);
-
+  
   // save file
   const save = useCallback(async () => {
     if (!isValid || !canEdit || !file?._id) return;
@@ -293,26 +349,40 @@ export function useCore(props) {
     setSelectedSolution(sol);
     setSolutionRef(sol?._id || null);
 
-    // hydrate + map units
-    (async () => {
-      const hydrated = await Promise.all(
-        (file.components || []).map(async comp => {
-          const unitSym = mapNetSuiteUnit(comp.unit);
-          let localItem = null;
-          try {
-            const res = await filesApi.items.get(comp.itemId);
-            if (!hasApiError(res)) localItem = extractApiData(res);
-          } catch {}
-          return {
-            ...comp,
-            item: localItem,
-            unit: unitSym,
-            qty:  String(comp.amount || 0)
-          };
-        })
-      );
-      setComponents(hydrated);
-    })();
+(async () => {
+    const hydrated = await Promise.all(
+      (file.components || []).map(async comp => {
+        // FIXED: Only map if it's a NetSuite unit ID (numeric), not if it's already a symbol
+        let unitSym = comp.unit;
+        
+        // ADD THIS DEBUG LOG:
+        console.log('🔧 File reload unit mapping debug:', {
+          originalUnit: comp.unit,
+          isNumeric: /^\d+$/.test(comp.unit.toString()),
+          type: typeof comp.unit
+        });
+        
+        if (comp.unit && /^\d+$/.test(comp.unit.toString())) {
+          // It's a NetSuite ID like '35', map it to 'mL'
+          unitSym = mapNetSuiteUnit(comp.unit);
+          console.log('🔧 Mapped unit:', comp.unit, '→', unitSym);
+        }
+        
+        let localItem = null;
+        try {
+          const res = await filesApi.items.get(comp.itemId);
+          if (!hasApiError(res)) localItem = extractApiData(res);
+        } catch {}
+        return {
+          ...comp,
+          item: localItem,
+          unit: unitSym,
+          qty: String(comp.amount || 0)
+        };
+      })
+    );
+    setComponents(hydrated);
+  })();
 
     setHasChanges(false);
     setError(null);

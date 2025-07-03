@@ -526,74 +526,100 @@ export async function POST(request) {
         });
       }
 
-      case 'import': {
+
+    case 'import': {
         const { bomData, fileId, overwriteExisting = false } = body;
+
+        console.log('🔧 NetSuite import action called with components:', bomData.components?.map(c => ({
+            ingredient: c.ingredient,
+            units: c.units,
+            quantity: c.quantity
+          })));
+
+
         if (!bomData || !fileId) {
-          return NextResponse.json({
+        return NextResponse.json({
             success: false,
             data: null,
             error: 'BOM data and file ID are required'
-          }, { status: 400 });
+        }, { status: 400 });
         }
-
+    
+        // Import the unit mapping function
+        const { mapNetSuiteUnit } = await import('@/db/lib/netsuite-units.js');
+    
         // Map NetSuite components to local format
         const mappingResults = await db.netsuite.mapNetSuiteComponents(bomData.components || []);
         const components = mappingResults.map(result => {
-          const comp = result.netsuiteComponent;
-          const match = result.bestMatch;
-          return {
+        const comp = result.netsuiteComponent;
+        const match = result.bestMatch;
+
+        
+        
+        // FIXED: Map the NetSuite unit ID to symbol
+        const mappedUnit = mapNetSuiteUnit(comp.units);
+
+
+        console.log('🔧 Unit mapping in backend:', {
+            ingredient: comp.ingredient,
+            originalUnit: comp.units,
+            mappedUnit: mappedUnit
+
+        });
+        
+        return {
             itemId: match?.chemical?._id || null,
             amount: comp.quantity || comp.bomQuantity || 0,
-            unit: comp.units || 'ea',
+            unit: mappedUnit, // ← Now using mapped symbol (e.g., 'mL' instead of '35')
             netsuiteData: {
-              itemId: comp.itemId,
-              itemRefName: comp.itemRefName || comp.ingredient,
-              ingredient: comp.ingredient,
-              bomQuantity: comp.bomQuantity || comp.quantity,
-              componentYield: comp.componentYield || 100,
-              units: comp.units,
-              lineId: comp.lineId,
-              bomComponentId: comp.bomComponentId,
-              itemSource: comp.itemSource,
-              type: 'netsuite'
+            itemId: comp.itemId,
+            itemRefName: comp.itemRefName || comp.ingredient,
+            ingredient: comp.ingredient,
+            bomQuantity: comp.bomQuantity || comp.quantity,
+            componentYield: comp.componentYield || 100,
+            units: comp.units, // ← Keep original NetSuite ID for reference
+            mappedUnit: mappedUnit, // ← Store mapped symbol
+            lineId: comp.lineId,
+            bomComponentId: comp.bomComponentId,
+            itemSource: comp.itemSource,
+            type: 'netsuite'
             }
-          };
-        });
-
-        // ←─── HERE: also save recipeQty & recipeUnit ←───
-        const updateData = {
-          recipeQty:    1,     // per-mL basis
-          recipeUnit:   'mL',
-          components,
-          netsuiteImportData: {
-            bomId:              bomData.bomId,
-            bomName:            bomData.bomName,
-            revisionId:         bomData.revisionId,
-            revisionName:       bomData.revisionName,
-            importedAt:         new Date(),
-            solutionNetsuiteId: bomData.assemblyItemId,
-            lastSyncAt:         new Date()
-          }
         };
-
+        });
+    
+        const updateData = {
+        recipeQty: 1,
+        recipeUnit: 'mL',
+        components,
+        netsuiteImportData: {
+            bomId: bomData.bomId,
+            bomName: bomData.bomName,
+            revisionId: bomData.revisionId,
+            revisionName: bomData.revisionName,
+            importedAt: new Date(),
+            solutionNetsuiteId: bomData.assemblyItemId,
+            lastSyncAt: new Date()
+        }
+        };
+    
         const updatedFile = await db.services.fileService.updateFileMeta(fileId, updateData);
-
+    
         return NextResponse.json({
-          success: true,
-          data: {
-            file:           updatedFile,
+        success: true,
+        data: {
+            file: updatedFile,
             mappingResults,
             summary: {
-              totalComponents:   components.length,
-              mappedComponents:  components.filter(c => c.itemId).length,
-              unmappedComponents: components.filter(c => !c.itemId).length
+            totalComponents: components.length,
+            mappedComponents: components.filter(c => c.itemId).length,
+            unmappedComponents: components.filter(c => !c.itemId).length
             }
-          },
-          error:   null,
-          message: 'BOM imported successfully'
+        },
+        error: null,
+        message: 'BOM imported successfully'
         });
-      }
-      
+    }
+
 
       case 'sync': {
         const { itemId, netsuiteItemId } = body;
