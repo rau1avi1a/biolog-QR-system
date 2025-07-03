@@ -38,48 +38,100 @@ export function useComponentState(core, props) {
   // === WORK ORDER BADGE LOGIC ===
   const getWorkOrderBadgeProps = useCallback(() => {
     const workOrderInfo = core.workOrderInfo;
-    if (!workOrderInfo) return null;
-
-    // Use real-time status from core
-    const realTimeStatus = core.workOrderStatus?.status || workOrderInfo.status;
-    const realTimeNumber = core.workOrderStatus?.workOrderNumber || workOrderInfo.workOrderNumber;
-    const isRealTimeUpdating = core.workOrderLoading && core.workOrderStatus?.status === 'creating';
-
+    
+    console.log('🏷️ Building work order badge:', {
+      workOrderInfo,
+      isCreatingWorkOrder: core.isCreatingWorkOrder,
+      userInitiatedCreation: core.userInitiatedCreation,
+      workOrderStatus: core.workOrderStatus,
+      workOrderLoading: core.workOrderLoading
+    });
+  
+    if (!workOrderInfo && !core.isCreatingWorkOrder && !core.userInitiatedCreation) {
+      return null;
+    }
+  
+    // FIXED: Better status detection and display logic
     const getBadgeColor = () => {
-      if (workOrderInfo.isFailed) return 'bg-red-50 text-red-700 border-red-200';
-      if (realTimeStatus === 'creating' || isRealTimeUpdating) return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-      if (realTimeStatus === 'completed') return 'bg-green-50 text-green-700 border-green-200';
-      if (realTimeNumber && !realTimeNumber.startsWith('LOCAL-')) return 'bg-blue-50 text-blue-700 border-blue-200';
+      if (workOrderInfo?.isFailed) return 'bg-red-50 text-red-700 border-red-200';
+      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation) {
+        return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+      }
+      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
+        return workOrderInfo.isNetSuite ? 
+          'bg-blue-50 text-blue-700 border-blue-200' : 
+          'bg-green-50 text-green-700 border-green-200';
+      }
       return 'bg-gray-50 text-gray-700 border-gray-200';
     };
-
+  
     const getDisplayText = () => {
-      if (workOrderInfo.isFailed) return compact ? 'WO Failed' : 'Work Order Failed';
-      if (realTimeStatus === 'creating' || isRealTimeUpdating) {
-        return compact ? 'Creating...' : 'Creating Work Order...';
+      // FIXED: Show work order number when created
+      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber && !workOrderInfo?.isPending) {
+        const number = workOrderInfo.workOrderNumber;
+        return compact ? number : `WO: ${number}`;
       }
-      if (realTimeNumber && !realTimeNumber.startsWith('PENDING-') && !realTimeNumber.startsWith('LOCAL-')) {
-        return compact ? realTimeNumber : `WO: ${realTimeNumber}`;
+      
+      // Show creating status
+      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation || core.workOrderLoading) {
+        return compact ? 'Creating...' : 'Creating Work Order';
       }
+      
+      // Show failed status
+      if (workOrderInfo?.isFailed) {
+        return compact ? 'WO Failed' : 'Work Order Failed';
+      }
+      
+      // Fallback
       return compact ? 'WO' : 'Work Order';
     };
-
+  
     const getIcon = () => {
-      if (workOrderInfo.isFailed) return '❌';
-      if (realTimeStatus === 'creating' || isRealTimeUpdating) return '⏳';
-      if (realTimeNumber && !realTimeNumber.startsWith('LOCAL-') && !realTimeNumber.startsWith('PENDING-')) return '🔗';
-      if (realTimeNumber?.startsWith('LOCAL-')) return '📝';
+      if (workOrderInfo?.isFailed) return '❌';
+      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation || core.workOrderLoading) {
+        return '⏳';
+      }
+      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
+        return workOrderInfo.isNetSuite ? '🔗' : '📝';
+      }
       return '📋';
     };
-
+  
+    const getTitle = () => {
+      if (workOrderInfo?.isFailed) {
+        return `Work order creation failed: ${workOrderInfo.error || 'Unknown error'}`;
+      }
+      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation) {
+        return 'Work order is being created in NetSuite...';
+      }
+      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
+        return workOrderInfo.isNetSuite ? 
+          `NetSuite Work Order: ${workOrderInfo.workOrderNumber}` : 
+          `Local Work Order: ${workOrderInfo.workOrderNumber}`;
+      }
+      return 'Work Order';
+    };
+  
+    const isAnimating = workOrderInfo?.isPending || 
+                       core.isCreatingWorkOrder || 
+                       core.userInitiatedCreation || 
+                       core.workOrderLoading;
+  
     return {
       className: `text-xs flex items-center gap-1 shrink-0 ${getBadgeColor()} transition-colors duration-200`,
-      title: workOrderInfo.error || `Work Order: ${realTimeNumber || workOrderInfo.id}`,
-      isAnimating: isRealTimeUpdating,
+      title: getTitle(),
+      isAnimating: isAnimating,
       icon: getIcon(),
       text: getDisplayText()
     };
-  }, [core.workOrderInfo, core.workOrderStatus, core.workOrderLoading, compact]);
+  }, [
+    core.workOrderInfo, 
+    core.isCreatingWorkOrder, 
+    core.userInitiatedCreation,
+    core.workOrderStatus, 
+    core.workOrderLoading,
+    compact
+  ]);
 
   // === BUTTON CONFIGURATION LOGIC ===
   const getButtonConfig = useCallback(() => {
@@ -413,26 +465,64 @@ export function useComponentState(core, props) {
     }
   }, [core.save, shouldShowConfirmation]);
 
-  const handleSaveConfirm = useCallback(async (confirmationData) => {
+// In your state.js file, replace the handleSaveConfirm function with this:
+
+const handleSaveConfirm = useCallback(async (confirmationData) => {
     try {
       // Show loading for work order creation when confirm button is clicked
       if (saveAction === 'create_work_order') {
         core.setIsCreatingWorkOrder(true);
         core.setUserInitiatedCreation(true);
       }
-
+  
+      // Clean and sanitize the confirmation data to prevent circular references
+      const sanitizedConfirmationData = confirmationData ? {
+        // Only include serializable properties
+        reason: confirmationData.reason,
+        // Add any other specific properties you need from confirmationData
+        // but avoid passing the entire object which might contain DOM elements
+      } : {};
+  
       const finalConfirmationData = {
         batchQuantity: Number(batchQuantity),
         batchUnit: batchUnit,
         solutionLotNumber: solutionLotNumber.trim(),
         solutionQuantity: solutionQuantity ? Number(solutionQuantity) : null,
         solutionUnit: solutionUnit.trim() || 'L',
-        components: confirmedComponents,
-        scaledComponents: scaledComponents,
+        components: confirmedComponents.map(comp => ({
+          // Sanitize component data to ensure no circular references
+          itemId: typeof comp.itemId === 'object' ? comp.itemId._id : comp.itemId,
+          amount: comp.amount,
+          scaledAmount: comp.scaledAmount,
+          originalAmount: comp.originalAmount,
+          plannedAmount: comp.plannedAmount,
+          actualAmount: comp.actualAmount,
+          lotNumber: comp.lotNumber,
+          lotId: comp.lotId,
+          displayName: comp.displayName,
+          sku: comp.sku,
+          unit: comp.unit
+        })),
+        scaledComponents: scaledComponents.map(comp => ({
+          // Same sanitization for scaled components
+          itemId: typeof comp.itemId === 'object' ? comp.itemId._id : comp.itemId,
+          amount: comp.amount,
+          scaledAmount: comp.scaledAmount,
+          originalAmount: comp.originalAmount,
+          plannedAmount: comp.plannedAmount,
+          actualAmount: comp.actualAmount,
+          lotNumber: comp.lotNumber,
+          lotId: comp.lotId,
+          displayName: comp.displayName,
+          sku: comp.sku,
+          unit: comp.unit
+        })),
         action: saveAction,
-        ...confirmationData
+        ...sanitizedConfirmationData
       };
-
+  
+      console.log('🔍 Final confirmation data:', finalConfirmationData);
+  
       await core.save(saveAction, finalConfirmationData);
       setShowSaveDialog(false);
       refreshFiles?.();
@@ -443,6 +533,7 @@ export function useComponentState(core, props) {
         }
       }, 200);
     } catch (error) {
+      console.error('❌ Save confirm error:', error);
       // Error handling
       if (saveAction === 'create_work_order') {
         core.setUserInitiatedCreation(false);
@@ -561,8 +652,8 @@ export function useComponentState(core, props) {
   // === WORKFLOW INDICATORS ===
   const getWorkflowIndicators = useCallback(() => {
     const indicators = [];
-
-    // Work order badge
+  
+    // Work order badge - FIXED: Always show if there's work order info or creation in progress
     const workOrderBadge = getWorkOrderBadgeProps();
     if (workOrderBadge) {
       indicators.push({
@@ -570,9 +661,9 @@ export function useComponentState(core, props) {
         ...workOrderBadge
       });
     }
-
-    // Read-only indicator for original files
-    if (core.isOriginal) {
+  
+    // Read-only indicator for original files (only if no work order badge)
+    if (core.isOriginal && !workOrderBadge) {
       indicators.push({
         type: 'read_only',
         className: 'text-xs bg-orange-50 text-orange-700 flex items-center gap-1 shrink-0',
@@ -580,7 +671,7 @@ export function useComponentState(core, props) {
         text: compact ? 'Read Only' : 'Read Only'
       });
     }
-
+  
     // Rejection indicator
     if (doc.wasRejected && !compact) {
       indicators.push({
@@ -590,7 +681,7 @@ export function useComponentState(core, props) {
         text: 'Rejected'
       });
     }
-
+  
     // Completion indicator
     if (core.isCompleted || core.isArchived) {
       indicators.push({
@@ -600,10 +691,19 @@ export function useComponentState(core, props) {
         text: compact ? (core.isArchived ? 'Arc' : 'Done') : (core.isArchived ? 'Archived' : 'Completed')
       });
     }
-
+  
+    console.log('🏷️ Final workflow indicators:', indicators);
+  
     return indicators;
-  }, [getWorkOrderBadgeProps, core.isOriginal, core.isCompleted, core.isArchived, doc.wasRejected, compact]);
-
+  }, [
+    getWorkOrderBadgeProps, 
+    core.isOriginal, 
+    core.isCompleted, 
+    core.isArchived, 
+    doc.wasRejected, 
+    compact
+  ]);
+  
   // === HEADER CONFIG ===
   const getHeaderConfig = useCallback(() => {
     return {
