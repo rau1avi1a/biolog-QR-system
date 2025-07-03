@@ -216,39 +216,170 @@ export async function GET(request) {
       }
 
       case 'workorder': {
-        const workOrderId = searchParams.get('id');
-        const status = searchParams.get('status');
-        const assemblyItem = searchParams.get('assemblyItem');
-        const limit = searchParams.get('limit');
-        
-        const workOrderService = await db.netsuite.createWorkOrderService(user);
-
-        if (workOrderId) {
-          const workOrder = await workOrderService.getWorkOrderStatus(workOrderId);
+        const { 
+          batchId, 
+          assemblyItemId, 
+          quantity, 
+          startDate, 
+          endDate,
+          location,
+          subsidiary,
+          department 
+        } = body;
+      
+        if (!quantity || quantity <= 0) {
           return NextResponse.json({
-            success: true,
-            data: workOrder,
-            error: null
+            success: false,
+            data: null,
+            error: 'Quantity is required and must be greater than 0'
+          }, { status: 400 });
+        }
+      
+        const workOrderService = await db.netsuite.createWorkOrderService(user);
+        let result;
+      
+        if (batchId) {
+          console.log('🔍 Creating work order for batch:', batchId);
+          
+          // Get the batch with full population
+          const batch = await db.services.batchService.getBatchById(batchId);
+          if (!batch) {
+            return NextResponse.json({
+              success: false,
+              data: null,
+              error: 'Batch not found'
+            }, { status: 404 });
+          }
+      
+          // DEBUG: Log the batch data
+          console.log('📋 Batch debug info:', {
+            id: batch._id,
+            fileId: batch.fileId?._id,
+            hasSnapshot: !!batch.snapshot,
+            snapshotEnabled: batch.snapshot?.enabled,
+            hasSolutionRef: !!batch.snapshot?.solutionRef,
+            solutionRefType: typeof batch.snapshot?.solutionRef,
+            solutionRefId: batch.snapshot?.solutionRef?._id || batch.snapshot?.solutionRef,
+            solutionRefDisplayName: batch.snapshot?.solutionRef?.displayName,
+            solutionRefNetsuiteId: batch.snapshot?.solutionRef?.netsuiteInternalId,
+            hasComponents: batch.snapshot?.components?.length > 0,
+            componentCount: batch.snapshot?.components?.length || 0
+          });
+      
+          // Check if we have the required data
+          if (!batch.snapshot) {
+            return NextResponse.json({
+              success: false,
+              data: null,
+              error: 'Batch snapshot not found - batch may not be properly configured'
+            }, { status: 400 });
+          }
+      
+          if (!batch.snapshot.solutionRef) {
+            return NextResponse.json({
+              success: false,
+              data: null,
+              error: 'Solution reference not found in batch snapshot - please configure the solution for this recipe'
+            }, { status: 400 });
+          }
+      
+          // Check if the solution has NetSuite ID
+          const solutionRef = batch.snapshot.solutionRef;
+          const netsuiteId = solutionRef?.netsuiteInternalId || solutionRef?.netsuiteId;
+          
+          if (!netsuiteId) {
+            console.log('❌ Solution missing NetSuite ID:', {
+              solutionId: solutionRef._id || solutionRef,
+              displayName: solutionRef.displayName,
+              sku: solutionRef.sku
+            });
+            
+            return NextResponse.json({
+              success: false,
+              data: null,
+              error: `Solution "${solutionRef.displayName || solutionRef.sku || 'Unknown'}" does not have a NetSuite Internal ID configured`
+            }, { status: 400 });
+          }
+      
+          console.log('✅ Solution validation passed:', {
+            solutionId: solutionRef._id || solutionRef,
+            displayName: solutionRef.displayName,
+            netsuiteId: netsuiteId
+          });
+      
+          try {
+            result = await workOrderService.createWorkOrderFromBatch(batch, quantity, {
+              startDate,
+              endDate,
+              location,
+              subsidiary,
+              department
+            });
+      
+            // Update batch with work order info
+            await db.services.batchService.updateBatch(batchId, {
+              workOrderId: result.workOrder.tranId || result.workOrder.id,
+              workOrderCreated: true,
+              workOrderCreatedAt: new Date(),
+              workOrderStatus: 'created',
+              netsuiteWorkOrderData: {
+                workOrderId: result.workOrder.id,
+                tranId: result.workOrder.tranId,
+                bomId: result.workOrder.bomId,
+                revisionId: result.workOrder.revisionId,
+                quantity: quantity,
+                status: result.workOrder.status,
+                createdAt: new Date(),
+                lastSyncAt: new Date()
+              }
+            });
+      
+            console.log('✅ Work order created successfully:', result.workOrder.tranId);
+      
+          } catch (workOrderError) {
+            console.error('❌ Work order creation failed:', workOrderError.message);
+            
+            // Update batch with error status
+            await db.services.batchService.updateBatch(batchId, {
+              workOrderStatus: 'failed',
+              workOrderError: workOrderError.message,
+              workOrderFailedAt: new Date()
+            });
+            
+            return NextResponse.json({
+              success: false,
+              data: null,
+              error: `Work order creation failed: ${workOrderError.message}`
+            }, { status: 500 });
+          }
+      
+        } else if (assemblyItemId) {
+          // Direct work order creation (not from batch)
+          result = await workOrderService.createWorkOrder({
+            assemblyItemId,
+            quantity,
+            startDate,
+            endDate,
+            location,
+            subsidiary,
+            department
           });
         } else {
-          const filters = {};
-          if (status) filters.status = status;
-          if (assemblyItem) filters.assemblyItem = assemblyItem;
-          if (limit) filters.limit = parseInt(limit);
-          
-          const workOrders = await workOrderService.listWorkOrders(filters);
           return NextResponse.json({
-            success: true,
-            data: {
-              workOrders,
-              count: workOrders.length,
-              filters
-            },
-            error: null
-          });
+            success: false,
+            data: null,
+            error: 'Either batchId or assemblyItemId is required'
+          }, { status: 400 });
         }
+      
+        return NextResponse.json({
+          success: true,
+          data: result,
+          error: null,
+          message: 'Work order created successfully'
+        });
       }
-
+      
       case 'setup': {
         const hasAccess = user.hasNetSuiteAccess();
         const envConfigured = !!(

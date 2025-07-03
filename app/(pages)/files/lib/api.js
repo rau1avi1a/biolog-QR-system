@@ -376,19 +376,87 @@ async importBOMToFile(fileId, bomData, mappingResults) {
       }
     },
 
-  // === WORK ORDER OPERATIONS ===
-  workOrders: {
-    async getStatus(batchId) {
-      return handleApiCall('workOrders.getStatus', async () => {
-        return await api.get.batchWorkOrderStatus(batchId);
-      });
-    },
+// === WORK ORDER OPERATIONS ===
+workOrders: {
+  async getStatus(batchId) {
+    return handleApiCall('workOrders.getStatus', async () => {
+      // FIXED: Use the dedicated work order status endpoint
+      const result = await api.client('batches').get(batchId, { action: 'workorder-status' });
+      
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      
+      // This should return the specific work order status data
+      return result;
+    });
+  },
 
-    async create(batchId, quantity, options = {}) {
-      return handleApiCall('workOrders.create', async () => {
-        return await api.create.netsuiteWorkOrderFromBatch(batchId, quantity, options);
-      });
-    }
+  // Alternative direct call if the above doesn't work
+  async getStatusDirect(batchId) {
+    return handleApiCall('workOrders.getStatusDirect', async () => {
+      try {
+        const response = await fetch(`/api/batches?id=${batchId}&action=workorder-status`, {
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        return result;
+      } catch (error) {
+        throw new Error(`Direct API call failed: ${error.message}`);
+      }
+    });
+  },
+
+  async create(batchId, quantity, workOrderData = {}) {
+    return handleApiCall('workOrders.create', async () => {
+      console.log('🚀 Creating work order via NetSuite API');
+      console.log('📊 Work order data:', { batchId, quantity, ...workOrderData });
+      
+      // FIXED: Use NetSuite endpoint for work order creation
+      const data = {
+        batchId,
+        quantity,
+        startDate: workOrderData.startDate,
+        endDate: workOrderData.endDate,
+        location: workOrderData.location,
+        subsidiary: workOrderData.subsidiary,
+        department: workOrderData.department
+      };
+      
+      return await api.client('netsuite').custom('workorder', data, 'POST');
+    });
+  }
+},
+
+  // Alternative method that might match your backend better
+  async createFromBatch(batchId, workOrderData) {
+    return handleApiCall('workOrders.createFromBatch', async () => {
+      console.log('🚀 Creating work order from batch:', batchId);
+      
+      // Try the netsuite endpoint if that's where work orders are handled
+      return await api.client('netsuite').custom('workorder', {
+        batchId,
+        ...workOrderData
+      }, 'POST');
+    });
+  },
+
+  // Alternative method that might match your backend better
+  async createFromBatch(batchId, workOrderData) {
+    return handleApiCall('workOrders.createFromBatch', async () => {
+      console.log('🚀 Creating work order from batch:', batchId);
+      
+      // Try the netsuite endpoint if that's where work orders are handled
+      return await api.client('netsuite').custom('workorder', {
+        batchId,
+        ...workOrderData
+      }, 'POST');
+    });
   },
 
   // === WORKFLOW HELPERS ===

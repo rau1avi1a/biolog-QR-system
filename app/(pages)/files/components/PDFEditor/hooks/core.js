@@ -79,110 +79,317 @@ export function useCore(props) {
     return true; // Draft, In Progress, and Review batches - drawing allowed
   }, [doc?.isBatch, doc?.status, doc?.isArchived]);
 
-  // === WORK ORDER INFO ===
+// === WORK ORDER STATUS POLLING - RESILIENT TO RE-RENDERS ===
+const checkWorkOrderStatus = useCallback(async () => {
+    if (!doc?._id || !doc?.isBatch) {
+      console.log('❌ Skipping work order check: not a batch or missing ID');
+      return false; // Return false to indicate no need to continue polling
+    }
+  
+    try {
+      console.log('🔍 Checking work order status for batch:', doc._id);
+      setWorkOrderLoading(true);
+      
+      // FIXED: Direct fetch with cache busting and better error handling
+      const timestamp = Date.now();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch(`/api/batches?id=${doc._id}&action=workorder-status&t=${timestamp}`, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('📊 Work order status API response:', result);
+  
+      if (result.success && result.data) {
+        const statusData = result.data;
+        
+        console.log('✅ Work order status updated:', {
+          created: statusData.created,
+          status: statusData.status,
+          workOrderNumber: statusData.workOrderNumber,
+          workOrderId: statusData.workOrderId,
+          error: statusData.error,
+          debug: statusData.debug
+        });
+        
+        // Always update the status
+        setWorkOrderStatus(statusData);
+        setWorkOrderError(null);
+        pollCountRef.current = 0;
+        
+        // Check for completion
+        const isComplete = statusData.status === 'created' && statusData.workOrderNumber;
+        const isFailed = statusData.status === 'failed';
+        const shouldContinue = statusData.status === 'creating' || statusData.status === 'pending';
+        
+        console.log('🔍 Status analysis:', { isComplete, isFailed, shouldContinue });
+        
+        if (isComplete) {
+          console.log('🎉 Work order created successfully:', statusData.workOrderNumber);
+          setLastWorkOrderNumber(statusData.workOrderNumber);
+          setIsCreatingWorkOrder(false);
+          setUserInitiatedCreation(false);
+          return false; // Stop polling
+        } else if (isFailed) {
+          console.log('❌ Work order creation failed:', statusData.error);
+          setIsCreatingWorkOrder(false);
+          setUserInitiatedCreation(false);
+          return false; // Stop polling
+        } else if (shouldContinue) {
+          console.log('⏳ Work order still being created, will continue polling...');
+          return true; // Continue polling
+        } else {
+          console.log('🛑 Unknown status, stopping polling:', statusData.status);
+          return false; // Stop polling
+        }
+      } else {
+        console.error('❌ Work order status API error:', result.error);
+        setWorkOrderError(result.error || 'Failed to get work order status');
+        pollCountRef.current++;
+        return pollCountRef.current < 10; // Continue polling if under error limit
+      }
+    } catch (err) {
+      console.error('❌ Work order status check failed:', err);
+      setWorkOrderError(err.message);
+      pollCountRef.current++;
+      
+      // Continue polling if under error limit
+      return pollCountRef.current < 10;
+    } finally {
+      setWorkOrderLoading(false);
+    }
+  }, [doc?._id, doc?.isBatch]);
+  
+  // FIXED: Use a more stable polling approach with useRef
+  const pollingActiveRef = useRef(false);
+  
+  const startWorkOrderPolling = useCallback(() => {
+    if (pollingActiveRef.current) {
+      console.log('⚠️ Polling already active');
+      return;
+    }
+  
+    console.log('🚀 Starting work order status polling...');
+    pollingActiveRef.current = true;
+    pollCountRef.current = 0;
+    
+    const poll = async () => {
+      // FIXED: Check if polling should still be active
+      if (!pollingActiveRef.current) {
+        console.log('🛑 Polling stopped externally');
+        return;
+      }
+      
+      try {
+        const shouldContinue = await checkWorkOrderStatus();
+        
+        // Continue polling if shouldContinue is true and polling is still active
+        if (shouldContinue && pollingActiveRef.current && pollCountRef.current < 30) {
+          // Adaptive polling interval
+          let delay = 2000; // Start with 2 seconds
+          if (pollCountRef.current > 5) delay = 3000;  // 3 seconds after 5 polls
+          if (pollCountRef.current > 15) delay = 5000; // 5 seconds after 15 polls
+          
+          console.log(`🔄 Scheduling next poll in ${delay}ms (attempt ${pollCountRef.current + 1})`);
+          pollCountRef.current++;
+          
+          // Use setTimeout instead of intervalRef for more reliable scheduling
+          setTimeout(poll, delay);
+        } else {
+          console.log('🛑 Polling stopped - shouldContinue:', shouldContinue, 'active:', pollingActiveRef.current, 'count:', pollCountRef.current);
+          pollingActiveRef.current = false;
+          
+          if (pollCountRef.current >= 30) {
+            setIsCreatingWorkOrder(false);
+            setUserInitiatedCreation(false);
+            setWorkOrderError('Work order creation timed out after 5 minutes');
+          }
+        }
+      } catch (error) {
+        console.error('❌ Poll iteration failed:', error);
+        pollingActiveRef.current = false;
+      }
+    };
+    
+    // Start immediately
+    poll();
+  }, [checkWorkOrderStatus]);
+  
+  const stopWorkOrderPolling = useCallback(() => {
+    if (pollingActiveRef.current) {
+      pollingActiveRef.current = false;
+      console.log('🛑 Work order polling stopped');
+    }
+    
+    // Also clear the intervalRef if it exists
+    if (intervalRef.current) {
+      clearTimeout(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+  
+  // === FIXED: POLLING MANAGEMENT - More stable triggers ===
+  useEffect(() => {
+    // Start polling when work order creation is initiated
+    const shouldStartPolling = doc?._id && 
+                               doc?.isBatch && 
+                               (isCreatingWorkOrder || 
+                                userInitiatedCreation || 
+                                (doc?.workOrderCreated && doc?.workOrderStatus === 'creating'));
+  
+    console.log('🤔 Polling decision:', {
+      shouldStartPolling,
+      docId: doc?._id,
+      isBatch: doc?.isBatch,
+      isCreatingWorkOrder,
+      userInitiatedCreation,
+      docWorkOrderCreated: doc?.workOrderCreated,
+      docWorkOrderStatus: doc?.workOrderStatus,
+      pollingActive: pollingActiveRef.current
+    });
+  
+    if (shouldStartPolling && !pollingActiveRef.current) {
+      console.log('🚀 Starting polling - conditions met');
+      startWorkOrderPolling();
+    } else if (!shouldStartPolling && pollingActiveRef.current) {
+      console.log('🛑 Stopping polling - conditions not met');
+      stopWorkOrderPolling();
+    }
+  
+    // Cleanup on unmount or doc change
+    return () => {
+      if (!doc?._id) {
+        // Only stop polling if the document actually changed/unmounted
+        console.log('📄 Document changed, stopping polling');
+        stopWorkOrderPolling();
+      }
+    };
+  }, [
+    doc?._id, 
+    doc?.isBatch, 
+    doc?.workOrderCreated, 
+    doc?.workOrderStatus,
+    isCreatingWorkOrder, 
+    userInitiatedCreation,
+    startWorkOrderPolling, 
+    stopWorkOrderPolling
+  ]);
+  
+  // === ENHANCED: Work order info computation with better fallbacks ===
   const workOrderInfo = useMemo(() => {
     if (!doc?.isBatch) return null;
+    
+    console.log('🧮 Computing workOrderInfo:', {
+      hasWorkOrderStatus: !!workOrderStatus,
+      workOrderStatus,
+      docWorkOrderCreated: doc.workOrderCreated,
+      docWorkOrderStatus: doc.workOrderStatus,
+      docWorkOrderId: doc.workOrderId,
+      docNetSuiteTranId: doc.netsuiteWorkOrderData?.tranId,
+      lastWorkOrderNumber,
+      isCreatingWorkOrder,
+      userInitiatedCreation,
+      pollingActive: pollingActiveRef.current
+    });
+    
+    // If work order creation is actively in progress, return pending status
+    if ((isCreatingWorkOrder || userInitiatedCreation) && !workOrderStatus?.workOrderNumber) {
+      return {
+        id: 'pending',
+        workOrderNumber: null,
+        internalId: null,
+        status: 'creating',
+        isNetSuite: false,
+        isLocal: false,
+        isPending: true,
+        isFailed: false,
+        isCreated: false,
+        isUpdating: workOrderLoading || pollingActiveRef.current,
+        error: workOrderError
+      };
+    }
     
     // Use real-time status if available, otherwise fall back to doc data
     const currentStatus = workOrderStatus || {
       created: doc.workOrderCreated,
       status: doc.workOrderStatus,
       workOrderId: doc.workOrderId,
-      workOrderNumber: doc.netsuiteWorkOrderData?.tranId
+      workOrderNumber: doc.netsuiteWorkOrderData?.tranId || lastWorkOrderNumber
     };
     
-    if (currentStatus.created) {
-      const workOrderNumber = currentStatus.workOrderNumber || currentStatus.workOrderId;
-      const isNetSuite = !!(currentStatus.workOrderNumber && !currentStatus.workOrderNumber.startsWith('LOCAL-'));
-      const isPending = currentStatus.status === 'creating' || workOrderNumber?.startsWith('PENDING-');
+    if (currentStatus.created || currentStatus.workOrderNumber || currentStatus.workOrderId) {
+      const workOrderNumber = currentStatus.workOrderNumber || currentStatus.workOrderId || lastWorkOrderNumber;
+      const isNetSuite = !!(workOrderNumber && !workOrderNumber.startsWith('LOCAL-') && !workOrderNumber.startsWith('PENDING-'));
+      const isPending = currentStatus.status === 'creating' || 
+                       currentStatus.status === 'pending' ||
+                       workOrderNumber?.startsWith('PENDING-');
       const isLocal = workOrderNumber?.startsWith('LOCAL-WO-');
       const isFailed = currentStatus.status === 'failed';
+      const isCreated = currentStatus.status === 'created' || (workOrderNumber && !isPending && !isFailed);
       
       return {
         id: workOrderNumber || 'Unknown',
-        workOrderNumber: currentStatus.workOrderNumber,
+        workOrderNumber: currentStatus.workOrderNumber || lastWorkOrderNumber,
         internalId: currentStatus.internalId,
         status: currentStatus.status || 'created',
         isNetSuite,
         isLocal,
         isPending,
         isFailed,
-        isUpdating: workOrderLoading,
+        isCreated,
+        isUpdating: workOrderLoading || pollingActiveRef.current,
         error: currentStatus.error || workOrderError
       };
     }
     
     return null;
-  }, [doc, workOrderStatus, workOrderLoading, workOrderError]);
-
-  // === WORK ORDER STATUS POLLING ===
-  const checkWorkOrderStatus = useCallback(async () => {
-    if (!doc?._id || !doc?.isBatch || !doc?.workOrderCreated) return;
-
-    try {
-      setWorkOrderLoading(true);
-      const result = await filesApi.workOrders.getStatus(doc._id);
-      
-      if (!mountedRef.current) return;
-
-      if (!result.error) {
-        setWorkOrderStatus(result.data);
-        setWorkOrderError(null);
-        pollCountRef.current = 0;
-        
-        // If work order is now created, stop polling
-        if (result.data.status === 'created' || result.data.status === 'failed') {
-          console.log('Work order status resolved, stopping polling');
-          stopWorkOrderPolling();
-        }
-      } else {
-        setWorkOrderError(result.error);
-      }
-    } catch (err) {
-      if (mountedRef.current) {
-        setWorkOrderError(err.message);
-        pollCountRef.current++;
-        
-        // Stop polling after too many failures
-        if (pollCountRef.current > 10) {
-          console.log('Too many polling failures, stopping');
-          stopWorkOrderPolling();
-        }
-      }
-    } finally {
-      if (mountedRef.current) {
-        setWorkOrderLoading(false);
-      }
-    }
-  }, [doc?._id, doc?.isBatch, doc?.workOrderCreated]);
-
-  const startWorkOrderPolling = useCallback(() => {
-    if (intervalRef.current) return; // Already polling
-
-    console.log('Starting work order status polling...');
+  }, [
+    doc, 
+    workOrderStatus, 
+    lastWorkOrderNumber, 
+    isCreatingWorkOrder, 
+    userInitiatedCreation,
+    workOrderLoading, 
+    workOrderError
+  ]);
+  
+  // === CLEANUP ===
+  useEffect(() => {
+    mountedRef.current = true;
     
-    let pollInterval = 2000; // Start with 2 seconds
-    
-    const poll = () => {
-      checkWorkOrderStatus();
-      
-      // Gradually increase interval to reduce server load
-      if (pollCountRef.current > 5) pollInterval = 5000;  // 5 seconds after 5 polls
-      if (pollCountRef.current > 15) pollInterval = 10000; // 10 seconds after 15 polls
-      
-      intervalRef.current = setTimeout(poll, pollInterval);
+    return () => {
+      mountedRef.current = false;
+      // Don't stop polling on every unmount, let the other effect handle it
+      console.log('🔄 Component cleanup - mountedRef set to false');
     };
-    
-    poll();
-  }, [checkWorkOrderStatus]);
-
-  const stopWorkOrderPolling = useCallback(() => {
-    if (intervalRef.current) {
-      clearTimeout(intervalRef.current);
-      intervalRef.current = null;
-      console.log('Work order polling stopped');
-    }
   }, []);
+  
+  // Final cleanup on actual unmount
+  useEffect(() => {
+    return () => {
+      console.log('🧹 Final cleanup - stopping all polling');
+      pollingActiveRef.current = false;
+      if (intervalRef.current) {
+        clearTimeout(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, []);
+
 
   // === CANVAS INITIALIZATION ===
   const initCanvas = useCallback(() => {
@@ -405,7 +612,7 @@ export function useCore(props) {
   }, [pages]);
 
   // === SAVE FUNCTIONALITY ===
-  const save = useCallback(async (action = 'save', confirmationData = null) => {
+const save = useCallback(async (action = 'save', confirmationData = null) => {
     // Check if saving is allowed
     if (!doc) return;
     if (doc.isArchived || doc.status === 'Completed') {
@@ -441,7 +648,7 @@ export function useCore(props) {
       }
       return;
     }
-
+  
     // Get canvas dimensions for proper scaling
     const canvas = canvasRef.current;
     const container = pageContainerRef.current;
@@ -454,7 +661,7 @@ export function useCore(props) {
       displayHeight: containerRect?.height || canvas.offsetHeight,
       containerRect: containerRect
     } : null;
-
+  
     setIsSaving(true);
     try {
       const isOriginal = !doc.isBatch && !doc.originalFileId;
@@ -468,7 +675,15 @@ export function useCore(props) {
           annotations: overlays,
           canvasDimensions: canvasDimensions
         };
-
+  
+        // For work order creation, we need to include the scaling data
+        if (action === 'create_work_order') {
+          editorData.batchQuantity = confirmationData.batchQuantity;
+          editorData.batchUnit = confirmationData.batchUnit;
+          editorData.scaledComponents = confirmationData.components || confirmationData.scaledComponents;
+          editorData.createWorkOrder = true; // Flag to trigger work order creation
+        }
+  
         const result = await filesApi.editor.saveFromEditor(
           doc._id,
           editorData,
@@ -481,24 +696,35 @@ export function useCore(props) {
         }
         
         // Switch to the new batch
+        const newBatchData = result.data;
         setCurrentDoc({
-          ...result.data,
-          pdf: result.data.signedPdf ? 
-            `data:application/pdf;base64,${result.data.signedPdf.data}` : 
+          ...newBatchData,
+          pdf: newBatchData.signedPdf ? 
+            `data:application/pdf;base64,${newBatchData.signedPdf.data}` : 
             doc.pdf,
           isBatch: true,
-          originalFileId: result.data.fileId || doc._id
+          originalFileId: newBatchData.fileId || doc._id,
+          // For work order creation, set initial status
+          status: action === 'create_work_order' ? 'In Progress' : (newBatchData.status || 'Draft'),
+          workOrderCreated: action === 'create_work_order' ? true : (newBatchData.workOrderCreated || false),
+          workOrderStatus: action === 'create_work_order' ? 'creating' : (newBatchData.workOrderStatus || 'not_created')
         });
         
+        // Set work order creation flags for UI
+        if (action === 'create_work_order') {
+          setIsCreatingWorkOrder(true);
+          setUserInitiatedCreation(true);
+        }
+        
       } else {
-        // Existing batch - use updateBatch for all actions
+        // Existing batch - handle different actions
         const firstOverlay = overlays[1] || overlays[Object.keys(overlays)[0]];
         const updateData = {
           overlayPng: firstOverlay,
           annotations: overlays,
           canvasDimensions: canvasDimensions
         };
-
+  
         if (action === 'submit_review' && confirmationData) {
           updateData.status = 'Review';
           updateData.submittedForReviewAt = new Date();
@@ -529,16 +755,15 @@ export function useCore(props) {
           updateData.status = 'Completed';
           updateData.completedAt = new Date();
         } else if (action === 'create_work_order') {
+          // This shouldn't happen for existing batches, but handle it just in case
           updateData.status = 'In Progress';
           updateData.workOrderCreated = true;
-          updateData.workOrderId = `WO-${Date.now()}`;
           updateData.workOrderCreatedAt = new Date();
-          
-          // Set work order creation flags
-          setIsCreatingWorkOrder(true);
-          setUserInitiatedCreation(true);
+          updateData.batchQuantity = confirmationData.batchQuantity;
+          updateData.batchUnit = confirmationData.batchUnit;
+          updateData.scaledComponents = confirmationData.components || confirmationData.scaledComponents;
         }
-
+  
         const result = await filesApi.batches.update(doc._id, updateData);
         
         if (result.error) {
@@ -554,7 +779,7 @@ export function useCore(props) {
           isBatch: true
         });
       }
-
+  
       refreshFiles?.();
       
       // Start polling for work order creation
@@ -565,6 +790,7 @@ export function useCore(props) {
       }
       
     } catch (err) {
+      console.error('💥 Save error details:', err);
       alert('Save error: ' + (err.message || 'Unknown error'));
       // Reset work order creation flags on error
       if (action === 'create_work_order') {

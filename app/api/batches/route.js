@@ -253,8 +253,19 @@ export async function POST(request) {
 
     // POST /api/batches - Create new batch
     const payload = await request.json();
+    
+    console.log('📥 Received batch creation payload:', {
+      hasOriginalFileId: !!payload.originalFileId,
+      hasFileId: !!payload.fileId,
+      originalFileId: payload.originalFileId,
+      fileId: payload.fileId,
+      status: payload.status,
+      workOrderStatus: payload.workOrderStatus
+    });
+    
     payload.user = user;
 
+    // FIXED: Extract fileId and ensure it's set in the payload
     const fileId = payload.originalFileId || payload.fileId;
     if (!fileId) {
       return NextResponse.json({ 
@@ -273,6 +284,19 @@ export async function POST(request) {
         error: 'File not found'
       }, { status: 404 });
     }
+
+    // FIXED: Ensure fileId is set in the payload for the batch service
+    payload.fileId = fileId;
+    
+    // Remove originalFileId to avoid confusion
+    delete payload.originalFileId;
+    
+    console.log('📤 Sending to batch service:', {
+      fileId: payload.fileId,
+      hasFileId: !!payload.fileId,
+      status: payload.status,
+      workOrderStatus: payload.workOrderStatus
+    });
 
     const batch = await db.services.batchService.createBatch(payload);
     

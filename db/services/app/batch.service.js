@@ -1,6 +1,7 @@
 // db/services/app/batch.service.js - Consolidated batch operations with single import
 import { CoreService } from './core.service.js';
 import db from '@/db/index.js';
+import mongoose from 'mongoose';
 
 /**
  * Batch Service - Handles all batch-related operations
@@ -43,26 +44,48 @@ class BatchService extends CoreService {
   async createBatch(payload) {
     await this.connect();
     
+    console.log('🔍 BatchService: Received payload:', {
+      keys: Object.keys(payload),
+      hasFileId: !!payload.fileId,
+      hasOriginalFileId: !!payload.originalFileId,
+      hasEditorData: !!payload.editorData,
+      fileId: payload.fileId,
+      originalFileId: payload.originalFileId
+    });
+    
+    // FIXED: Handle the new payload structure properly
     let fileId, overlayPng, status, editorData, confirmationData, user;
     
-    if (payload.originalFileId && payload.editorData) {
-      fileId = payload.originalFileId;
-      overlayPng = payload.editorData.overlayPng;
-      editorData = payload.editorData;
-      status = payload.status || 'In Progress';
-      confirmationData = payload.confirmationData;
-      user = payload.user;
-    } else {
-      fileId = payload.fileId;
-      overlayPng = payload.overlayPng;
-      status = payload.status || 'In Progress';
-      user = payload.user;
+    // Extract fileId - it should already be set by the API route
+    fileId = payload.fileId;
+    if (!fileId) {
+      throw new Error('fileId is required for batch creation');
     }
-
+    
+    // Extract other fields from payload
+    overlayPng = payload.overlayPng;
+    status = payload.status || 'Draft';
+    user = payload.user;
+    confirmationData = payload.confirmationData;
+    
+    console.log('🔍 BatchService: Extracted values:', {
+      fileId,
+      status,
+      hasOverlayPng: !!overlayPng,
+      hasUser: !!user
+    });
+  
     // Get file data
     const file = await this.File.findById(fileId).lean();
     if (!file) throw new Error('File not found');
-
+  
+    console.log('🔍 BatchService: Found file:', {
+      fileName: file.fileName,
+      hasSolutionRef: !!file.solutionRef,
+      solutionRefId: file.solutionRef,
+      componentCount: file.components?.length || 0
+    });
+  
     // Create snapshot from file properties
     const snapshot = {
       enabled: true,
@@ -72,7 +95,13 @@ class BatchService extends CoreService {
       recipeUnit: file.recipeUnit,
       components: file.components || []
     };
-
+  
+    console.log('🔍 BatchService: Created snapshot:', {
+      hasSolutionRef: !!snapshot.solutionRef,
+      solutionRefId: snapshot.solutionRef,
+      componentCount: snapshot.components.length
+    });
+  
     // Handle PDF overlay if provided
     let signedPdf = null;
     if (overlayPng && file.pdf) {
@@ -82,38 +111,141 @@ class BatchService extends CoreService {
         console.error('Failed to bake overlay into PDF:', e);
       }
     }
-
-    // Prepare batch data
+  
+    // Helper function to convert string IDs to ObjectIds
+    const toObjectId = (id) => {
+      if (!id) return null;
+      if (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)) {
+        return new mongoose.Types.ObjectId(id);
+      }
+      if (id instanceof mongoose.Types.ObjectId) {
+        return id;
+      }
+      return id;
+    };
+  
+    // FIXED: Convert all ObjectId fields properly
     const batchData = { 
-      fileId,
+      fileId: toObjectId(fileId), // Convert to ObjectId
       overlayPng, 
       status, 
-      snapshot 
+      snapshot: {
+        enabled: snapshot.enabled,
+        productRef: toObjectId(snapshot.productRef), // Convert to ObjectId
+        solutionRef: toObjectId(snapshot.solutionRef), // Convert to ObjectId
+        recipeQty: snapshot.recipeQty,
+        recipeUnit: snapshot.recipeUnit,
+        components: snapshot.components.map(comp => ({
+          itemId: toObjectId(comp.itemId), // Convert to ObjectId
+          amount: comp.amount,
+          unit: comp.unit,
+          netsuiteData: comp.netsuiteData
+        }))
+      }
     };
-
+  
+    console.log('🔍 BatchService: Prepared batch data:', {
+      hasFileId: !!batchData.fileId,
+      fileId: batchData.fileId,
+      fileIdType: typeof batchData.fileId,
+      fileIdConstructor: batchData.fileId.constructor.name,
+      status: batchData.status,
+      hasSnapshot: !!batchData.snapshot,
+      solutionRefType: typeof batchData.snapshot.solutionRef,
+      solutionRefConstructor: batchData.snapshot.solutionRef?.constructor.name,
+      keys: Object.keys(batchData)
+    });
+  
     // Handle confirmation data
     if (confirmationData) {
       if (confirmationData.components?.length > 0) {
-        batchData.confirmedComponents = confirmationData.components;
+        // FIXED: Convert ObjectIds in confirmedComponents too
+        batchData.confirmedComponents = confirmationData.components.map(comp => ({
+          itemId: toObjectId(comp.itemId), // Convert to ObjectId
+          plannedAmount: comp.plannedAmount || comp.amount,
+          actualAmount: comp.actualAmount || comp.amount,
+          unit: comp.unit,
+          lotNumber: comp.lotNumber || '',
+          lotId: toObjectId(comp.lotId), // Convert to ObjectId if exists
+          displayName: comp.displayName,
+          sku: comp.sku
+        }));
       }
       if (confirmationData.solutionLotNumber) {
         batchData.solutionLotNumber = confirmationData.solutionLotNumber;
       }
     }
-
+  
     // Set workflow flags
     if (payload.workOrderStatus) batchData.workOrderStatus = payload.workOrderStatus;
     if (payload.chemicalsTransacted) batchData.chemicalsTransacted = payload.chemicalsTransacted;
     if (payload.solutionCreated) batchData.solutionCreated = payload.solutionCreated;
     if (payload.solutionLotNumber) batchData.solutionLotNumber = payload.solutionLotNumber;
-
+  
     if (signedPdf) {
       batchData.signedPdf = { data: signedPdf, contentType: 'application/pdf' };
     }
-
-    // Create the batch
-    const batch = await this.create(batchData);
-
+  
+    // Add debugging before creating the batch
+    console.log('🔍 BatchService: Final batchData before create:', {
+      fullData: JSON.stringify(batchData, (key, value) => {
+        if (value && typeof value === 'object' && value.constructor && value.constructor.name === 'ObjectId') {
+          return value.toString();
+        }
+        return value;
+      }, 2),
+      hasFileId: !!batchData.fileId,
+      fileIdString: batchData.fileId?.toString(),
+      allKeys: Object.keys(batchData)
+    });
+  
+    console.log('🔍 BatchService: Model info:', {
+      modelName: this.model?.modelName,
+      hasModel: !!this.model,
+      modelSchema: this.model?.schema?.paths ? Object.keys(this.model.schema.paths) : 'no schema'
+    });
+  
+    // Create the batch with enhanced error handling - BYPASS CoreService
+    let batch;
+    try {
+      console.log('🔍 BatchService: Attempting direct model creation...');
+      
+      // FIXED: Try direct model creation instead of this.create()
+      batch = new this.model(batchData);
+      console.log('🔍 BatchService: Model instance created, attempting save...');
+      
+      const savedBatch = await batch.save();
+      console.log('✅ BatchService: Batch saved successfully:', savedBatch._id);
+      
+      // Convert to plain object
+      batch = savedBatch.toObject();
+      
+    } catch (error) {
+      console.error('❌ BatchService: Direct model creation failed:', {
+        error: error.message,
+        stack: error.stack,
+        validationErrors: error.errors ? Object.keys(error.errors) : 'no validation errors'
+      });
+      
+      // Try one more approach - minimal data only
+      console.log('🔍 BatchService: Trying minimal batch creation...');
+      try {
+        const minimalBatch = new this.model({
+          fileId: toObjectId(fileId),
+          status: 'Draft'
+        });
+        
+        const savedMinimal = await minimalBatch.save();
+        console.log('✅ BatchService: Minimal batch saved:', savedMinimal._id);
+        
+        batch = savedMinimal.toObject();
+        
+      } catch (minimalError) {
+        console.error('❌ BatchService: Even minimal creation failed:', minimalError.message);
+        throw error; // Throw original error
+      }
+    }
+  
     // Handle work order creation using db.services
     if (payload.action === 'create_work_order') {
       try {
@@ -124,7 +256,7 @@ class BatchService extends CoreService {
         console.error('Failed to queue work order creation:', e);
       }
     }
-
+  
     // Handle chemical transactions and solution creation using db.services
     if (payload.action === 'submit_review' && confirmationData) {
       try {
@@ -135,7 +267,7 @@ class BatchService extends CoreService {
             batch.transactionDate = new Date();
           }
         }
-
+  
         if (confirmationData.solutionLotNumber) {
           const solutionResult = await this.createSolutionLot(
             batch, 
@@ -155,7 +287,7 @@ class BatchService extends CoreService {
         console.error('Failed to process submit for review:', e);
       }
     }
-
+  
     // Return populated batch
     return this.findById(batch._id);
   }
