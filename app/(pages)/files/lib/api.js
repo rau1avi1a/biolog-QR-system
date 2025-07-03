@@ -258,58 +258,35 @@ export const filesApi = {
       /**
        * Import NetSuite BOM into a file
        */
-      async importBOMToFile(fileId, bomData, mappingResults) {
-        return handleApiCall('netsuite.importBOMToFile', async () => {
-          console.log('📥 Importing BOM to file:', fileId);
-          
-          // Transform the mapping results into file components
-          const components = mappingResults.map(result => {
-            const comp = result.netsuiteComponent;
-            const match = result.bestMatch;
-            
-            return {
-              itemId: match?.chemical?._id || null,
-              amount: comp.quantity || comp.bomQuantity || 0,
-              unit: comp.units || 'ea',
-              netsuiteData: {
-                itemId: comp.itemId,
-                itemRefName: comp.itemRefName || comp.ingredient,
-                ingredient: comp.ingredient,
-                bomQuantity: comp.bomQuantity || comp.quantity,
-                componentYield: comp.componentYield || 100,
-                units: comp.units,
-                lineId: comp.lineId,
-                bomComponentId: comp.bomComponentId,
-                itemSource: comp.itemSource,
-                type: 'netsuite'
-              }
-            };
-          });
-  
-          // Prepare the update data
-          const updateData = {
-            components,
-            netsuiteImportData: {
-              bomId: bomData.bomId,
-              bomName: bomData.bomName,
-              revisionId: bomData.revisionId,
-              revisionName: bomData.revisionName,
-              importedAt: new Date(),
-              solutionNetsuiteId: bomData.assemblyItemId,
-              lastSyncAt: new Date()
-            }
-          };
-  
-          // Update the file with the BOM data
-          const result = await filesApi.files.updateMeta(fileId, updateData);
-          
-          if (hasApiError(result)) {
-            throw new Error(handleApiError(result, 'Failed to import BOM to file'));
-          }
-          
-          return result;
-        });
+/**
+ * Import NetSuite BOM into a file - FIXED to use NetSuite import action with unit mapping
+ */
+async importBOMToFile(fileId, bomData, mappingResults) {
+  return handleApiCall('netsuite.importBOMToFile', async () => {
+    console.log('📥 Importing BOM to file:', fileId);
+    
+    // FIXED: Use the NetSuite import action instead of manual component construction
+    // This ensures unit mapping happens in the backend
+    const result = await api.client('netsuite').custom('import', {
+      bomData: {
+        bomId: bomData.bomId,
+        bomName: bomData.bomName,
+        revisionId: bomData.revisionId,
+        revisionName: bomData.revisionName,
+        assemblyItemId: bomData.assemblyItemId,
+        components: bomData.recipe || bomData.components || []
       },
+      fileId: fileId
+    }, 'POST');
+    
+    if (hasApiError(result)) {
+      throw new Error(handleApiError(result, 'Failed to import BOM to file'));
+    }
+    
+    return result;
+  });
+},
+
   
       /**
        * Complete BOM import workflow: fetch BOM, map components, import to file

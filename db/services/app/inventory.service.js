@@ -100,37 +100,68 @@ class ItemService extends CoreService {
    */
   async getById(id) {
     await this.connect();
-    const item = await this.Item.findById(id)
-      .populate('bom.itemId', 'displayName sku')
-      .lean();
+    
+    // First get the item to check its type
+    const item = await this.Item.findById(id).lean();
+    if (!item) return null;
+    
+    // Only populate BOM for solution and product types
+    if (item.itemType === 'solution' || item.itemType === 'product') {
+      return this.Item.findById(id)
+        .populate('bom.itemId', 'displayName sku')
+        .lean();
+    }
+    
+    // For chemicals, return without BOM population
     return item;
   }
 
-  /**
-   * Search items - matches the interface your route expects
-   */
-  async search(query = {}) {
-    await this.connect();
-    const { type, search, netsuiteId } = query;
+    /**
+     * Search items - FIXED with fuzzy search like file search
+     */
+    async search(query = {}) {
+        await this.connect();
+        const { type, search, netsuiteId } = query;
+        
+        const filter = {};
+        if (type) filter.itemType = type;
+        
+        if (netsuiteId) {
+        filter.netsuiteInternalId = netsuiteId;
+        } else if (search) {
+        if (/^\d+$/.test(search.trim())) {
+            // If it's all digits, search NetSuite ID
+            filter.netsuiteInternalId = search.trim();
+        } else {
+            // FIXED: Fuzzy search - split terms and match all
+            const searchTerms = search.trim().split(/\s+/).filter(term => term.length > 0);
+            
+            if (searchTerms.length === 1) {
+            // Single term - search in displayName and sku
+            const term = searchTerms[0];
+            filter.$or = [
+                { displayName: { $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                { sku: { $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }
+            ];
+            } else {
+            // Multiple terms - all must match somewhere in displayName
+            const searchConditions = searchTerms.map(term => ({
+                $or: [
+                { displayName: { $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                { sku: { $regex: term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }
+                ]
+            }));
+            
+            filter.$and = searchConditions;
+            }
+        }
+        }
     
-    const filter = {};
-    if (type) filter.itemType = type;
-    
-    if (netsuiteId) {
-      filter.netsuiteInternalId = netsuiteId;
-    } else if (search) {
-      if (/^\d+$/.test(search.trim())) {
-        filter.netsuiteInternalId = search.trim();
-      } else {
-        filter.displayName = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
-      }
+        return this.Item.find(filter)
+        .sort({ displayName: 1 })
+        .select('_id displayName sku netsuiteInternalId itemType qtyOnHand uom')
+        .lean();
     }
-
-    return this.Item.find(filter)
-      .sort({ displayName: 1 })
-      .select('_id displayName sku netsuiteInternalId itemType qtyOnHand uom')
-      .lean();
-  }
 
   /**
    * List items by type with search

@@ -248,9 +248,9 @@ export function useComponentState(core, props) {
     return core.searchResults.map(item => ({
       ...item,
       displayText: `${item.displayName || 'Unknown'} (${item.sku || 'No SKU'})`,
-      subtitle: `${item.itemCategory || 'Unknown'} • Stock: ${item.qtyOnHand || 0} ${item.uom || ''}`,
-      isChemical: item.itemCategory === 'chemical',
-      isSolution: item.itemCategory === 'solution'
+      subtitle: `${item.itemType || 'Unknown'} • Stock: ${item.qtyOnHand || 0} ${item.uom || ''}`,
+      isChemical: item.itemType === 'chemical',
+      isSolution: item.itemType === 'solution'
     }));
   }, [core.searchResults]);
 
@@ -283,7 +283,7 @@ export function useComponentState(core, props) {
         ...comp,
         displayName: item.displayName || 'Unknown Item',
         sku: item.sku || 'No SKU',
-        category: item.itemCategory || 'unknown',
+        category: item.itemType || 'unknown',
         currentStock: item.qtyOnHand || 0,
         stockUnit: item.uom || comp.unit || 'units',
         isValid: comp.qty && parseFloat(comp.qty) > 0,
