@@ -90,6 +90,52 @@ batchSchema.methods.getWorkOrderDisplayId = function() {
   return this.workOrderId || 'No Work Order';
 };
 
+batchSchema.methods.getAssemblyBuildDisplayId = function() {
+  if (this.assemblyBuildTranId) {
+    return this.assemblyBuildTranId; // Return the ASSYB number
+  }
+  if (this.netsuiteWorkOrderData?.assemblyBuildTranId) {
+    return this.netsuiteWorkOrderData.assemblyBuildTranId;
+  }
+  if (this.assemblyBuildId) {
+    return this.assemblyBuildId; // Fallback to internal ID
+  }
+  return 'No Assembly Build';
+};
+
+batchSchema.methods.isAssemblyBuildCreated = function() {
+  return (
+    this.assemblyBuildCreated ||
+    this.workOrderCompleted ||
+    !!this.assemblyBuildTranId ||
+    !!this.netsuiteWorkOrderData?.assemblyBuildTranId
+  );
+};
+
+batchSchema.methods.getProductionStatus = function() {
+  if (this.isAssemblyBuildCreated()) {
+    return {
+      status: 'completed',
+      workOrder: this.getWorkOrderDisplayId(),
+      assemblyBuild: this.getAssemblyBuildDisplayId(),
+      completedAt: this.workOrderCompletedAt || this.assemblyBuildCreatedAt
+    };
+  } else if (this.hasNetSuiteWorkOrder()) {
+    return {
+      status: 'in_production',
+      workOrder: this.getWorkOrderDisplayId(),
+      assemblyBuild: null,
+      createdAt: this.workOrderCreatedAt
+    };
+  } else {
+    return {
+      status: 'not_started',
+      workOrder: null,
+      assemblyBuild: null
+    };
+  }
+};
+
 batchSchema.statics.findByStatus = function(status) {
   return this.find({ status }).populate('fileId', 'fileName');
 };

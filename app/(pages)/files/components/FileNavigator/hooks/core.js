@@ -29,17 +29,6 @@ export function useCore(props) {
     dataLoading
   } = props;
 
-  console.log('🔧 useCore props received:', {
-    view,
-    rootType: typeof root,
-    rootLength: Array.isArray(root) ? root.length : 'not array',
-    filesType: typeof files,
-    filesLength: Array.isArray(files) ? files.length : 'not array',
-    currentFolder: currentFolder?.name || 'none',
-    hasError: !!error,
-    dataLoading
-  });
-
   /* ── CORE STATE ─────────────────────────────────────────────── */
   const [isDragOver, setIsDragOver] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
@@ -60,7 +49,6 @@ export function useCore(props) {
       queryKey: ['filesByStatus', status, refreshTrigger],
       queryFn: async () => {
         try {
-          console.log(`🔍 Loading ${status} batches...`);
           const result = await api.list.batchesByStatus(status);
           
           if (hasError(result)) {
@@ -69,7 +57,6 @@ export function useCore(props) {
           }
           
           const batches = extractList(result, 'batches', []);
-          console.log(`📦 ${status} batches extracted:`, batches.length);
           
           // Transform batches to have proper fileName for display
           return batches.map(batch => ({
@@ -114,7 +101,6 @@ export function useCore(props) {
     queryKey: ['archivedBatches', refreshTrigger],
     queryFn: async () => {
       try {
-        console.log('🔍 Loading archived batches...');
         const result = await api.list.batchesByStatus('Completed');
         
         if (hasError(result)) {
@@ -123,7 +109,6 @@ export function useCore(props) {
         }
         
         const batches = extractList(result, 'batches', []);
-        console.log('📦 Archive batches extracted:', batches.length);
         
         return batches.map(batch => ({
           ...batch,
@@ -204,15 +189,12 @@ export function useCore(props) {
 
     setSearchBusy(true);
     try {
-      console.log('🔍 Performing search for:', query, 'in view:', view);
       
       if (view === 'folders') {
         // FIXED: For Files tab, use dedicated searchFiles API to only get original files
-        console.log('📄 Searching original files only...');
         
         const result = await api.list.searchFiles(query);
         
-        console.log('🔍 Files search result:', result);
         
         if (hasError(result)) {
           console.error('❌ Search error:', getError(result));
@@ -223,7 +205,6 @@ export function useCore(props) {
         // Extract files array using the helper function
         const files = extractList(result, 'files', []);
         
-        console.log('📄 Search files extracted:', files.length);
         
         // Additional filtering to ensure only original files (not batches)
         const originalFilesOnly = files.filter(file => {
@@ -236,12 +217,10 @@ export function useCore(props) {
           return isOriginalFile;
         });
         
-        console.log('✅ Filtered to original files only:', originalFilesOnly.length, 'out of', files.length);
         setSearchResults(originalFilesOnly);
         
       } else if (view === 'status') {
         // For Status tab, search within batches of specific statuses
-        console.log('📊 Searching status batches...');
         
         const result = await api.list.searchFiles(query);
         
@@ -267,12 +246,10 @@ export function useCore(props) {
                    'Untitled'
         }));
         
-        console.log('✅ Status search completed:', enrichedResults.length, 'results');
         setSearchResults(enrichedResults);
         
       } else if (view === 'archive') {
         // For Archive tab, search within completed batches
-        console.log('📚 Searching archive batches...');
         
         const result = await api.list.searchFiles(query);
         
@@ -297,7 +274,6 @@ export function useCore(props) {
                    'Archived File'
         }));
         
-        console.log('✅ Archive search completed:', enrichedResults.length, 'results');
         setSearchResults(enrichedResults);
       }
       
@@ -402,7 +378,6 @@ export function useCore(props) {
   /* ── FOLDER TREE OPERATIONS ─────────────────────────────────── */
   const loadFolderChildren = useCallback(async (folderId) => {
     try {
-      console.log('🔍 Loading children for folder:', folderId);
       
       // Load both subfolders and files for this folder
       const [foldersResult, filesResult] = await Promise.all([
@@ -410,7 +385,6 @@ export function useCore(props) {
         api.list.files(folderId)
       ]);
       
-      console.log('📁 Folder children result:', { foldersResult, filesResult });
       
       // Handle folders result
       let folders = [];
@@ -442,7 +416,6 @@ export function useCore(props) {
 
   /* ── NAVIGATION HELPERS ─────────────────────────────────────── */
   const navigateToFolder = useCallback((folder) => {
-    console.log('🧭 Navigating to folder:', folder?.name || 'root');
     setCurrentFolder(folder);
     setSearch?.(null);
     // Clear search when navigating
@@ -454,7 +427,6 @@ export function useCore(props) {
   }, []);
 
   const openFileAndClose = useCallback((file) => {
-    console.log('🔍 Opening file and closing drawer:', file);
     openFile(file);
     closeDrawer?.();
   }, [openFile, closeDrawer]);
@@ -484,19 +456,7 @@ export function useCore(props) {
   }, [searchResults, setSearch]);
 
   /* ── RETURN DATA STATE ──────────────────────────────────────── */
-  console.log('🔧 useCore returning data:', {
-    isDragOver,
-    order,
-    searchQuery,
-    searchBusy,
-    searchResultsCount: searchResults?.length || 0,
-    statusFilesInProgress: statusTabData.files.inProgress?.length || 0,
-    statusFilesReview: statusTabData.files.review?.length || 0,
-    archiveFilesCount: currentArchiveFiles?.length || 0,
-    archiveFoldersCount: currentArchiveFolders?.length || 0,
-    view: view
-  });
-  
+
   return {
     // Core state
     isDragOver,

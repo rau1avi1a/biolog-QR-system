@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
+import { filesApi } from '../../../lib/api'
 
 /**
  * PDFEditor State Hook
@@ -386,32 +387,49 @@ export function useComponentState(core, props) {
     setIsLoadingLots(true);
     const lotsMap = {};
     
+    console.log('🔍 Loading lots for components:', confirmedComponents.length);
+    
     await Promise.all(
-      confirmedComponents.map(async comp => {
+      confirmedComponents.map(async (comp, index) => {
+        // Extract itemId more reliably
         let itemId;
-        if (typeof comp.itemId === 'object' && comp.itemId !== null) {
-          itemId = comp.itemId._id || comp.itemId.toString();
-        } else {
-          itemId = comp.itemId;
+        if (comp.itemId) {
+          if (typeof comp.itemId === 'object' && comp.itemId !== null) {
+            itemId = comp.itemId._id || comp.itemId.toString();
+          } else {
+            itemId = comp.itemId.toString();
+          }
         }
         
-        if (!itemId) return;
+        if (!itemId) {
+          console.warn(`❌ Component ${index} missing itemId:`, comp);
+          return;
+        }
+        
+        console.log(`🔍 Fetching lots for item ${itemId} (${comp.displayName})`);
         
         try {
           const result = await filesApi.items.getLots(itemId);
-          if (!result.error) {
-            lotsMap[itemId] = result.data;
-            if (typeof comp.itemId === 'object' && comp.itemId !== null) {
-              lotsMap[comp.itemId._id] = result.data;
-              lotsMap[comp.itemId.toString()] = result.data;
-            }
+          
+          console.log(`📦 Lots result for ${itemId}:`, result);
+          
+          if (!result.error && result.data) {
+            const lots = Array.isArray(result.data) ? result.data : [];
+            lotsMap[itemId] = lots;
+            
+            console.log(`✅ Found ${lots.length} lots for ${comp.displayName}:`, lots);
+          } else {
+            console.warn(`⚠️ No lots found for ${comp.displayName}:`, result.error);
+            lotsMap[itemId] = [];
           }
-        } catch (e) {
+        } catch (error) {
+          console.error(`💥 Error fetching lots for ${comp.displayName}:`, error);
           lotsMap[itemId] = [];
         }
       })
     );
     
+    console.log('📊 Final lots map:', lotsMap);
     setAvailableLots(lotsMap);
     setIsLoadingLots(false);
   };
@@ -450,6 +468,9 @@ export function useComponentState(core, props) {
 
   // === EVENT HANDLERS ===
   const handleSave = useCallback(async (action = 'save') => {
+
+    console.log('🚀 HANDLE SAVE CALLED:', { action, needsConfirmation: shouldShowConfirmation(action) });
+
     setSaveAction(action);
     
     const needsConfirmation = shouldShowConfirmation(action);
@@ -465,23 +486,18 @@ export function useComponentState(core, props) {
     }
   }, [core.save, shouldShowConfirmation]);
 
-// In your state.js file, replace the handleSaveConfirm function with this:
+
 
 const handleSaveConfirm = useCallback(async (confirmationData) => {
+
+    console.log('✅ HANDLE SAVE CONFIRM CALLED:', { saveAction, confirmationData });
+
     try {
       // Show loading for work order creation when confirm button is clicked
       if (saveAction === 'create_work_order') {
         core.setIsCreatingWorkOrder(true);
         core.setUserInitiatedCreation(true);
       }
-  
-      // Clean and sanitize the confirmation data to prevent circular references
-      const sanitizedConfirmationData = confirmationData ? {
-        // Only include serializable properties
-        reason: confirmationData.reason,
-        // Add any other specific properties you need from confirmationData
-        // but avoid passing the entire object which might contain DOM elements
-      } : {};
   
       const finalConfirmationData = {
         batchQuantity: Number(batchQuantity),
@@ -490,7 +506,6 @@ const handleSaveConfirm = useCallback(async (confirmationData) => {
         solutionQuantity: solutionQuantity ? Number(solutionQuantity) : null,
         solutionUnit: solutionUnit.trim() || 'L',
         components: confirmedComponents.map(comp => ({
-          // Sanitize component data to ensure no circular references
           itemId: typeof comp.itemId === 'object' ? comp.itemId._id : comp.itemId,
           amount: comp.amount,
           scaledAmount: comp.scaledAmount,
@@ -504,7 +519,6 @@ const handleSaveConfirm = useCallback(async (confirmationData) => {
           unit: comp.unit
         })),
         scaledComponents: scaledComponents.map(comp => ({
-          // Same sanitization for scaled components
           itemId: typeof comp.itemId === 'object' ? comp.itemId._id : comp.itemId,
           amount: comp.amount,
           scaledAmount: comp.scaledAmount,
@@ -517,21 +531,103 @@ const handleSaveConfirm = useCallback(async (confirmationData) => {
           sku: comp.sku,
           unit: comp.unit
         })),
-        action: saveAction,
-        ...sanitizedConfirmationData
+        action: saveAction
       };
   
       console.log('🔍 Final confirmation data:', finalConfirmationData);
   
-      await core.save(saveAction, finalConfirmationData);
+      // Perform the save and wait for result
+      const result = await core.save(saveAction, finalConfirmationData);
       setShowSaveDialog(false);
-      refreshFiles?.();
       
-      setTimeout(() => {
-        if (core.canvasRef.current) {
-          core.initCanvas();
-        }
-      }, 200);
+      console.log('💾 Save completed, result:', result);
+      
+      // FIXED: Different handling for simple saves vs baking actions
+      const actionsThatBakePDF = ['create_work_order', 'submit_review', 'complete'];
+      const shouldClearOverlays = actionsThatBakePDF.includes(saveAction);
+      
+      if (shouldClearOverlays) {
+        console.log('🔥 Action bakes PDF - clearing overlays');
+        
+        // Clear overlays immediately since they're now baked into the PDF
+        setTimeout(() => {
+          console.log('🧹 Clearing overlays from memory...');
+          
+          // Clear all overlays and history since they're now baked
+          core.overlaysRef.current = {};
+          core.historiesRef.current = {};
+          
+          // Reset drawing state
+          core.setHistIdx(-1);
+          core.setHistory([]);
+          core.setOverlay(null);
+          
+          // Clear the canvas
+          const canvas = core.canvasRef.current;
+          const ctx = core.ctxRef.current;
+          
+          if (canvas && ctx) {
+            console.log('🧹 Clearing canvas completely...');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+          }
+          
+          console.log('✅ Overlays cleared - drawings are now baked into PDF');
+          
+        }, 100);
+        
+      } else {
+        console.log('💾 Simple save - preserving and redrawing overlays');
+        
+        // For simple saves, we need to refresh the canvas to show the preserved overlays
+        setTimeout(() => {
+          const canvas = core.canvasRef.current;
+          const ctx = core.ctxRef.current;
+          
+          if (canvas && ctx) {
+            console.log('🎨 Refreshing canvas after simple save...');
+            
+            // Get the current page overlay
+            const currentPageOverlay = core.overlaysRef.current[core.pageNo];
+            
+            if (currentPageOverlay) {
+              console.log('🖌️ Redrawing overlay for page:', core.pageNo);
+              
+              // Clear canvas first
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              
+              // Redraw the overlay
+              const img = new Image();
+              img.onload = () => {
+                try {
+                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                  console.log('✅ Overlay redrawn successfully after simple save');
+                } catch (err) {
+                  console.error('❌ Failed to redraw overlay:', err);
+                }
+              };
+              img.onerror = () => {
+                console.error('❌ Failed to load overlay image for redraw');
+              };
+              img.src = currentPageOverlay;
+              
+            } else {
+              console.log('ℹ️ No overlay to redraw for current page');
+            }
+          } else {
+            console.warn('⚠️ Canvas or context not available for refresh');
+          }
+          
+        }, 200); // Give save time to complete
+      }
+      
+      // Always refresh files to update the UI with new document data
+      if (refreshFiles) {
+        console.log('🔄 Refreshing file list...');
+        setTimeout(() => {
+          refreshFiles();
+        }, 300);
+      }
+      
     } catch (error) {
       console.error('❌ Save confirm error:', error);
       // Error handling
@@ -703,7 +799,7 @@ const handleSaveConfirm = useCallback(async (confirmationData) => {
     doc.wasRejected, 
     compact
   ]);
-  
+
   // === HEADER CONFIG ===
   const getHeaderConfig = useCallback(() => {
     return {

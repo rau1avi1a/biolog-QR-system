@@ -39,19 +39,16 @@ export default function FilesPage() {
   useEffect(() => {
     const loadFolderData = async () => {
       try {
-        console.log('🔍 Page: Starting loadFolderData...');
         setDataLoading(true);
         setError(null);
         
         if (currentFolder) {
-          console.log('🔍 Page: Loading data for folder:', currentFolder.name);
           
           const [foldersResult, filesResult] = await Promise.all([
             filesApi.folders.list(currentFolder._id),
             filesApi.files.list(currentFolder._id)
           ]);
           
-          console.log('📁 Page: Folder data results:', { foldersResult, filesResult });
           
           // FIXED: Handle folders with proper data extraction
           let foldersData = [];
@@ -61,7 +58,6 @@ export default function FilesPage() {
             // Extract the full data object first, then get the folders array
             const fullData = extractApiData(foldersResult, { folders: [] });
             foldersData = fullData.folders || [];
-            console.log('📂 Page: Extracted folders:', foldersData);
           }
           
           // FIXED: Handle files with proper data extraction - ONLY original files
@@ -72,24 +68,20 @@ export default function FilesPage() {
             // Extract the full data object first, then get the files array
             const fullData = extractApiData(filesResult, { files: [] });
             const allFiles = fullData.files || [];
-            console.log('📄 Page: All files from API:', allFiles);
             // Filter to only include original files (not batches)
             filesData = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
-            console.log('📄 Page: Filtered original files:', filesData);
           }
           
           setRoot(foldersData);
           setFiles(filesData);
           
         } else {
-          console.log('🔍 Page: Loading root data...');
           
           const [foldersResult, filesResult] = await Promise.all([
             filesApi.folders.list(),
             filesApi.files.list()
           ]);
           
-          console.log('📁 Page: Root data results:', { foldersResult, filesResult });
           
           // FIXED: Handle root folders with proper data extraction
           let foldersData = [];
@@ -101,7 +93,6 @@ export default function FilesPage() {
             // Extract the full data object first, then get the folders array
             const fullData = extractApiData(foldersResult, { folders: [] });
             foldersData = fullData.folders || [];
-            console.log('📂 Page: Extracted root folders:', foldersData);
           }
           
           // FIXED: Handle root files with proper data extraction - ONLY original files
@@ -112,7 +103,6 @@ export default function FilesPage() {
             // Extract the full data object first, then get the files array
             const fullData = extractApiData(filesResult, { files: [] });
             const allFiles = fullData.files || [];
-            console.log('📄 Page: All root files from API:', allFiles);
             // Filter to only include original files (not batches)
             filesData = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
             console.log('📄 Page: Filtered root original files:', filesData);
@@ -122,7 +112,6 @@ export default function FilesPage() {
           setFiles(filesData);
         }
         
-        console.log('✅ Page: Data loading completed successfully');
         
       } catch (error) {
         console.error('❌ Page: Failed to load folder data:', error);
@@ -140,14 +129,12 @@ export default function FilesPage() {
   // === FOLDER OPERATIONS - FIXED ===
   const createFolder = useCallback(async (name) => {
     try {
-      console.log('🔍 Page: Creating folder:', name, 'in:', currentFolder?.name || 'root');
       const result = await filesApi.folders.create(name, currentFolder?._id);
       
       if (hasApiError(result)) {
         throw new Error(handleApiError(result));
       }
       
-      console.log('✅ Page: Created folder successfully');
       triggerRefresh();
     } catch (error) {
       console.error('❌ Page: Failed to create folder:', error);
@@ -158,14 +145,12 @@ export default function FilesPage() {
 
   const updateFolder = useCallback(async (id, name) => {
     try {
-      console.log('🔍 Page: Updating folder:', id, 'to:', name);
       const result = await filesApi.folders.update(id, name);
       
       if (hasApiError(result)) {
         throw new Error(handleApiError(result));
       }
       
-      console.log('✅ Page: Updated folder successfully');
       triggerRefresh();
     } catch (error) {
       console.error('❌ Page: Failed to update folder:', error);
@@ -176,14 +161,12 @@ export default function FilesPage() {
 
   const deleteFolder = useCallback(async (id) => {
     try {
-      console.log('🔍 Page: Deleting folder:', id);
       const result = await filesApi.folders.remove(id);
       
       if (hasApiError(result)) {
         throw new Error(handleApiError(result));
       }
       
-      console.log('✅ Page: Deleted folder successfully');
       
       // If we deleted the current folder, go back to root
       if (currentFolder?._id === id) {
@@ -201,14 +184,12 @@ export default function FilesPage() {
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList.length) return;
     
-    console.log('🔍 Page: Uploading', fileList.length, 'files...');
     setUploading(true);
     setUploadProgress({ current: 0, total: fileList.length });
     
     try {
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
-        console.log(`🔍 Page: Uploading file ${i + 1}/${fileList.length}:`, file.name);
         const result = await filesApi.files.upload(file, currentFolder?._id);
         
         if (hasApiError(result)) {
@@ -218,7 +199,6 @@ export default function FilesPage() {
         setUploadProgress({ current: i + 1, total: fileList.length });
       }
       
-      console.log('✅ Page: All files uploaded successfully');
       triggerRefresh();
     } catch (error) {
       console.error('❌ Page: Upload failed:', error);
@@ -233,7 +213,6 @@ export default function FilesPage() {
   const onFolderUpload = useCallback(async (fileList) => {
     if (!fileList.length) return;
     
-    console.log('🔍 Page: Batch uploading', fileList.length, 'files with folder structure...');
     setUploading(true);
     setUploadProgress({ current: 0, total: fileList.length });
 
@@ -243,7 +222,6 @@ export default function FilesPage() {
         relativePath: file.webkitRelativePath || file.name
       }));
 
-      console.log('🔍 Page: File structure preview:', fileDataArray.slice(0, 3));
 
       const result = await filesApi.files.uploadBatch(fileDataArray, currentFolder?._id);
       
@@ -251,7 +229,6 @@ export default function FilesPage() {
         throw new Error(handleApiError(result));
       }
 
-      console.log('✅ Page: Batch upload completed successfully');
       triggerRefresh();
     } catch (error) {
       console.error('❌ Page: Batch upload failed:', error);
@@ -266,7 +243,6 @@ export default function FilesPage() {
 // === ENHANCED FILE OPENING LOGIC - FIXED ===
 const openFile = useCallback(async (file) => {
   try {
-    console.log('🔍 Page: Opening file:', file);
     
     if (!file || !file._id) {
       throw new Error('Invalid file data');
@@ -284,7 +260,6 @@ const openFile = useCallback(async (file) => {
 
     if (isBatchFile) {
       // This is a batch file
-      console.log('📦 Page: Opening batch file:', file._id);
       
       const result = await filesApi.batches.get(file._id);
       
@@ -454,7 +429,6 @@ const openFile = useCallback(async (file) => {
       // Now test the wrapper with debug enabled
       const result = await filesApi.files.getWithPdf(file._id);
       
-      console.log('📄 Page: Original file API result:', result);
       
       if (hasApiError(result)) {
         throw new Error('Failed to load file: ' + handleApiError(result));
@@ -462,15 +436,7 @@ const openFile = useCallback(async (file) => {
       
       const fileData = extractApiData(result);
       
-      // DEBUG: Let's see what extractApiData is doing
-      console.log('🔍 DEBUG extractApiData:', {
-        resultData: result.data,
-        extractedData: fileData,
-        resultDataPdf: result.data?.pdf,
-        extractedDataPdf: fileData?.pdf,
-        resultKeys: result.data ? Object.keys(result.data) : [],
-        extractedKeys: fileData ? Object.keys(fileData) : []
-      });
+
       
       if (!fileData) {
         throw new Error('No data returned from file API');
@@ -505,7 +471,6 @@ const openFile = useCallback(async (file) => {
         fileName: fileData.fileName || file.fileName || 'Untitled File'
       };
       
-      console.log('✅ Page: Original file loaded successfully with PDF data');
       setCurrentDoc(docData);
     }
     
@@ -585,18 +550,7 @@ const openFile = useCallback(async (file) => {
     refreshTrigger,
   };
 
-  console.log('🔍 Page: Passing props to FileNavigator:', {
-    rootCount: Array.isArray(root) ? root.length : 'not array',
-    rootType: typeof root,
-    filesCount: Array.isArray(files) ? files.length : 'not array',
-    filesType: typeof files,
-    currentFolder: currentFolder?.name || 'none',
-    view,
-    uploading,
-    dataLoading,
-    hasError: !!error,
-    currentDoc: currentDoc?.fileName || 'none'
-  });
+
 
   // === RENDER ===
   return (
