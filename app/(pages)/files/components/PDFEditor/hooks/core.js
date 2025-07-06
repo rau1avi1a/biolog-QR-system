@@ -613,6 +613,9 @@ const checkWorkOrderStatus = useCallback(async () => {
 
   // === SAVE FUNCTIONALITY ===
 const save = useCallback(async (action = 'save', confirmationData = null) => {
+
+    console.log('🔧 CORE.SAVE CALLED:', { action, confirmationData, docFileName: doc?.fileName });
+
     // Check if saving is allowed
     if (!doc) return;
     if (doc.isArchived || doc.status === 'Completed') {
@@ -634,19 +637,23 @@ const save = useCallback(async (action = 'save', confirmationData = null) => {
           throw new Error(result.error);
         }
         
-        setCurrentDoc({
-          ...doc,
-          ...result.data,
-          isBatch: true
-        });
+        // FIXED: Update current document with result
+        if (setCurrentDoc && result.data) {
+          setCurrentDoc({
+            ...doc,
+            ...result.data,
+            isBatch: true
+          });
+        }
         
         refreshFiles?.();
+        return result; // Return the result
       } catch (err) {
         alert('Error during rejection: ' + (err.message || 'Unknown error'));
+        throw err;
       } finally {
         setIsSaving(false);
       }
-      return;
     }
   
     // Get canvas dimensions for proper scaling
@@ -663,8 +670,10 @@ const save = useCallback(async (action = 'save', confirmationData = null) => {
     } : null;
   
     setIsSaving(true);
+    
     try {
       const isOriginal = !doc.isBatch && !doc.originalFileId;
+      let result; // Declare result variable
       
       if (isOriginal) {
         // Original file - create new batch using the editor API
@@ -684,7 +693,7 @@ const save = useCallback(async (action = 'save', confirmationData = null) => {
           editorData.createWorkOrder = true; // Flag to trigger work order creation
         }
   
-        const result = await filesApi.editor.saveFromEditor(
+        result = await filesApi.editor.saveFromEditor(
           doc._id,
           editorData,
           action,
@@ -695,20 +704,46 @@ const save = useCallback(async (action = 'save', confirmationData = null) => {
           throw new Error(result.error);
         }
         
-        // Switch to the new batch
-        const newBatchData = result.data;
-        setCurrentDoc({
-          ...newBatchData,
-          pdf: newBatchData.signedPdf ? 
-            `data:application/pdf;base64,${newBatchData.signedPdf.data}` : 
-            doc.pdf,
-          isBatch: true,
-          originalFileId: newBatchData.fileId || doc._id,
-          // For work order creation, set initial status
-          status: action === 'create_work_order' ? 'In Progress' : (newBatchData.status || 'Draft'),
-          workOrderCreated: action === 'create_work_order' ? true : (newBatchData.workOrderCreated || false),
-          workOrderStatus: action === 'create_work_order' ? 'creating' : (newBatchData.workOrderStatus || 'not_created')
+        // ENHANCED DEBUG: Check what the save API actually returns
+        console.log('🔍 SAVE DEBUG - API Response (Original File):', {
+          hasResult: !!result,
+          hasResultData: !!(result?.data),
+          resultKeys: result?.data ? Object.keys(result.data) : [],
+          fileName: result?.data?.fileName,
+          runNumber: result?.data?.runNumber,
+          status: result?.data?.status,
+          overlays: result?.data?.overlays ? Object.keys(result.data.overlays) : [],
+          hasSignedPdf: !!(result?.data?.signedPdf),
+          action: action
         });
+        
+        // FIXED: Update current document with new batch data
+        if (setCurrentDoc && result.data) {
+          const newBatchData = result.data;
+          const updatedDoc = {
+            ...newBatchData,
+            pdf: newBatchData.signedPdf ? 
+              `data:application/pdf;base64,${newBatchData.signedPdf.data}` : 
+              doc.pdf,
+            isBatch: true,
+            originalFileId: newBatchData.fileId || doc._id,
+            // For work order creation, set initial status
+            status: action === 'create_work_order' ? 'In Progress' : (newBatchData.status || 'Draft'),
+            workOrderCreated: action === 'create_work_order' ? true : (newBatchData.workOrderCreated || false),
+            workOrderStatus: action === 'create_work_order' ? 'creating' : (newBatchData.workOrderStatus || 'not_created')
+          };
+          
+          // ENHANCED DEBUG: Check what we're setting
+          console.log('🔍 SAVE DEBUG - Setting Updated Doc (Original File):', {
+            fileName: updatedDoc.fileName,
+            runNumber: updatedDoc.runNumber,
+            status: updatedDoc.status,
+            overlays: updatedDoc.overlays ? Object.keys(updatedDoc.overlays) : [],
+            hasSignedPdf: !!updatedDoc.signedPdf
+          });
+          
+          setCurrentDoc(updatedDoc);
+        }
         
         // Set work order creation flags for UI
         if (action === 'create_work_order') {
@@ -764,23 +799,66 @@ const save = useCallback(async (action = 'save', confirmationData = null) => {
           updateData.scaledComponents = confirmationData.components || confirmationData.scaledComponents;
         }
   
-        const result = await filesApi.batches.update(doc._id, updateData);
+        result = await filesApi.batches.update(doc._id, updateData);
         
         if (result.error) {
           throw new Error(result.error);
         }
         
-        setCurrentDoc({
-          ...doc,
-          ...result.data,
-          pdf: result.data.signedPdf ? 
-            `data:application/pdf;base64,${result.data.signedPdf.data}` : 
-            doc.pdf,
-          isBatch: true
+        // ENHANCED DEBUG: Check what the save API actually returns
+        console.log('🔍 SAVE DEBUG - API Response (Existing Batch):', {
+          hasResult: !!result,
+          hasResultData: !!(result?.data),
+          resultKeys: result?.data ? Object.keys(result.data) : [],
+          fileName: result?.data?.fileName,
+          runNumber: result?.data?.runNumber,
+          status: result?.data?.status,
+          overlays: result?.data?.overlays ? Object.keys(result.data.overlays) : [],
+          hasSignedPdf: !!(result?.data?.signedPdf),
+          action: action
         });
+        
+        // ENHANCED DEBUG: Check current document before update
+        console.log('🔍 SAVE DEBUG - Current Doc Before Update:', {
+          currentFileName: doc?.fileName,
+          currentRunNumber: doc?.runNumber,
+          currentStatus: doc?.status,
+          currentOverlays: doc?.overlays ? Object.keys(doc.overlays) : []
+        });
+        
+        // FIXED: Update current document with updated batch data
+        if (setCurrentDoc && result.data) {
+          const updatedDoc = {
+            ...doc,
+            ...result.data,
+            pdf: result.data.signedPdf ? 
+              `data:application/pdf;base64,${result.data.signedPdf.data}` : 
+              doc.pdf,
+            isBatch: true
+          };
+          
+          // ENHANCED DEBUG: Check what we're setting
+          console.log('🔍 SAVE DEBUG - Setting Updated Doc (Existing Batch):', {
+            fileName: updatedDoc.fileName,
+            runNumber: updatedDoc.runNumber,
+            status: updatedDoc.status,
+            overlays: updatedDoc.overlays ? Object.keys(updatedDoc.overlays) : [],
+            hasSignedPdf: !!updatedDoc.signedPdf
+          });
+          
+          setCurrentDoc(updatedDoc);
+        } else {
+          console.warn('⚠️ SAVE DEBUG - No result data to update document with:', {
+            hasSetCurrentDoc: !!setCurrentDoc,
+            hasResultData: !!(result?.data)
+          });
+        }
       }
   
-      refreshFiles?.();
+      // FIXED: Refresh the file list
+      if (refreshFiles) {
+        refreshFiles();
+      }
       
       // Start polling for work order creation
       if (action === 'create_work_order') {
@@ -788,6 +866,8 @@ const save = useCallback(async (action = 'save', confirmationData = null) => {
           startWorkOrderPolling();
         }, 1000);
       }
+      
+      return result; // Return the result
       
     } catch (err) {
       console.error('💥 Save error details:', err);
@@ -834,8 +914,8 @@ const save = useCallback(async (action = 'save', confirmationData = null) => {
     w.addEventListener('load', ready);
   }, [blobUri, buildLetterPdf]);
 
-  // === DOCUMENT RESET ===
-  useEffect(() => {
+// === DOCUMENT RESET ===
+useEffect(() => {
     setBlobUri(doc?.pdf || null);
     setPageNo(1);
     

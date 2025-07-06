@@ -379,6 +379,46 @@ export async function GET(request) {
           message: 'Work order created successfully'
         });
       }
+
+      case 'assemblybuild': {
+        const assemblyBuildId = searchParams.get('id');
+        const workOrderId = searchParams.get('workOrderId');
+        
+        if (assemblyBuildId) {
+          // Get specific assembly build
+          const { createAssemblyBuildService } = await import('@/services/netsuite/assemblyBuild.service.js');
+          const assemblyBuildService = createAssemblyBuildService(user);
+          const result = await assemblyBuildService.getAssemblyBuildStatus(assemblyBuildId);
+          
+          return NextResponse.json({
+            success: result.success,
+            data: result.success ? result.assemblyBuild : null,
+            error: result.success ? null : result.error
+          });
+          
+        } else if (workOrderId) {
+          // Get assembly builds for a work order
+          const { createAssemblyBuildService } = await import('@/services/netsuite/assemblyBuild.service.js');
+          const assemblyBuildService = createAssemblyBuildService(user);
+          const result = await assemblyBuildService.getAssemblyBuildsForWorkOrder(workOrderId);
+          
+          return NextResponse.json({
+            success: result.success,
+            data: {
+              assemblyBuilds: result.assemblyBuilds,
+              count: result.count
+            },
+            error: result.success ? null : result.error
+          });
+          
+        } else {
+          return NextResponse.json({
+            success: false,
+            data: null,
+            error: 'Either assemblyBuildId or workOrderId is required'
+          }, { status: 400 });
+        }
+      }
       
       case 'setup': {
         const hasAccess = user.hasNetSuiteAccess();
@@ -749,6 +789,63 @@ export async function POST(request) {
         error: null,
         message: 'BOM imported successfully'
         });
+    }
+
+    case 'assemblybuild': {
+      const { 
+        batchId, 
+        workOrderInternalId, 
+        quantityCompleted,
+        actualComponents,
+        completionDate 
+      } = body;
+    
+      if (!quantityCompleted || quantityCompleted <= 0) {
+        return NextResponse.json({
+          success: false,
+          data: null,
+          error: 'Quantity completed is required and must be greater than 0'
+        }, { status: 400 });
+      }
+    
+      const { createAssemblyBuildService } = await import('@/services/netsuite/assemblyBuild.service.js');
+      const assemblyBuildService = createAssemblyBuildService(user);
+      let result;
+    
+      if (batchId) {
+        // Complete work order for a specific batch
+        const submissionData = {
+          solutionQuantity: quantityCompleted,
+          solutionUnit: body.solutionUnit || 'mL',
+          confirmedComponents: actualComponents || [],
+          solutionLotNumber: body.solutionLotNumber
+        };
+        
+        result = await assemblyBuildService.completeWorkOrderForBatch(batchId, submissionData);
+        
+      } else if (workOrderInternalId) {
+        // Direct assembly build creation
+        result = await assemblyBuildService.createAssemblyBuild({
+          workOrderInternalId,
+          quantityCompleted,
+          actualComponents,
+          completionDate
+        });
+        
+      } else {
+        return NextResponse.json({
+          success: false,
+          data: null,
+          error: 'Either batchId or workOrderInternalId is required'
+        }, { status: 400 });
+      }
+    
+      return NextResponse.json({
+        success: result.success,
+        data: result,
+        error: result.success ? null : result.error,
+        message: 'Assembly build created successfully'
+      });
     }
 
 

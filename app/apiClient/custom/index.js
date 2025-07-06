@@ -233,6 +233,94 @@ export function customOperations(apiManager, handleApiCall) {
           return { data: null, error: error.message }
         }
       },
+
+            // === ASSEMBLY BUILD OPERATIONS ===
+            async createAssemblyBuild(data) {
+              const { 
+                batchId, 
+                workOrderInternalId, 
+                quantityCompleted,
+                actualComponents,
+                completionDate,
+                solutionUnit,
+                solutionLotNumber
+              } = data;
+      
+              if (!quantityCompleted || quantityCompleted <= 0) {
+                return { data: null, error: 'Quantity completed is required and must be greater than 0' };
+              }
+      
+              if (!batchId && !workOrderInternalId) {
+                return { data: null, error: 'Either batchId or workOrderInternalId is required' };
+              }
+      
+              return handleApiCall('custom', 'create-assembly-build', data, () =>
+                apiManager.client('netsuite').custom('assemblybuild', {
+                  batchId,
+                  workOrderInternalId,
+                  quantityCompleted,
+                  actualComponents,
+                  completionDate,
+                  solutionUnit,
+                  solutionLotNumber
+                }, 'POST')
+              );
+            },
+      
+            async createAssemblyBuildFromBatch(batchId, submissionData) {
+              if (!batchId) {
+                return { data: null, error: 'batchId is required' };
+              }
+      
+              const {
+                solutionQuantity,
+                solutionUnit = 'mL',
+                confirmedComponents = [],
+                solutionLotNumber
+              } = submissionData;
+      
+              if (!solutionQuantity || solutionQuantity <= 0) {
+                return { data: null, error: 'Solution quantity is required and must be greater than 0' };
+              }
+      
+              return this.createAssemblyBuild({
+                batchId,
+                quantityCompleted: solutionQuantity,
+                actualComponents: confirmedComponents,
+                solutionUnit,
+                solutionLotNumber
+              });
+            },
+      
+            async getAssemblyBuildStatus(assemblyBuildId) {
+              if (!assemblyBuildId) {
+                return { data: null, error: 'assemblyBuildId is required' };
+              }
+      
+              try {
+                const response = await fetch(`/api/netsuite?action=assemblybuild&id=${assemblyBuildId}`);
+                if (!response.ok) throw new Error('Failed to get assembly build status');
+                const result = await response.json();
+                return { data: result, error: null };
+              } catch (error) {
+                return { data: null, error: error.message };
+              }
+            },
+      
+            async getAssemblyBuildsForWorkOrder(workOrderId) {
+              if (!workOrderId) {
+                return { data: null, error: 'workOrderId is required' };
+              }
+      
+              try {
+                const response = await fetch(`/api/netsuite?action=assemblybuild&workOrderId=${workOrderId}`);
+                if (!response.ok) throw new Error('Failed to get assembly builds for work order');
+                const result = await response.json();
+                return { data: result, error: null };
+              } catch (error) {
+                return { data: null, error: error.message };
+              }
+            },
   
       // === INVENTORY OPERATIONS ===
       async getItemLots(itemId, lotId = null) {

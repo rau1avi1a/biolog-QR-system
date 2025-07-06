@@ -191,40 +191,25 @@ export class CoreService {
   /**
    * Update document by ID
    */
-  async updateById(id, updateData, options = {}) {
-    await this.connect();
-    
-    const { 
-      populate = [], 
-      includeFields = [], 
-      excludeFields = [],
-      runValidators = true,
-      new: returnNew = true,
-      session = null 
-    } = options;
-    
+  async updateById(id, data) {
     try {
-      const cleanData = this.cleanUpdateData(updateData);
+      await this.connect();
       
-      let query = this.model.findByIdAndUpdate(
-        id, 
-        cleanData, 
-        { 
-          new: returnNew, 
-          runValidators,
-          ...(session && { session })
-        }
-      );
+      // FIXED: Handle Buffer objects before saving to prevent serialization issues
+      const sanitizedData = this.sanitizeBuffers(data);
       
-      const selectStr = this.buildSelect(includeFields, excludeFields);
-      if (selectStr) query = query.select(selectStr);
-      
-      const populateFields = this.buildPopulate(populate);
-      populateFields.forEach(pop => {
-        query = query.populate(pop);
+      console.log('🔍 CoreService updateById:', {
+        id,
+        hasSignedPdf: !!sanitizedData.signedPdf,
+        signedPdfDataType: sanitizedData.signedPdf?.data ? typeof sanitizedData.signedPdf.data : 'no data',
+        isBuffer: sanitizedData.signedPdf?.data ? Buffer.isBuffer(sanitizedData.signedPdf.data) : false
       });
       
-      const result = await query.lean().exec();
+      const result = await this.model.findByIdAndUpdate(
+        id,
+        { $set: sanitizedData },
+        { new: true, runValidators: false, lean: false }
+      );
       
       if (!result) {
         throw new Error(`${this.modelName} not found`);
@@ -234,6 +219,31 @@ export class CoreService {
     } catch (error) {
       throw new Error(`Error updating ${this.modelName}: ${error.message}`);
     }
+  }
+  
+  // Helper method to sanitize Buffer objects
+  sanitizeBuffers(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    
+    const sanitized = Array.isArray(obj) ? [...obj] : { ...obj };
+    
+    for (const [key, value] of Object.entries(sanitized)) {
+      if (Buffer.isBuffer(value)) {
+        // Keep Buffer as-is
+        sanitized[key] = value;
+      } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // Check for serialized Buffer objects
+        if (value.type === 'Buffer' && Array.isArray(value.data)) {
+          console.log(`🔧 Converting serialized Buffer back to Buffer for ${key}`);
+          sanitized[key] = Buffer.from(value.data);
+        } else {
+          // Recursively sanitize nested objects
+          sanitized[key] = this.sanitizeBuffers(value);
+        }
+      }
+    }
+    
+    return sanitized;
   }
 
   /**

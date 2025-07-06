@@ -184,6 +184,16 @@ const batchSchema = new Schema({
   workOrderError: { type: String },
   workOrderFailedAt: { type: Date },
   
+    // Assembly Build fields (when work order is completed)
+    assemblyBuildId: { type: String }, // NetSuite internal ID
+    assemblyBuildTranId: { type: String }, // The ASSYB number for searching
+    assemblyBuildCreated: { type: Boolean, default: false },
+    assemblyBuildCreatedAt: { type: Date },
+    workOrderCompleted: { type: Boolean, default: false },
+    workOrderCompletedAt: { type: Date },
+    workOrderCompletionError: { type: String },
+    workOrderCompletionFailedAt: { type: Date },  
+
   // NetSuite work order data
   netsuiteWorkOrderData: {
     workOrderId: { type: String },
@@ -196,9 +206,11 @@ const batchSchema = new Schema({
     createdAt: { type: Date },
     completedAt: { type: Date },
     cancelledAt: { type: Date },
+    // Assembly build data (when completed)
+    assemblyBuildId: { type: String },
+    assemblyBuildTranId: { type: String }, // The ASSYB number
     lastSyncAt: { type: Date }
   },
-
   // Chemical transaction fields
   chemicalsTransacted: { type: Boolean, default: false },
   transactionDate: { type: Date },

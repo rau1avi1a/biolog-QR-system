@@ -215,7 +215,14 @@ export const filesApi = {
       return handleApiCall('items.getLots', async () => {
         const result = await api.get.itemLots(id);
         
-        // FIXED: Return the full data object, not just the lots array
+        // FIXED: Extract lots from nested structure for backward compatibility
+        if (result.data && result.data.lots) {
+          return {
+            data: result.data.lots,  // Return just the lots array
+            error: result.error
+          };
+        }
+        
         return result;
       });
     }
@@ -392,6 +399,33 @@ workOrders: {
     });
   },
 
+    // === ASSEMBLY BUILD OPERATIONS ===
+    assemblyBuild: {
+      async createFromBatch(batchId, submissionData) {
+        return handleApiCall('assemblyBuild.createFromBatch', async () => {
+          return await api.custom.createAssemblyBuildFromBatch(batchId, submissionData);
+        });
+      },
+  
+      async getStatus(assemblyBuildId) {
+        return handleApiCall('assemblyBuild.getStatus', async () => {
+          return await api.custom.getAssemblyBuildStatus(assemblyBuildId);
+        });
+      },
+  
+      async getForWorkOrder(workOrderId) {
+        return handleApiCall('assemblyBuild.getForWorkOrder', async () => {
+          return await api.custom.getAssemblyBuildsForWorkOrder(workOrderId);
+        });
+      },
+  
+      async create(data) {
+        return handleApiCall('assemblyBuild.create', async () => {
+          return await api.custom.createAssemblyBuild(data);
+        });
+      }
+    },
+
   // Alternative direct call if the above doesn't work
   async getStatusDirect(batchId) {
     return handleApiCall('workOrders.getStatusDirect', async () => {
@@ -556,4 +590,4 @@ export function normalizeFileData(file) {
 }
 
 // Export individual API modules for focused imports
-export const { folders, files, batches, items, workOrders, workflow, editor, validation } = filesApi;
+export const { folders, files, batches, items, workOrders, assemblyBuild, workflow, editor, validation } = filesApi;
