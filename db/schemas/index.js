@@ -163,13 +163,20 @@ const batchSchema = new Schema({
   status: {
     type: String,
     enum: ['Draft', 'In Progress', 'Review', 'Completed'],
-    default: 'Draft',
+    default: 'In Progress',
     index: true
   },
 
   // Archive handling
   isArchived: { type: Boolean, default: false },
-  archivedAt: { type: Date },
+  archivedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
   folderPath: { type: String },
 
   // Enhanced Work Order fields
@@ -180,19 +187,54 @@ const batchSchema = new Schema({
     enum: ['not_created', 'creating', 'created', 'completed', 'cancelled', 'failed'],
     default: 'not_created'
   },
-  workOrderCreatedAt: { type: Date },
+  workOrderCreatedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
   workOrderError: { type: String },
-  workOrderFailedAt: { type: Date },
+  workOrderFailedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
   
-    // Assembly Build fields (when work order is completed)
-    assemblyBuildId: { type: String }, // NetSuite internal ID
-    assemblyBuildTranId: { type: String }, // The ASSYB number for searching
-    assemblyBuildCreated: { type: Boolean, default: false },
-    assemblyBuildCreatedAt: { type: Date },
-    workOrderCompleted: { type: Boolean, default: false },
-    workOrderCompletedAt: { type: Date },
-    workOrderCompletionError: { type: String },
-    workOrderCompletionFailedAt: { type: Date },  
+  // Assembly Build fields (when work order is completed)
+  assemblyBuildId: { type: String }, // NetSuite internal ID
+  assemblyBuildTranId: { type: String }, // The ASSYB number for searching
+  assemblyBuildCreated: { type: Boolean, default: false },
+  assemblyBuildCreatedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
+  workOrderCompleted: { type: Boolean, default: false },
+  workOrderCompletedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
+  workOrderCompletionError: { type: String },
+  workOrderCompletionFailedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
 
   // NetSuite work order data
   netsuiteWorkOrderData: {
@@ -203,30 +245,80 @@ const batchSchema = new Schema({
     quantity: { type: Number },
     status: { type: String },
     orderStatus: { type: String },
-    createdAt: { type: Date },
-    completedAt: { type: Date },
-    cancelledAt: { type: Date },
+    createdAt: { 
+      type: Date,
+      set: function(value) {
+        // Handle ISO string conversion for date serialization
+        if (typeof value === 'string') return new Date(value);
+        return value;
+      }
+    },
+    completedAt: { 
+      type: Date,
+      set: function(value) {
+        // Handle ISO string conversion for date serialization
+        if (typeof value === 'string') return new Date(value);
+        return value;
+      }
+    },
+    cancelledAt: { 
+      type: Date,
+      set: function(value) {
+        // Handle ISO string conversion for date serialization
+        if (typeof value === 'string') return new Date(value);
+        return value;
+      }
+    },
     // Assembly build data (when completed)
     assemblyBuildId: { type: String },
     assemblyBuildTranId: { type: String }, // The ASSYB number
-    lastSyncAt: { type: Date }
+    lastSyncAt: { 
+      type: Date,
+      set: function(value) {
+        // Handle ISO string conversion for date serialization
+        if (typeof value === 'string') return new Date(value);
+        return value;
+      }
+    }
   },
+  
   // Chemical transaction fields
   chemicalsTransacted: { type: Boolean, default: false },
-  transactionDate: { type: Date },
+  transactionDate: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
 
   // Solution creation fields
   solutionCreated: { type: Boolean, default: false },
   solutionLotNumber: { type: String },
   solutionQuantity: { type: Number },
   solutionUnit: { type: String },
-  solutionCreatedDate: { type: Date },
+  solutionCreatedDate: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
 
   // Rejection handling
   wasRejected: { type: Boolean, default: false },
   rejectionReason: { type: String },
   rejectedBy: { type: String },
-  rejectedAt: { type: Date },
+  rejectedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
 
   // Confirmed components
   confirmedComponents: [{
@@ -254,15 +346,37 @@ const batchSchema = new Schema({
 
   // Workflow tracking
   signedBy: { type: String },
-  signedAt: { type: Date },
-  submittedForReviewAt: { type: Date },
-  completedAt: { type: Date },
+  signedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
+  submittedForReviewAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
+  completedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') return new Date(value);
+      return value;
+    }
+  },
   
   ...auditFields
 }, { 
   timestamps: true,
   strict: false // IMPORTANT: Allows services to add fields
 });
+
 
 // =============================================================================
 // FOLDER SCHEMA

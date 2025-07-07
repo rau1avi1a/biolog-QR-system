@@ -64,7 +64,7 @@ class BatchService extends CoreService {
     
     // Extract other fields from payload
     overlayPng = payload.overlayPng;
-    status = payload.status || 'Draft';
+    status = payload.status || 'In Progress';
     user = payload.user;
     confirmationData = payload.confirmationData;
     
@@ -232,7 +232,7 @@ class BatchService extends CoreService {
       try {
         const minimalBatch = new this.model({
           fileId: toObjectId(fileId),
-          status: 'Draft'
+          status: 'In Progress'
         });
         
         const savedMinimal = await minimalBatch.save();
@@ -296,410 +296,427 @@ class BatchService extends CoreService {
   // BATCH UPDATE - From your original updateBatch function
   // =============================================================================
   
-  async updateBatch(id, payload) {
-    await this.connect();
-    
-    const prev = await this.Batch.findById(id).populate('fileId','pdf').lean();
-    if (!prev) throw new Error('Batch not found');
+// Fixed assembly build integration section for batch.service.js updateBatch() method
+// This replaces the problematic section around lines 580-640
+
+async updateBatch(id, payload) {
+  await this.connect();
   
-    const user = payload.user || this.getSystemUser();
-  
-    // Handle PDF overlay updates
-    if (payload.overlayPng && prev?.fileId?.pdf) {
-      try {
-        console.log('🔍 Processing overlay update for batch:', id);
-        
-        // Debug the original PDF data
-        console.log('📋 Original PDF data info:', {
-          hasPdfData: !!prev.fileId.pdf?.data,
-          dataType: typeof prev.fileId.pdf?.data,
-          isBuffer: Buffer.isBuffer(prev.fileId.pdf?.data),
-          dataLength: prev.fileId.pdf?.data?.length,
-          contentType: prev.fileId.pdf?.contentType,
-          dataConstructor: prev.fileId.pdf?.data?.constructor?.name,
-          dataKeys: prev.fileId.pdf?.data && typeof prev.fileId.pdf?.data === 'object' ? Object.keys(prev.fileId.pdf?.data).slice(0, 10) : 'not object'
+  const prev = await this.Batch.findById(id).populate('fileId','pdf').lean();
+  if (!prev) throw new Error('Batch not found');
+
+  const user = payload.user || this.getSystemUser();
+
+  // Handle PDF overlay updates
+  if (payload.overlayPng && prev?.fileId?.pdf) {
+    try {
+      console.log('🔍 Processing overlay update for batch:', id);
+      
+      // Debug the original PDF data
+      console.log('📋 Original PDF data info:', {
+        hasPdfData: !!prev.fileId.pdf?.data,
+        dataType: typeof prev.fileId.pdf?.data,
+        isBuffer: Buffer.isBuffer(prev.fileId.pdf?.data),
+        dataLength: prev.fileId.pdf?.data?.length,
+        contentType: prev.fileId.pdf?.contentType,
+        dataConstructor: prev.fileId.pdf?.data?.constructor?.name,
+        dataKeys: prev.fileId.pdf?.data && typeof prev.fileId.pdf?.data === 'object' ? Object.keys(prev.fileId.pdf?.data).slice(0, 10) : 'not object'
+      });
+
+      // REMOVED: Deep PDF data analysis - moved to separate debug if needed
+      if (prev.fileId.pdf?.data && typeof prev.fileId.pdf.data === 'object') {
+        console.log('🔬 Deep PDF data analysis:', {
+          hasType: 'type' in prev.fileId.pdf.data,
+          type: prev.fileId.pdf.data.type,
+          hasDataArray: 'data' in prev.fileId.pdf.data,
+          isDataArray: Array.isArray(prev.fileId.pdf.data.data),
+          dataArrayLength: Array.isArray(prev.fileId.pdf.data.data) ? prev.fileId.pdf.data.data.length : 'not array',
+          hasBuffer: 'buffer' in prev.fileId.pdf.data,
+          hasByteLength: 'byteLength' in prev.fileId.pdf.data,
+          isMongooseDocument: prev.fileId.pdf.data.constructor?.name,
+          allKeys: Object.keys(prev.fileId.pdf.data),
+          firstFewBytes: Array.isArray(prev.fileId.pdf.data.data) ? 
+            prev.fileId.pdf.data.data.slice(0, 10) : 
+            'no data array',
+          stringPreview: typeof prev.fileId.pdf.data.toString === 'function' ? 
+            prev.fileId.pdf.data.toString().substring(0, 50) : 
+            'no toString method'
         });
-  
-        // REMOVED: Deep PDF data analysis - moved to separate debug if needed
-        if (prev.fileId.pdf?.data && typeof prev.fileId.pdf.data === 'object') {
-          console.log('🔬 Deep PDF data analysis:', {
-            hasType: 'type' in prev.fileId.pdf.data,
-            type: prev.fileId.pdf.data.type,
-            hasDataArray: 'data' in prev.fileId.pdf.data,
-            isDataArray: Array.isArray(prev.fileId.pdf.data.data),
-            dataArrayLength: Array.isArray(prev.fileId.pdf.data.data) ? prev.fileId.pdf.data.data.length : 'not array',
-            hasBuffer: 'buffer' in prev.fileId.pdf.data,
-            hasByteLength: 'byteLength' in prev.fileId.pdf.data,
-            isMongooseDocument: prev.fileId.pdf.data.constructor?.name,
-            allKeys: Object.keys(prev.fileId.pdf.data),
-            firstFewBytes: Array.isArray(prev.fileId.pdf.data.data) ? 
-              prev.fileId.pdf.data.data.slice(0, 10) : 
-              'no data array',
-            stringPreview: typeof prev.fileId.pdf.data.toString === 'function' ? 
-              prev.fileId.pdf.data.toString().substring(0, 50) : 
-              'no toString method'
-          });
-        }
-        
-        // Get the original PDF data URL
-        let originalPdfUrl;
-        if (prev.fileId.pdf?.data) {
-          if (Buffer.isBuffer(prev.fileId.pdf.data)) {
-            const base64String = prev.fileId.pdf.data.toString('base64');
-            originalPdfUrl = `data:${prev.fileId.pdf.contentType || 'application/pdf'};base64,${base64String}`;
-          } else if (typeof prev.fileId.pdf.data === 'string') {
-            // Already a string, check if it's a data URL or base64
-            if (prev.fileId.pdf.data.startsWith('data:')) {
-              originalPdfUrl = prev.fileId.pdf.data;
-            } else {
-              originalPdfUrl = `data:${prev.fileId.pdf.contentType || 'application/pdf'};base64,${prev.fileId.pdf.data}`;
-            }
-          } else if (typeof prev.fileId.pdf.data === 'object') {
-            // Handle Mongoose document or serialized Buffer
-            console.log('🔍 Handling object-type PDF data...');
-            
-            let buffer;
-            if (prev.fileId.pdf.data.type === 'Buffer' && Array.isArray(prev.fileId.pdf.data.data)) {
-              // Serialized Buffer: { type: 'Buffer', data: [1, 2, 3, ...] }
-              buffer = Buffer.from(prev.fileId.pdf.data.data);
-              console.log('✅ Reconstructed Buffer from serialized data');
-            } else if (prev.fileId.pdf.data.buffer) {
-              // MongoDB Binary object - extract the actual buffer
-              console.log('🔍 Detected MongoDB Binary object, extracting buffer...');
-              
-              // MongoDB Binary objects can be accessed in different ways
-              let extractedBuffer;
-              if (Buffer.isBuffer(prev.fileId.pdf.data.buffer)) {
-                // Direct buffer access
-                extractedBuffer = prev.fileId.pdf.data.buffer;
-              } else if (prev.fileId.pdf.data.buffer.buffer) {
-                // Nested buffer (sometimes happens with MongoDB Binary)
-                extractedBuffer = Buffer.from(prev.fileId.pdf.data.buffer.buffer);
-              } else {
-                // Convert the buffer property to Buffer
-                extractedBuffer = Buffer.from(prev.fileId.pdf.data.buffer);
-              }
-              
-              buffer = extractedBuffer;
-              console.log('✅ Extracted Buffer from MongoDB Binary:', {
-                bufferLength: buffer.length,
-                firstBytes: buffer.subarray(0, 10),
-                isPdf: buffer.toString('ascii', 0, 4) === '%PDF',
-                bufferConstructor: buffer.constructor.name
-              });
-            } else if (prev.fileId.pdf.data.byteLength) {
-              // ArrayBuffer or TypedArray
-              buffer = Buffer.from(prev.fileId.pdf.data);
-              console.log('✅ Converted ArrayBuffer/TypedArray to Buffer');
-            } else if (typeof prev.fileId.pdf.data.toString === 'function') {
-              // Try to convert to Buffer (might be a Mongoose document)
-              try {
-                buffer = Buffer.from(prev.fileId.pdf.data);
-                console.log('✅ Converted object to Buffer using Buffer.from()');
-              } catch (e) {
-                console.error('❌ Failed to convert object to Buffer:', e);
-                throw new Error('Cannot convert PDF data object to Buffer');
-              }
-            } else {
-              console.error('❌ Unknown object structure:', Object.keys(prev.fileId.pdf.data));
-              throw new Error('Cannot handle PDF data object structure');
-            }
-            
-            // Validate the buffer contains PDF data
-            if (!buffer || buffer.length === 0) {
-              throw new Error('Extracted buffer is empty');
-            }
-            
-            if (!buffer.toString('ascii', 0, 4).startsWith('%PDF')) {
-              console.warn('⚠️ Buffer does not start with PDF header, but continuing...');
-            }
-            
-            const base64String = buffer.toString('base64');
-            console.log('📋 Base64 conversion result:', {
-              originalBufferLength: buffer.length,
-              base64Length: base64String.length,
-              base64Preview: base64String.substring(0, 50)
-            });
-            
-            originalPdfUrl = `data:${prev.fileId.pdf.contentType || 'application/pdf'};base64,${base64String}`;
+      }
+      
+      // Get the original PDF data URL
+      let originalPdfUrl;
+      if (prev.fileId.pdf?.data) {
+        if (Buffer.isBuffer(prev.fileId.pdf.data)) {
+          const base64String = prev.fileId.pdf.data.toString('base64');
+          originalPdfUrl = `data:${prev.fileId.pdf.contentType || 'application/pdf'};base64,${base64String}`;
+        } else if (typeof prev.fileId.pdf.data === 'string') {
+          // Already a string, check if it's a data URL or base64
+          if (prev.fileId.pdf.data.startsWith('data:')) {
+            originalPdfUrl = prev.fileId.pdf.data;
           } else {
-            throw new Error(`Unsupported PDF data type: ${typeof prev.fileId.pdf.data}`);
+            originalPdfUrl = `data:${prev.fileId.pdf.contentType || 'application/pdf'};base64,${prev.fileId.pdf.data}`;
           }
+        } else if (typeof prev.fileId.pdf.data === 'object') {
+          // Handle Mongoose document or serialized Buffer
+          console.log('🔍 Handling object-type PDF data...');
+          
+          let buffer;
+          if (prev.fileId.pdf.data.type === 'Buffer' && Array.isArray(prev.fileId.pdf.data.data)) {
+            // Serialized Buffer: { type: 'Buffer', data: [1, 2, 3, ...] }
+            buffer = Buffer.from(prev.fileId.pdf.data.data);
+            console.log('✅ Reconstructed Buffer from serialized data');
+          } else if (prev.fileId.pdf.data.buffer) {
+            // MongoDB Binary object - extract the actual buffer
+            console.log('🔍 Detected MongoDB Binary object, extracting buffer...');
+            
+            // MongoDB Binary objects can be accessed in different ways
+            let extractedBuffer;
+            if (Buffer.isBuffer(prev.fileId.pdf.data.buffer)) {
+              // Direct buffer access
+              extractedBuffer = prev.fileId.pdf.data.buffer;
+            } else if (prev.fileId.pdf.data.buffer.buffer) {
+              // Nested buffer (sometimes happens with MongoDB Binary)
+              extractedBuffer = Buffer.from(prev.fileId.pdf.data.buffer.buffer);
+            } else {
+              // Convert the buffer property to Buffer
+              extractedBuffer = Buffer.from(prev.fileId.pdf.data.buffer);
+            }
+            
+            buffer = extractedBuffer;
+            console.log('✅ Extracted Buffer from MongoDB Binary:', {
+              bufferLength: buffer.length,
+              firstBytes: buffer.subarray(0, 10),
+              isPdf: buffer.toString('ascii', 0, 4) === '%PDF',
+              bufferConstructor: buffer.constructor.name
+            });
+          } else if (prev.fileId.pdf.data.byteLength) {
+            // ArrayBuffer or TypedArray
+            buffer = Buffer.from(prev.fileId.pdf.data);
+            console.log('✅ Converted ArrayBuffer/TypedArray to Buffer');
+          } else if (typeof prev.fileId.pdf.data.toString === 'function') {
+            // Try to convert to Buffer (might be a Mongoose document)
+            try {
+              buffer = Buffer.from(prev.fileId.pdf.data);
+              console.log('✅ Converted object to Buffer using Buffer.from()');
+            } catch (e) {
+              console.error('❌ Failed to convert object to Buffer:', e);
+              throw new Error('Cannot convert PDF data object to Buffer');
+            }
+          } else {
+            console.error('❌ Unknown object structure:', Object.keys(prev.fileId.pdf.data));
+            throw new Error('Cannot handle PDF data object structure');
+          }
+          
+          // Validate the buffer contains PDF data
+          if (!buffer || buffer.length === 0) {
+            throw new Error('Extracted buffer is empty');
+          }
+          
+          if (!buffer.toString('ascii', 0, 4).startsWith('%PDF')) {
+            console.warn('⚠️ Buffer does not start with PDF header, but continuing...');
+          }
+          
+          const base64String = buffer.toString('base64');
+          console.log('📋 Base64 conversion result:', {
+            originalBufferLength: buffer.length,
+            base64Length: base64String.length,
+            base64Preview: base64String.substring(0, 50)
+          });
+          
+          originalPdfUrl = `data:${prev.fileId.pdf.contentType || 'application/pdf'};base64,${base64String}`;
         } else {
-          throw new Error('No PDF data found in original file');
+          throw new Error(`Unsupported PDF data type: ${typeof prev.fileId.pdf.data}`);
+        }
+      } else {
+        throw new Error('No PDF data found in original file');
+      }
+      
+      console.log('📄 Constructed PDF URL info:', {
+        length: originalPdfUrl.length,
+        startsWithData: originalPdfUrl.startsWith('data:'),
+        mimeType: originalPdfUrl.substring(0, originalPdfUrl.indexOf(';')),
+        base64Part: originalPdfUrl.split(',')[1]?.length || 0,
+        firstCharsAfterComma: originalPdfUrl.split(',')[1]?.substring(0, 20) || 'no base64 part'
+      });
+      
+      // Build overlay history
+      let allOverlays = [];
+      if (prev.overlayHistory?.length) {
+        allOverlays = [...prev.overlayHistory];
+      } else if (prev.overlayPng) {
+        allOverlays = [prev.overlayPng];
+      }
+      allOverlays.push(payload.overlayPng);
+      
+      console.log('🖌️ Overlay processing info:', {
+        newOverlayLength: payload.overlayPng?.length,
+        newOverlayType: typeof payload.overlayPng,
+        newOverlayStartsWith: payload.overlayPng?.substring(0, 20),
+        totalOverlays: allOverlays.length,
+        historyOverlays: prev.overlayHistory?.length || 0
+      });
+      
+      // Apply all overlays sequentially
+      let currentPdfUrl = originalPdfUrl;
+      for (let i = 0; i < allOverlays.length; i++) {
+        const overlay = allOverlays[i];
+        console.log(`🖌️ Applying overlay ${i + 1}/${allOverlays.length}...`);
+        
+        if (!overlay || typeof overlay !== 'string') {
+          console.warn(`⚠️ Skipping invalid overlay ${i + 1}:`, typeof overlay);
+          continue;
         }
         
-        console.log('📄 Constructed PDF URL info:', {
-          length: originalPdfUrl.length,
-          startsWithData: originalPdfUrl.startsWith('data:'),
-          mimeType: originalPdfUrl.substring(0, originalPdfUrl.indexOf(';')),
-          base64Part: originalPdfUrl.split(',')[1]?.length || 0,
-          firstCharsAfterComma: originalPdfUrl.split(',')[1]?.substring(0, 20) || 'no base64 part'
-        });
+        const bakedBuffer = await this.bakeOverlayIntoPdf(currentPdfUrl, overlay);
         
-        // Build overlay history
-        let allOverlays = [];
-        if (prev.overlayHistory?.length) {
-          allOverlays = [...prev.overlayHistory];
-        } else if (prev.overlayPng) {
-          allOverlays = [prev.overlayPng];
+        // Convert Buffer back to data URL for next iteration
+        const base64String = bakedBuffer.toString('base64');
+        currentPdfUrl = `data:application/pdf;base64,${base64String}`;
+      }
+      
+      // Extract the final Buffer properly
+      const finalBase64 = currentPdfUrl.split(',')[1];
+      const finalBuffer = Buffer.from(finalBase64, 'base64');
+      
+      // IMMEDIATE validation after Buffer creation
+      console.log('🔍 Immediate post-creation buffer check:', {
+        isBuffer: Buffer.isBuffer(finalBuffer),
+        length: finalBuffer.length,
+        constructor: finalBuffer.constructor.name,
+        type: typeof finalBuffer
+      });
+      
+      // Set the signedPdf with proper Buffer
+      payload.signedPdf = { 
+        data: finalBuffer,  // This should be a proper Buffer
+        contentType: 'application/pdf' 
+      };
+      
+      // IMMEDIATE validation after assignment
+      console.log('🔍 Immediate post-assignment buffer check:', {
+        isBuffer: Buffer.isBuffer(payload.signedPdf.data),
+        length: payload.signedPdf.data?.length,
+        constructor: payload.signedPdf.data?.constructor.name,
+        type: typeof payload.signedPdf.data,
+        keys: typeof payload.signedPdf.data === 'object' ? Object.keys(payload.signedPdf.data).slice(0, 10) : 'not object'
+      });
+      
+      payload.overlayHistory = allOverlays;
+      
+      console.log('✅ PDF overlay processing completed:', {
+        overlayCount: allOverlays.length,
+        finalSize: finalBuffer.length,
+        isBuffer: Buffer.isBuffer(finalBuffer)
+      });
+      
+    } catch (e) {
+      console.error('❌ Failed to bake overlays during update:', e);
+      // Don't throw - continue with update without baked PDF
+      delete payload.signedPdf;
+    }
+  }
+  
+  // SINGLE Buffer validation before saving
+  if (payload.signedPdf?.data) {
+    console.log('🔍 Pre-save signedPdf validation:', {
+      dataType: typeof payload.signedPdf.data,
+      isBuffer: Buffer.isBuffer(payload.signedPdf.data),
+      constructor: payload.signedPdf.data?.constructor?.name,
+      hasType: payload.signedPdf.data?.type,
+      hasDataArray: Array.isArray(payload.signedPdf.data?.data),
+      dataLength: payload.signedPdf.data?.length || 'no length',
+      isNumericObject: typeof payload.signedPdf.data === 'object' && Object.keys(payload.signedPdf.data || {}).every(key => !isNaN(key)),
+      keyCount: typeof payload.signedPdf.data === 'object' ? Object.keys(payload.signedPdf.data || {}).length : 'not object'
+    });
+    
+    // Fix ANY non-Buffer signedPdf.data
+    if (!Buffer.isBuffer(payload.signedPdf.data)) {
+      console.log('🔧 signedPdf.data is not a Buffer, attempting to fix...');
+      
+      if (payload.signedPdf.data?.type === 'Buffer' && Array.isArray(payload.signedPdf.data.data)) {
+        // Serialized Buffer format: {type: 'Buffer', data: [1,2,3...]}
+        console.log('🔧 Converting serialized Buffer (type/data format)');
+        payload.signedPdf.data = Buffer.from(payload.signedPdf.data.data);
+      } else if (typeof payload.signedPdf.data === 'object' && payload.signedPdf.data !== null) {
+        // Check if it's a numeric object like {0: 123, 1: 456, ...}
+        const keys = Object.keys(payload.signedPdf.data);
+        if (keys.length > 0 && keys.every(key => !isNaN(key) && Number.isInteger(Number(key)))) {
+          console.log('🔧 Converting numeric object to Buffer');
+          const values = keys
+            .map(key => parseInt(key))
+            .sort((a, b) => a - b)
+            .map(index => payload.signedPdf.data[index]);
+          payload.signedPdf.data = Buffer.from(values);
+        } else {
+          console.error('❌ Unknown object structure for signedPdf.data:', {
+            keys: keys.slice(0, 10),
+            hasNumericKeys: keys.every(key => !isNaN(key)),
+            sampleValues: keys.slice(0, 3).map(key => ({ key, value: payload.signedPdf.data[key], type: typeof payload.signedPdf.data[key] }))
+          });
+          
+          // Last resort: remove invalid data
+          delete payload.signedPdf;
+          console.log('🗑️ Removed invalid signedPdf to prevent save error');
         }
-        allOverlays.push(payload.overlayPng);
-        
-        console.log('🖌️ Overlay processing info:', {
-          newOverlayLength: payload.overlayPng?.length,
-          newOverlayType: typeof payload.overlayPng,
-          newOverlayStartsWith: payload.overlayPng?.substring(0, 20),
-          totalOverlays: allOverlays.length,
-          historyOverlays: prev.overlayHistory?.length || 0
-        });
-        
-        // Apply all overlays sequentially
-        let currentPdfUrl = originalPdfUrl;
-        for (let i = 0; i < allOverlays.length; i++) {
-          const overlay = allOverlays[i];
-          console.log(`🖌️ Applying overlay ${i + 1}/${allOverlays.length}...`);
-          
-          if (!overlay || typeof overlay !== 'string') {
-            console.warn(`⚠️ Skipping invalid overlay ${i + 1}:`, typeof overlay);
-            continue;
-          }
-          
-          const bakedBuffer = await this.bakeOverlayIntoPdf(currentPdfUrl, overlay);
-          
-          // Convert Buffer back to data URL for next iteration
-          const base64String = bakedBuffer.toString('base64');
-          currentPdfUrl = `data:application/pdf;base64,${base64String}`;
+      } else if (typeof payload.signedPdf.data === 'string') {
+        // String - might be base64
+        console.log('🔧 Converting string to Buffer (assuming base64)');
+        try {
+          payload.signedPdf.data = Buffer.from(payload.signedPdf.data, 'base64');
+        } catch (e) {
+          console.error('❌ Failed to convert string to Buffer:', e.message);
+          delete payload.signedPdf;
         }
-        
-        // Extract the final Buffer properly
-        const finalBase64 = currentPdfUrl.split(',')[1];
-        const finalBuffer = Buffer.from(finalBase64, 'base64');
-        
-        // IMMEDIATE validation after Buffer creation
-        console.log('🔍 Immediate post-creation buffer check:', {
-          isBuffer: Buffer.isBuffer(finalBuffer),
-          length: finalBuffer.length,
-          constructor: finalBuffer.constructor.name,
-          type: typeof finalBuffer
-        });
-        
-        // Set the signedPdf with proper Buffer
-        payload.signedPdf = { 
-          data: finalBuffer,  // This should be a proper Buffer
-          contentType: 'application/pdf' 
-        };
-        
-        // IMMEDIATE validation after assignment
-        console.log('🔍 Immediate post-assignment buffer check:', {
-          isBuffer: Buffer.isBuffer(payload.signedPdf.data),
-          length: payload.signedPdf.data?.length,
-          constructor: payload.signedPdf.data?.constructor.name,
-          type: typeof payload.signedPdf.data,
-          keys: typeof payload.signedPdf.data === 'object' ? Object.keys(payload.signedPdf.data).slice(0, 10) : 'not object'
-        });
-        
-        payload.overlayHistory = allOverlays;
-        
-        console.log('✅ PDF overlay processing completed:', {
-          overlayCount: allOverlays.length,
-          finalSize: finalBuffer.length,
-          isBuffer: Buffer.isBuffer(finalBuffer)
-        });
-        
-      } catch (e) {
-        console.error('❌ Failed to bake overlays during update:', e);
-        // Don't throw - continue with update without baked PDF
+      } else {
+        console.error('❌ Cannot handle signedPdf.data type:', typeof payload.signedPdf.data);
         delete payload.signedPdf;
       }
     }
     
-    // SINGLE Buffer validation before saving
+    // Final validation and logging
     if (payload.signedPdf?.data) {
-      console.log('🔍 Pre-save signedPdf validation:', {
-        dataType: typeof payload.signedPdf.data,
-        isBuffer: Buffer.isBuffer(payload.signedPdf.data),
-        constructor: payload.signedPdf.data?.constructor?.name,
-        hasType: payload.signedPdf.data?.type,
-        hasDataArray: Array.isArray(payload.signedPdf.data?.data),
-        dataLength: payload.signedPdf.data?.length || 'no length',
-        isNumericObject: typeof payload.signedPdf.data === 'object' && Object.keys(payload.signedPdf.data || {}).every(key => !isNaN(key)),
-        keyCount: typeof payload.signedPdf.data === 'object' ? Object.keys(payload.signedPdf.data || {}).length : 'not object'
-      });
-      
-      // Fix ANY non-Buffer signedPdf.data
-      if (!Buffer.isBuffer(payload.signedPdf.data)) {
-        console.log('🔧 signedPdf.data is not a Buffer, attempting to fix...');
-        
-        if (payload.signedPdf.data?.type === 'Buffer' && Array.isArray(payload.signedPdf.data.data)) {
-          // Serialized Buffer format: {type: 'Buffer', data: [1,2,3...]}
-          console.log('🔧 Converting serialized Buffer (type/data format)');
-          payload.signedPdf.data = Buffer.from(payload.signedPdf.data.data);
-        } else if (typeof payload.signedPdf.data === 'object' && payload.signedPdf.data !== null) {
-          // Check if it's a numeric object like {0: 123, 1: 456, ...}
-          const keys = Object.keys(payload.signedPdf.data);
-          if (keys.length > 0 && keys.every(key => !isNaN(key) && Number.isInteger(Number(key)))) {
-            console.log('🔧 Converting numeric object to Buffer');
-            const values = keys
-              .map(key => parseInt(key))
-              .sort((a, b) => a - b)
-              .map(index => payload.signedPdf.data[index]);
-            payload.signedPdf.data = Buffer.from(values);
-          } else {
-            console.error('❌ Unknown object structure for signedPdf.data:', {
-              keys: keys.slice(0, 10),
-              hasNumericKeys: keys.every(key => !isNaN(key)),
-              sampleValues: keys.slice(0, 3).map(key => ({ key, value: payload.signedPdf.data[key], type: typeof payload.signedPdf.data[key] }))
-            });
-            
-            // Last resort: remove invalid data
-            delete payload.signedPdf;
-            console.log('🗑️ Removed invalid signedPdf to prevent save error');
-          }
-        } else if (typeof payload.signedPdf.data === 'string') {
-          // String - might be base64
-          console.log('🔧 Converting string to Buffer (assuming base64)');
-          try {
-            payload.signedPdf.data = Buffer.from(payload.signedPdf.data, 'base64');
-          } catch (e) {
-            console.error('❌ Failed to convert string to Buffer:', e.message);
-            delete payload.signedPdf;
-          }
-        } else {
-          console.error('❌ Cannot handle signedPdf.data type:', typeof payload.signedPdf.data);
-          delete payload.signedPdf;
-        }
-      }
-      
-      // Final validation and logging
-      if (payload.signedPdf?.data) {
-        if (Buffer.isBuffer(payload.signedPdf.data)) {
-          console.log('✅ signedPdf.data is now a valid Buffer:', {
-            length: payload.signedPdf.data.length,
-            isPdf: payload.signedPdf.data.toString('ascii', 0, 4) === '%PDF',
-            lastBytes: payload.signedPdf.data.toString('ascii', payload.signedPdf.data.length - 10)
-          });
-        } else {
-          console.error('❌ signedPdf.data is STILL not a Buffer after conversion attempts!');
-          delete payload.signedPdf;
-        }
+      if (Buffer.isBuffer(payload.signedPdf.data)) {
+        console.log('✅ signedPdf.data is now a valid Buffer:', {
+          length: payload.signedPdf.data.length,
+          isPdf: payload.signedPdf.data.toString('ascii', 0, 4) === '%PDF',
+          lastBytes: payload.signedPdf.data.toString('ascii', payload.signedPdf.data.length - 10)
+        });
+      } else {
+        console.error('❌ signedPdf.data is STILL not a Buffer after conversion attempts!');
+        delete payload.signedPdf;
       }
     }
-  
-    // Handle work order creation during update using db.services
-    if (payload.workOrderCreated && !prev.workOrderCreated) {
-      try {
-        const quantity = payload.confirmedComponents?.reduce((sum, comp) => sum + (comp.actualAmount || comp.amount || 0), 0) || 
-                        prev.snapshot?.recipeQty || 1;
-        await db.services.AsyncWorkOrderService.queueWorkOrderCreation(id, quantity, user?._id);
-      } catch (e) {
-        console.error('Failed to queue work order creation during update:', e);
-      }
-    }
-  
-    // Handle chemical transactions during update
-    if (payload.chemicalsTransacted && payload.confirmedComponents?.length > 0) {
-      try {
-        const confirmationData = { components: payload.confirmedComponents };
-        const transactionResult = await this.transactChemicals({ _id: id, runNumber: prev.runNumber, snapshot: prev.snapshot }, confirmationData, user);
-        if (transactionResult.success) {
-          console.log('Chemicals transacted successfully during update');
-        }
-      } catch (e) {
-        console.error('Failed to transact chemicals during update:', e);
-      }
-    }
-  
-    // Handle solution creation during update
-    if (payload.solutionCreated && !prev.solutionCreated && payload.solutionLotNumber) {
-      try {
-        await this.createSolutionLot(
-          { _id: id, runNumber: prev.runNumber, snapshot: prev.snapshot }, 
-          payload.solutionLotNumber,
-          payload.solutionQuantity || prev.snapshot?.recipeQty,
-          payload.solutionUnit || prev.snapshot?.recipeUnit,
-          user
-        );
-        payload.solutionCreatedDate = new Date();
-      } catch (e) {
-        console.error('Failed to create solution lot during update:', e);
-      }
-    }
+  }
 
-    if (payload.status === 'Review' && payload.chemicalsTransacted) {
-      console.log('🏗️ Batch moving to Review status - checking for work order completion...');
+  // Handle work order creation during update using db.services
+  if (payload.workOrderCreated && !prev.workOrderCreated) {
+    try {
+      const quantity = payload.confirmedComponents?.reduce((sum, comp) => sum + (comp.actualAmount || comp.amount || 0), 0) || 
+                      prev.snapshot?.recipeQty || 1;
+      await db.services.AsyncWorkOrderService.queueWorkOrderCreation(id, quantity, user?._id);
+    } catch (e) {
+      console.error('Failed to queue work order creation during update:', e);
+    }
+  }
+
+  // Handle chemical transactions during update
+  if (payload.chemicalsTransacted && payload.confirmedComponents?.length > 0) {
+    try {
+      const confirmationData = { components: payload.confirmedComponents };
+      const transactionResult = await this.transactChemicals({ _id: id, runNumber: prev.runNumber, snapshot: prev.snapshot }, confirmationData, user);
+      if (transactionResult.success) {
+        console.log('Chemicals transacted successfully during update');
+      }
+    } catch (e) {
+      console.error('Failed to transact chemicals during update:', e);
+    }
+  }
+
+  // Handle solution creation during update
+  if (payload.solutionCreated && !prev.solutionCreated && payload.solutionLotNumber) {
+    try {
+      await this.createSolutionLot(
+        { _id: id, runNumber: prev.runNumber, snapshot: prev.snapshot }, 
+        payload.solutionLotNumber,
+        payload.solutionQuantity || prev.snapshot?.recipeQty,
+        payload.solutionUnit || prev.snapshot?.recipeUnit,
+        user
+      );
+      payload.solutionCreatedDate = new Date().toISOString();
+    } catch (e) {
+      console.error('Failed to create solution lot during update:', e);
+    }
+  }
+
+  // Update the batch FIRST
+  const next = await this.updateById(id, payload);
+
+  // FIXED: Assembly build creation AFTER batch update (using correct import path and prev data)
+  if (prev.status !== 'Review' && next.status === 'Review' && payload.chemicalsTransacted) {
+    console.log('🏗️ Batch moving to Review status - checking for work order completion...');
+    
+    // Check if batch has a NetSuite work order that needs completion
+    if (prev.netsuiteWorkOrderData?.workOrderId && !prev.workOrderCompleted) {
+      console.log('🏗️ Completing NetSuite work order:', prev.netsuiteWorkOrderData.tranId);
       
-      // Check if batch has a NetSuite work order that needs completion
-      if (batch.netsuiteWorkOrderData?.workOrderId && !batch.workOrderCompleted) {
-        console.log('🏗️ Completing NetSuite work order:', batch.netsuiteWorkOrderData.tranId);
+      try {
+        // Get user for NetSuite operations (FIXED: use payload.user with fallback)
+        const user = payload.user || this.getSystemUser();
         
-        try {
-          // Get user for NetSuite operations (you'll need to pass this or get it from context)
-          const user = payload.user || await this.getUserFromContext(); // You'll need to implement this
+        // Import and use the assembly build service (FIXED: correct import path)
+        const { createAssemblyBuildService } = await import('@/db/services/netsuite/assemblyBuild.service.js');
+        const assemblyBuildService = createAssemblyBuildService(user);
+        
+        // Complete the work order by creating assembly build (using prev data)
+        const completionResult = await assemblyBuildService.completeWorkOrderForBatch(prev._id, {
+          solutionQuantity: payload.solutionQuantity || prev.snapshot?.recipeQty || 1,
+          solutionUnit: payload.solutionUnit || prev.snapshot?.recipeUnit || 'mL',
+          confirmedComponents: payload.confirmedComponents || [],
+          solutionLotNumber: payload.solutionLotNumber
+        });
+        
+        if (completionResult.success) {
+          console.log('✅ Work order completed successfully:', completionResult.assemblyBuild.id);
           
-          // Import and use the assembly build service
-          const { createAssemblyBuildService } = await import('@/services/netsuite/assemblyBuild.service.js');
-          const assemblyBuildService = createAssemblyBuildService(user);
-          
-          // Complete the work order by creating assembly build
-          const completionResult = await assemblyBuildService.completeWorkOrderForBatch(batch._id, {
-            solutionQuantity: payload.solutionQuantity || batch.snapshot?.recipeQty || 1,
-            solutionUnit: payload.solutionUnit || batch.snapshot?.recipeUnit || 'mL',
-            confirmedComponents: payload.confirmedComponents || [],
-            solutionLotNumber: payload.solutionLotNumber
-          });
-          
-          if (completionResult.success) {
-            console.log('✅ Work order completed successfully:', completionResult.assemblyBuild.id);
-            
-            // Update payload with completion data
-            payload.workOrderCompleted = true;
-            payload.workOrderCompletedAt = new Date();
-            payload.assemblyBuildId = completionResult.assemblyBuild.id;
-            payload.assemblyBuildTranId = completionResult.assemblyBuild.tranId; // ← Store the ASSYB number
-            payload.assemblyBuildCreated = true;
-            payload.assemblyBuildCreatedAt = new Date();
+          // Apply assembly build data as follow-up update
+          const assemblyBuildUpdate = {
+            workOrderCompleted: true,
+            workOrderCompletedAt: new Date(),
+            assemblyBuildId: completionResult.assemblyBuild.id,
+            assemblyBuildTranId: completionResult.assemblyBuild.tranId, // ← Store the ASSYB number
+            assemblyBuildCreated: true,
+            assemblyBuildCreatedAt: new Date(),
             
             // Update NetSuite work order data
-            payload.netsuiteWorkOrderData = {
-              ...batch.netsuiteWorkOrderData,
+            netsuiteWorkOrderData: {
+              ...prev.netsuiteWorkOrderData,
               status: 'built',
               completedAt: new Date(),
               assemblyBuildId: completionResult.assemblyBuild.id,
               assemblyBuildTranId: completionResult.assemblyBuild.tranId, // ← Store the ASSYB number
               lastSyncAt: new Date()
-            };
-            
-          } else {
-            console.error('❌ Work order completion failed:', completionResult.error);
-            // Don't fail the entire operation, just log the error
-            payload.workOrderCompletionError = completionResult.error;
-            payload.workOrderCompletionFailedAt = new Date();
-          }
+            }
+          };
           
-        } catch (error) {
-          console.error('❌ Work order completion failed with exception:', error);
+          // Apply the assembly build update to the already-updated batch
+          await this.updateById(id, assemblyBuildUpdate);
+          console.log('✅ Assembly build data applied to batch');
+          
+        } else {
+          console.error('❌ Work order completion failed:', completionResult.error);
           // Don't fail the entire operation, just log the error
-          payload.workOrderCompletionError = error.message;
-          payload.workOrderCompletionFailedAt = new Date();
+          await this.updateById(id, {
+            workOrderCompletionError: completionResult.error,
+            workOrderCompletionFailedAt: new Date().toISOString()
+          });
         }
-      } else if (!batch.netsuiteWorkOrderData?.workOrderId) {
-        console.log('ℹ️ Batch has no NetSuite work order - skipping assembly build creation');
-      } else if (batch.workOrderCompleted) {
-        console.log('ℹ️ Work order already completed - skipping assembly build creation');
+        
+      } catch (error) {
+        console.error('❌ Work order completion failed with exception:', error);
+        // Don't fail the entire operation, just log the error
+        await this.updateById(id, {
+          workOrderCompletionError: error.message,
+          workOrderCompletionFailedAt: new Date().toISOString()
+        });
       }
+    } else if (!prev.netsuiteWorkOrderData?.workOrderId) {
+      console.log('ℹ️ Batch has no NetSuite work order - skipping assembly build creation');
+    } else if (prev.workOrderCompleted) {
+      console.log('ℹ️ Work order already completed - skipping assembly build creation');
     }
-  
-    // Update the batch
-    const next = await this.updateById(id, payload);
-  
-    // Handle archiving when completed using db.services
-    if (prev.status !== 'Completed' && next.status === 'Completed') {
-      await db.services.archiveService.createArchiveCopy(next);
-    }
-  
-    return next;
   }
+
+  // Get the final updated batch state
+  const finalBatch = await this.findById(id);
+
+  // Handle archiving when completed using db.services
+  if (prev.status !== 'Completed' && finalBatch.status === 'Completed') {
+    await db.services.archiveService.createArchiveCopy(finalBatch);
+  }
+
+  return finalBatch;
+}
 
   // =============================================================================
   // BATCH RETRIEVAL - Enhanced versions

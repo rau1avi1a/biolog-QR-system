@@ -39,20 +39,20 @@ export class AsyncWorkOrderService {
           $set: {
             workOrderCreated: true,
             workOrderStatus: 'creating',
-            workOrderCreatedAt: new Date(),
+            workOrderCreatedAt: new Date().toISOString(), // FIXED: Convert to ISO string
             workOrderId: `PENDING-${Date.now()}`,
             workOrderError: null, // Clear any previous errors
             workOrderFailedAt: null
           }
         }
       );
-
+  
       if (updateResult.matchedCount === 0) {
         throw new Error('Batch not found');
       }
-
+  
       console.log('✓ Batch status set to creating, starting background job');
-
+  
       // Start the background job with better error handling
       setImmediate(() => {
         this.createWorkOrderInBackground(batchId, quantity, userId)
@@ -61,14 +61,14 @@ export class AsyncWorkOrderService {
             this.handleWorkOrderFailure(batchId, error.message);
           });
       });
-
+  
       return {
         success: true,
         batchId,
         status: 'creating',
         message: 'Work order creation started in background'
       };
-
+  
     } catch (error) {
       console.error('Error queuing work order creation:', error);
       throw error;
@@ -78,161 +78,329 @@ export class AsyncWorkOrderService {
   /**
    * Create work order in background with guaranteed database updates
    */
-  static async createWorkOrderInBackground(batchId, quantity, userId = null) {
-    try {
-      console.log('🚀 Starting background work order creation for batch:', batchId);
-      
-      // CRITICAL: Always start with fresh connection
-      await this.connect();
-      
-      // Get the batch with a fresh query
-      const batch = await this.Batch.findById(batchId)
-        .populate('fileId', 'fileName')
-        .populate('snapshot.solutionRef', 'displayName sku netsuiteInternalId')
-        .lean();
-  
-      if (!batch) {
-        throw new Error('Batch not found');
-      }
+static async createWorkOrderInBackground(batchId, quantity, userId = null) {
+  try {
+    console.log('🚀 Starting background work order creation for batch:', batchId);
+    
+    // CRITICAL: Always start with fresh connection
+    await this.connect();
+    
+    // Get the batch with a fresh query
+    const batch = await this.Batch.findById(batchId)
+      .populate('fileId', 'fileName')
+      .populate('snapshot.solutionRef', 'displayName sku netsuiteInternalId')
+      .lean();
 
-      // Verify batch is in creating state
-      if (batch.workOrderStatus !== 'creating') {
-        console.warn('⚠️ Batch not in creating state, current status:', batch.workOrderStatus);
-      }
-  
-      // Get user if provided
-      let user = null;
-      if (userId) {
-        user = await this.User.findById(userId);
-      }
-  
-      const fullUser = await this.getFullUser(user);
-      
-      // Create work order (NetSuite or local)
-      let workOrderResult;
-      
-      if (this.hasNetSuiteAccess(fullUser)) {
-        try {
-          console.log('🔗 Creating NetSuite work order...');
-          workOrderResult = await this.createNetSuiteWorkOrder(batch, quantity, fullUser);
-        } catch (error) {
-          console.error('❌ NetSuite work order creation failed, falling back to local:', error);
-          workOrderResult = this.createLocalWorkOrder(batch, quantity);
-        }
-      } else {
-        console.log('📝 No NetSuite access, creating local work order');
+    if (!batch) {
+      throw new Error('Batch not found');
+    }
+
+    // Verify batch is in creating state
+    if (batch.workOrderStatus !== 'creating') {
+      console.warn('⚠️ Batch not in creating state, current status:', batch.workOrderStatus);
+    }
+
+    // Get user if provided
+    let user = null;
+    if (userId) {
+      user = await this.User.findById(userId);
+    }
+
+    const fullUser = await this.getFullUser(user);
+    
+    // Create work order (NetSuite or local)
+    let workOrderResult;
+    
+    if (this.hasNetSuiteAccess(fullUser)) {
+      try {
+        console.log('🔗 Creating NetSuite work order...');
+        workOrderResult = await this.createNetSuiteWorkOrder(batch, quantity, fullUser);
+        console.log('✅ NetSuite work order created successfully:', {
+          tranId: workOrderResult.tranId,
+          netsuiteId: workOrderResult.netsuiteId,
+          status: workOrderResult.status
+        });
+      } catch (error) {
+        console.error('❌ NetSuite work order creation failed, falling back to local:', error);
         workOrderResult = this.createLocalWorkOrder(batch, quantity);
       }
-  
-      // FIXED: Multiple database update attempts with verification
-      const updateData = {
-        workOrderId: workOrderResult.tranId || workOrderResult.id,
-        workOrderStatus: 'created', // CRITICAL: Must be 'created'
-        workOrderCreatedAt: new Date(),
-        workOrderError: null,
-        workOrderFailedAt: null
+    } else {
+      console.log('📝 No NetSuite access, creating local work order');
+      workOrderResult = this.createLocalWorkOrder(batch, quantity);
+    }
+
+    // ENHANCED: Prepare update data with detailed logging
+    const updateData = {
+      workOrderId: workOrderResult.tranId || workOrderResult.id,
+      workOrderStatus: 'created', // CRITICAL: Must be 'created'
+      workOrderCreatedAt: new Date().toISOString(), // FIXED: Convert to ISO string
+      workOrderError: null,
+      workOrderFailedAt: null
+    };
+
+    // Store NetSuite-specific data if available
+    if (workOrderResult.source === 'netsuite') {
+      updateData.netsuiteWorkOrderData = {
+        workOrderId: workOrderResult.netsuiteId,
+        tranId: workOrderResult.tranId,
+        bomId: workOrderResult.bomId,
+        revisionId: workOrderResult.revisionId,
+        quantity: quantity,
+        status: workOrderResult.status,
+        orderStatus: workOrderResult.orderStatus,
+        // FIXED: Remove problematic date fields or convert to ISO strings
+        createdAt: new Date().toISOString(),
+        lastSyncAt: new Date().toISOString()
       };
+      
+      console.log('📊 NetSuite data prepared for database:', {
+        workOrderId: updateData.netsuiteWorkOrderData.workOrderId,
+        tranId: updateData.netsuiteWorkOrderData.tranId,
+        hasAllFields: !!(updateData.netsuiteWorkOrderData.workOrderId && updateData.netsuiteWorkOrderData.tranId)
+      });
+    }
 
-      // Store NetSuite-specific data if available
-      if (workOrderResult.source === 'netsuite') {
-        updateData.netsuiteWorkOrderData = {
-          workOrderId: workOrderResult.netsuiteId,
-          tranId: workOrderResult.tranId,
-          bomId: workOrderResult.bomId,
-          revisionId: workOrderResult.revisionId,
-          quantity: quantity,
-          status: workOrderResult.status,
-          orderStatus: workOrderResult.orderStatus,
-          createdAt: new Date(),
-          lastSyncAt: new Date()
-        };
-      }
+    console.log('📝 Complete update data prepared:', {
+      workOrderId: updateData.workOrderId,
+      workOrderStatus: updateData.workOrderStatus,
+      hasNetsuiteData: !!updateData.netsuiteWorkOrderData,
+      netsuiteDataKeys: updateData.netsuiteWorkOrderData ? Object.keys(updateData.netsuiteWorkOrderData) : [],
+      updateDataKeys: Object.keys(updateData)
+    });
 
-      // ATTEMPT: Direct update with retry logic
-      let updateSuccess = false;
-      let attempts = 0;
-      const maxAttempts = 3;
+    // ENHANCED: Database update with extensive retry logic and logging
+    let updateSuccess = false;
+    let attempts = 0;
+    const maxAttempts = 5; // Increased attempts
+    let lastError = null;
 
-      while (!updateSuccess && attempts < maxAttempts) {
-        attempts++;
-        console.log(`🔄 Database update attempt ${attempts}/${maxAttempts}`);
+    while (!updateSuccess && attempts < maxAttempts) {
+      attempts++;
+      console.log(`🔄 Database update attempt ${attempts}/${maxAttempts} for batch ${batchId}`);
 
-        try {
-          await this.connect(); // Ensure fresh connection each attempt
-          
-          const updateResult = await this.Batch.updateOne(
-            { _id: batchId },
-            { $set: updateData },
-            { upsert: false }
-          );
+      try {
+        // CRITICAL: Fresh connection each attempt
+        await this.connect();
+        
+        // PRE-UPDATE: Verify batch still exists
+        const preUpdateBatch = await this.Batch.findById(batchId).select('_id workOrderStatus').lean();
+        if (!preUpdateBatch) {
+          throw new Error('Batch no longer exists in database');
+        }
+        
+        console.log(`📋 Pre-update batch status: ${preUpdateBatch.workOrderStatus}`);
+        
+        // PERFORM UPDATE with extensive logging
+        console.log(`🔧 Executing database update with data:`, JSON.stringify(updateData, null, 2));
+        
+        const updateResult = await this.Batch.updateOne(
+          { _id: batchId },
+          { $set: updateData },
+          { 
+            upsert: false,
+            // Add these options for better reliability
+            writeConcern: { w: 'majority', j: true },
+            maxTimeMS: 10000
+          }
+        );
 
-          if (updateResult.matchedCount > 0 && updateResult.modifiedCount > 0) {
+        console.log(`📊 Update result for attempt ${attempts}:`, {
+          acknowledged: updateResult.acknowledged,
+          matchedCount: updateResult.matchedCount,
+          modifiedCount: updateResult.modifiedCount,
+          upsertedCount: updateResult.upsertedCount,
+          upsertedId: updateResult.upsertedId
+        });
+
+        // ENHANCED SUCCESS CRITERIA
+        if (updateResult.acknowledged && updateResult.matchedCount > 0) {
+          if (updateResult.modifiedCount > 0) {
             updateSuccess = true;
-            console.log('✅ Database update successful on attempt', attempts);
+            console.log(`✅ Database update successful on attempt ${attempts} - document modified`);
           } else {
-            console.warn(`⚠️ Update attempt ${attempts} matched: ${updateResult.matchedCount}, modified: ${updateResult.modifiedCount}`);
+            // Matched but not modified - check if data is already correct
+            console.log(`⚠️ Document matched but not modified on attempt ${attempts} - checking current state`);
             
-            // Wait before retry
-            if (attempts < maxAttempts) {
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+            const currentBatch = await this.Batch.findById(batchId)
+              .select('workOrderStatus workOrderId netsuiteWorkOrderData')
+              .lean();
+            
+            if (currentBatch && currentBatch.workOrderStatus === 'created' && currentBatch.workOrderId === updateData.workOrderId) {
+              console.log(`✅ Data already correct - treating as success`);
+              updateSuccess = true;
+            } else {
+              console.log(`❌ Data not correct after update:`, {
+                currentStatus: currentBatch?.workOrderStatus,
+                expectedStatus: updateData.workOrderStatus,
+                currentWorkOrderId: currentBatch?.workOrderId,
+                expectedWorkOrderId: updateData.workOrderId
+              });
             }
           }
-        } catch (updateError) {
-          console.error(`❌ Update attempt ${attempts} failed:`, updateError);
-          
-          if (attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
-          } else {
-            throw updateError;
-          }
+        } else {
+          console.error(`❌ Update attempt ${attempts} failed - no match:`, {
+            acknowledged: updateResult.acknowledged,
+            matchedCount: updateResult.matchedCount
+          });
+        }
+
+        if (!updateSuccess && attempts < maxAttempts) {
+          const delay = 1000 * attempts; // Exponential backoff
+          console.log(`⏳ Waiting ${delay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        
+      } catch (updateError) {
+        lastError = updateError;
+        console.error(`❌ Update attempt ${attempts} failed with exception:`, {
+          error: updateError.message,
+          code: updateError.code,
+          codeName: updateError.codeName,
+          stack: updateError.stack?.split('\n')[0] // Just first line of stack
+        });
+        
+        if (attempts < maxAttempts) {
+          const delay = 1000 * attempts;
+          console.log(`⏳ Waiting ${delay}ms before retry after error...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
+    }
 
-      if (!updateSuccess) {
-        throw new Error('Failed to update database after all attempts');
+    // FINAL ERROR HANDLING
+    if (!updateSuccess) {
+      const errorMessage = `Failed to update database after ${maxAttempts} attempts. Last error: ${lastError?.message || 'unknown'}`;
+      console.error(`💥 ${errorMessage}`);
+      throw new Error(errorMessage);
+    }
+
+    // ENHANCED VERIFICATION with detailed checking
+    console.log('🔍 Starting final verification...');
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Longer delay for DB consistency
+    
+    const verificationBatch = await this.Batch.findById(batchId)
+      .select('workOrderStatus workOrderId workOrderCreatedAt netsuiteWorkOrderData')
+      .lean();
+    
+    console.log('🔍 Final verification result:', {
+      found: !!verificationBatch,
+      workOrderStatus: verificationBatch?.workOrderStatus,
+      workOrderId: verificationBatch?.workOrderId,
+      workOrderCreatedAt: verificationBatch?.workOrderCreatedAt,
+      hasNetsuiteData: !!verificationBatch?.netsuiteWorkOrderData,
+      netsuiteDataKeys: verificationBatch?.netsuiteWorkOrderData ? Object.keys(verificationBatch.netsuiteWorkOrderData) : [],
+      tranId: verificationBatch?.netsuiteWorkOrderData?.tranId,
+      netsuiteWorkOrderId: verificationBatch?.netsuiteWorkOrderData?.workOrderId
+    });
+
+    // STRICT VERIFICATION
+    if (!verificationBatch) {
+      throw new Error('Verification failed - batch not found after update');
+    }
+    
+    if (verificationBatch.workOrderStatus !== 'created') {
+      throw new Error(`Verification failed - status is '${verificationBatch.workOrderStatus}', expected 'created'`);
+    }
+    
+    if (verificationBatch.workOrderId !== updateData.workOrderId) {
+      throw new Error(`Verification failed - workOrderId is '${verificationBatch.workOrderId}', expected '${updateData.workOrderId}'`);
+    }
+    
+    if (workOrderResult.source === 'netsuite' && !verificationBatch.netsuiteWorkOrderData) {
+      throw new Error('Verification failed - NetSuite data not saved');
+    }
+    
+    if (workOrderResult.source === 'netsuite' && verificationBatch.netsuiteWorkOrderData?.tranId !== workOrderResult.tranId) {
+      throw new Error(`Verification failed - NetSuite tranId is '${verificationBatch.netsuiteWorkOrderData?.tranId}', expected '${workOrderResult.tranId}'`);
+    }
+
+    console.log('🎉 Background work order creation completed successfully with verification:', {
+      batchId: batchId,
+      tranId: workOrderResult.tranId,
+      internalId: workOrderResult.netsuiteId,
+      finalStatus: verificationBatch.workOrderStatus,
+      finalWorkOrderId: verificationBatch.workOrderId,
+      source: workOrderResult.source,
+      attempts: attempts,
+      verified: true
+    });
+    
+    return {
+      success: true,
+      workOrderId: workOrderResult.tranId,
+      internalId: workOrderResult.netsuiteId,
+      source: workOrderResult.source,
+      attempts: attempts,
+      verified: true
+    };
+
+  } catch (error) {
+    console.error('💥 Background work order creation failed:', {
+      error: error.message,
+      stack: error.stack?.split('\n').slice(0, 3), // First 3 lines of stack
+      batchId: batchId
+    });
+    
+    // CRITICAL: Always record failure in database
+    await this.handleWorkOrderFailure(batchId, error.message);
+    throw error;
+  }
+}
+
+/**
+ * ENHANCED: Handle work order creation failure with better error tracking and verification
+ */
+static async handleWorkOrderFailure(batchId, errorMessage) {
+  try {
+    console.log(`🚨 Recording work order failure for batch ${batchId}: ${errorMessage}`);
+    await this.connect();
+    
+    const updateResult = await this.Batch.updateOne(
+      { _id: batchId },
+      {
+        $set: {
+          workOrderStatus: 'failed',
+          workOrderError: errorMessage,
+          workOrderFailedAt: new Date().toISOString() // FIXED: Convert to ISO string
+        }
+      },
+      {
+        writeConcern: { w: 'majority', j: true }
       }
-
-      // VERIFICATION: Confirm the update worked
-      await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for DB consistency
+    );
+    
+    console.log('📊 Failure recording result:', {
+      acknowledged: updateResult.acknowledged,
+      matchedCount: updateResult.matchedCount,
+      modifiedCount: updateResult.modifiedCount
+    });
+    
+    if (updateResult.modifiedCount > 0) {
+      console.log('✅ Work order failure recorded for batch:', batchId);
       
-      const verificationBatch = await this.Batch.findById(batchId)
-        .select('workOrderStatus workOrderId netsuiteWorkOrderData')
+      // Verify the failure was recorded
+      const verifyBatch = await this.Batch.findById(batchId)
+        .select('workOrderStatus workOrderError workOrderFailedAt')
         .lean();
       
-      console.log('🔍 Final verification:', {
-        workOrderStatus: verificationBatch.workOrderStatus,
-        workOrderId: verificationBatch.workOrderId,
-        hasNetsuiteData: !!verificationBatch.netsuiteWorkOrderData,
-        tranId: verificationBatch.netsuiteWorkOrderData?.tranId
-      });
-
-      if (verificationBatch.workOrderStatus !== 'created') {
-        console.error('❌ Verification failed! Status is still:', verificationBatch.workOrderStatus);
-        throw new Error('Database verification failed - status not updated');
-      }
-  
-      console.log('🎉 Background work order creation completed successfully:', {
-        tranId: workOrderResult.tranId,
-        internalId: workOrderResult.netsuiteId,
-        finalStatus: verificationBatch.workOrderStatus,
-        finalWorkOrderId: verificationBatch.workOrderId
+      console.log('🔍 Failure verification:', {
+        status: verifyBatch?.workOrderStatus,
+        error: verifyBatch?.workOrderError,
+        failedAt: verifyBatch?.workOrderFailedAt
       });
       
-      return {
-        success: true,
-        workOrderId: workOrderResult.tranId,
-        internalId: workOrderResult.netsuiteId,
-        source: workOrderResult.source
-      };
-  
-    } catch (error) {
-      console.error('💥 Background work order creation failed:', error);
-      
-      // CRITICAL: Always record failure in database
-      await this.handleWorkOrderFailure(batchId, error.message);
-      throw error;
+    } else {
+      console.error('❌ Failed to record work order failure - no document modified');
     }
+  } catch (error) {
+    console.error('💥 Error recording work order failure:', {
+      error: error.message,
+      originalError: errorMessage,
+      batchId: batchId
+    });
   }
+}
+
 
   /**
    * Enhanced NetSuite work order creation with timeout using db.services
@@ -302,7 +470,7 @@ export class AsyncWorkOrderService {
           $set: {
             workOrderStatus: 'failed',
             workOrderError: errorMessage,
-            workOrderFailedAt: new Date()
+            workOrderFailedAt: new Date().toISOString()
           }
         }
       );
@@ -391,10 +559,11 @@ export class AsyncWorkOrderService {
    */
   static async retryWorkOrderCreation(batchId, quantity, userId = null) {
     // Use batch service to get current batch state
-    const batch = await db.batches.getBatchById(batchId);    if (!batch) {
+    const batch = await db.batches.getBatchById(batchId);
+    if (!batch) {
       throw new Error('Batch not found');
     }
-
+  
     // Reset work order status and retry
     const resetResult = await this.Batch.updateOne(
       { _id: batchId },
@@ -404,16 +573,16 @@ export class AsyncWorkOrderService {
           workOrderError: null,
           workOrderFailedAt: null,
           workOrderId: `PENDING-RETRY-${Date.now()}`,
-          workOrderCreatedAt: new Date()
+          workOrderCreatedAt: new Date().toISOString() // FIXED: Convert to ISO string
         },
         $unset: { netsuiteWorkOrderData: "" }
       }
     );
-
+  
     if (resetResult.matchedCount === 0) {
       throw new Error('Batch not found for retry');
     }
-
+  
     return this.queueWorkOrderCreation(batchId, quantity, userId);
   }
 

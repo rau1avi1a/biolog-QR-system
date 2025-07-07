@@ -32,139 +32,208 @@ export class NetSuiteAssemblyBuildService {
     return db.connect();
   }
 
-  /**
-   * Create an assembly build from a work order
-   * This is the main function that completes production
-   */
-  async createAssemblyBuild({
+/**
+ * Transform work order to assembly build using NetSuite's record.transform
+ */
+async transformWorkOrderToAssemblyBuild(
     workOrderInternalId,
-    quantityCompleted,
-    actualComponents = null,
-    completionDate = null
-  }) {
-    try {
-      console.log('🏗️ Creating assembly build for work order:', workOrderInternalId);
-
-      // Step 1: Transform work order to assembly build
-      const assemblyBuild = await this.transformWorkOrderToAssemblyBuild(
-        workOrderInternalId, 
-        quantityCompleted
-      );
-
-      // Step 2: Set actual component quantities if provided
-      if (actualComponents && actualComponents.length > 0) {
-        await this.setActualComponentQuantities(assemblyBuild, actualComponents);
-      }
-
-      // Step 3: Set completion date if provided
-      if (completionDate) {
-        assemblyBuild.setValue({
-          fieldId: 'trandate',
-          value: completionDate
-        });
-      }
-
-      // Step 4: Save the assembly build
-      const assemblyBuildId = assemblyBuild.save();
-
-      console.log('✅ Assembly build created successfully:', assemblyBuildId);
-
-      // Step 5: Get the created assembly build details
-      const assemblyBuildDetails = await this.getAssemblyBuildDetails(assemblyBuildId);
-
-      return {
-        success: true,
-        assemblyBuild: {
-          id: assemblyBuildId,
-          tranId: assemblyBuildDetails?.tranId || null, // ← The ASSYB number
-          workOrderId: workOrderInternalId,
-          quantity: quantityCompleted,
-          tranDate: completionDate || new Date().toISOString().split('T')[0],
-          details: assemblyBuildDetails
-        }
-      };
-
-    } catch (error) {
-      console.error('❌ Assembly build creation failed:', error);
-      throw new Error(`Assembly build creation failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Transform work order to assembly build using NetSuite's record.transform
-   */
-  async transformWorkOrderToAssemblyBuild(workOrderInternalId, quantity) {
-    // This would be the actual NetSuite SuiteScript call
-    // Since we're in Node.js, we'll use the REST API approach
-    
-    // First, get the work order details to understand its structure
-    const workOrder = await (await this.auth).makeRequest(`/workOrder/${workOrderInternalId}`);
-    
-    if (!workOrder) {
-      throw new Error(`Work order ${workOrderInternalId} not found`);
-    }
-
-    // Create assembly build payload based on work order
-    const assemblyBuildPayload = {
-      // Reference the work order
-      createdFrom: { id: workOrderInternalId },
-      
-      // Set the assembly item (from work order)
-      item: workOrder.assemblyItem,
-      
-      // Set quantity to build
-      quantity: quantity,
-      
-      // Set location (from work order)
-      location: workOrder.location,
-      
-      // Set subsidiary (from work order)
-      subsidiary: workOrder.subsidiary,
-      
-      // Set department if available
-      ...(workOrder.department && { department: workOrder.department }),
-      
-      // Set transaction date to today
+    quantity,
+    actualComponents = [],
+    solutionLotNumber = null
+  ) {
+    // Build the transform payload
+    const payload = {
+      // override build quantity & date
+      quantity,
       trandate: new Date().toISOString().split('T')[0]
     };
 
-    // Create the assembly build via NetSuite REST API
-    const response = await (await this.auth).makeRequest('/assemblyBuild', 'POST', assemblyBuildPayload);
-    
-    return {
-      id: response.id,
-      setValue: (field) => {
-        // Store field updates for later use
-        this.pendingUpdates = this.pendingUpdates || {};
-        this.pendingUpdates[field.fieldId] = field.value;
-      },
-      save: async () => {
-        // Apply any pending updates
-        if (this.pendingUpdates) {
-          await (await this.auth).makeRequest(`/assemblyBuild/${response.id}`, 'PATCH', this.pendingUpdates);
-        }
-        return response.id;
-      }
-    };
+    // finished-good lot (receipt) if provided
+    if (solutionLotNumber) {
+      payload.inventoryDetail = {
+        inventoryAssignment: [{
+          receiptInventoryNumber: solutionLotNumber,
+          quantity
+        }]
+      };
+    }
+
+    // component sublist, wrapped under "items"
+    if (actualComponents.length) {
+      payload.component = {
+        items: actualComponents.map((comp, idx) => {
+          const used = comp.actualAmount ?? comp.plannedAmount ?? 1;
+          const entry = {
+            item: { id: comp.netsuiteInternalId },
+            quantity: used
+          };
+          if (comp.lotNumber) {
+            entry.componentInventoryDetail = {
+              inventoryAssignment: [{
+                issueInventoryNumber: comp.lotNumber,
+                quantity: used
+              }]
+            };
+          }
+          return entry;
+        })
+      };
+    }
+
+    console.log('🚀 Transform payload:', JSON.stringify(payload, null, 2));
+
+    // **THIS** is the one-call transform endpoint
+    const url = `/workOrder/${workOrderInternalId}/!transform/assemblyBuild`;
+    const response = await (await this.auth).makeRequest(url, 'POST', payload);
+
+    // NetSuite returns 204 No Content on success; we need to fetch the new internal ID
+    // It sets the Location header to the new record URL, or you can GET the workOrder subresource.
+    // For simplicity, re-query the list of builds for that WO:
+    const list = await (await this.auth)
+      .makeRequest(`/assemblyBuild?q=createdfrom:${workOrderInternalId}`);
+    const latest = Array.isArray(list.items) ? list.items.pop() : list; 
+    if (!latest?.id) throw new Error('Could not retrieve created Assembly Build ID');
+    return latest.id;
   }
 
   /**
-   * Set actual component quantities used in production
+   * Wrapper to create the build and return details
    */
-  async setActualComponentQuantities(assemblyBuild, actualComponents) {
-    // For now, we'll store these for when we save
-    // In a full implementation, this would modify the component sublist
-    
-    const componentUpdates = actualComponents.map(comp => ({
-      itemId: comp.itemId,
-      quantity: comp.actualAmount,
-      lotNumber: comp.lotNumber
-    }));
+  async createAssemblyBuild({ workOrderInternalId, quantityCompleted, actualComponents, solutionLotNumber }) {
+    await this.connect();
+    console.log('Transforming WO→AssemblyBuild:', workOrderInternalId);
 
-    // Store component updates for later application
-    assemblyBuild.componentUpdates = componentUpdates;
-    
-    console.log('📦 Component quantities set:', componentUpdates.length, 'components');
+    const buildId = await this.transformWorkOrderToAssemblyBuild(
+      workOrderInternalId,
+      quantityCompleted,
+      actualComponents,
+      solutionLotNumber
+    );
+    console.log('✅ Assembly Build created with ID', buildId);
+
+    // Fetch full details
+    const details = await (await this.auth).makeRequest(`/assemblyBuild/${buildId}`);
+    return { id: buildId, details };
+  }
+
+  
+  /**
+   * Complete work order for a batch (main integration point)
+   * FIXED: All date serialization issues
+   */
+  async completeWorkOrderForBatch(batchId, submissionData) {
+    await this.connect();
+  
+    // Get the batch with work order data
+    const batch = await this.models.Batch.findById(batchId).lean();
+    if (!batch) {
+      throw new Error('Batch not found');
+    }
+  
+    if (!batch.netsuiteWorkOrderData?.workOrderId) {
+      throw new Error('Batch does not have a NetSuite work order ID');
+    }
+  
+    // Extract completion data from submission
+    const {
+      solutionQuantity,
+      solutionUnit,
+      confirmedComponents,
+      solutionLotNumber
+    } = submissionData;
+  
+    console.log('🔍 Submission data for assembly build:', {
+      solutionQuantity,
+      solutionUnit,
+      confirmedComponentCount: confirmedComponents?.length || 0,
+      solutionLotNumber
+    });
+  
+    // ENHANCED: Prepare component data with NetSuite internal IDs
+    let enhancedComponents = [];
+    if (confirmedComponents && confirmedComponents.length > 0) {
+      console.log('🔍 Processing confirmed components:', confirmedComponents.length);
+      
+      for (const comp of confirmedComponents) {
+        console.log('🔍 Looking up item:', comp.itemId);
+        
+        // Get the full item data to ensure we have NetSuite internal ID
+        const item = await this.models.Item.findById(comp.itemId).lean();
+        
+        if (!item) {
+          console.warn(`⚠️ Item not found for component: ${comp.itemId}`);
+          continue;
+        }
+        
+        console.log('🔍 Item found:', {
+          displayName: item.displayName,
+          sku: item.sku,
+          netsuiteInternalId: item.netsuiteInternalId,
+          hasNetsuiteId: !!item.netsuiteInternalId
+        });
+        
+        if (!item.netsuiteInternalId) {
+          console.warn(`⚠️ Item missing NetSuite internal ID: ${item.displayName} (${item.sku})`);
+          console.warn(`⚠️ Skipping component - assembly build requires NetSuite internal IDs`);
+          continue;
+        }
+        
+        const enhancedComponent = {
+          ...comp,
+          netsuiteInternalId: item.netsuiteInternalId,
+          displayName: item.displayName,
+          sku: item.sku
+        };
+        
+        console.log('✅ Enhanced component:', {
+          displayName: enhancedComponent.displayName,
+          sku: enhancedComponent.sku,
+          netsuiteInternalId: enhancedComponent.netsuiteInternalId,
+          lotNumber: enhancedComponent.lotNumber,
+          actualAmount: enhancedComponent.actualAmount
+        });
+        
+        enhancedComponents.push(enhancedComponent);
+      }
+      
+      console.log('🔧 Total enhanced components for NetSuite:', enhancedComponents.length);
+    }
+  
+    // Create the assembly build
+    const result = await this.createAssemblyBuild({
+        workOrderInternalId: batch.netsuiteWorkOrderData.workOrderId,
+        quantityCompleted: solutionQuantity,
+        actualComponents: enhancedComponents,
+        completionDate: new Date().toISOString().split('T')[0],
+        solutionLotNumber // ← ✅ Passed from submissionData
+      });
+  
+    // FIXED: Update the batch with assembly build information (fixed date serialization)
+    await this.services.batchService.updateBatch(batchId, {
+      workOrderStatus: 'completed',
+      workOrderCompleted: true,
+      workOrderCompletedAt: new Date().toISOString(), // ← FIXED: ISO string
+      assemblyBuildId: result.assemblyBuild.id,
+      assemblyBuildTranId: result.assemblyBuild.tranId, // ← Store ASSYB number
+      assemblyBuildCreated: true,
+      assemblyBuildCreatedAt: new Date().toISOString(), // ← FIXED: ISO string
+      
+      // Update NetSuite work order data (fixed dates)
+      'netsuiteWorkOrderData.status': 'built',
+      'netsuiteWorkOrderData.completedAt': new Date().toISOString(), // ← FIXED: ISO string
+      'netsuiteWorkOrderData.assemblyBuildId': result.assemblyBuild.id,
+      'netsuiteWorkOrderData.assemblyBuildTranId': result.assemblyBuild.tranId, // ← Store ASSYB number
+      'netsuiteWorkOrderData.lastSyncAt': new Date().toISOString() // ← FIXED: ISO string
+    });
+  
+    console.log('✅ Work order completed for batch:', batchId);
+  
+    return {
+      success: true,
+      batchId,
+      assemblyBuild: result.assemblyBuild,
+      workOrderCompleted: true
+    };
   }
 
   /**
@@ -178,64 +247,6 @@ export class NetSuiteAssemblyBuildService {
       console.warn('⚠️ Could not fetch assembly build details:', error.message);
       return null;
     }
-  }
-
-  /**
-   * Complete work order for a batch (main integration point)
-   */
-  async completeWorkOrderForBatch(batchId, submissionData) {
-    await this.connect();
-
-    // Get the batch with work order data
-    const batch = await this.models.Batch.findById(batchId).lean();
-    if (!batch) {
-      throw new Error('Batch not found');
-    }
-
-    if (!batch.netsuiteWorkOrderData?.workOrderId) {
-      throw new Error('Batch does not have a NetSuite work order ID');
-    }
-
-    // Extract completion data from submission
-    const {
-      solutionQuantity,
-      solutionUnit,
-      confirmedComponents,
-      solutionLotNumber
-    } = submissionData;
-
-    // Create the assembly build
-    const result = await this.createAssemblyBuild({
-      workOrderInternalId: batch.netsuiteWorkOrderData.workOrderId,
-      quantityCompleted: solutionQuantity,
-      actualComponents: confirmedComponents,
-      completionDate: new Date().toISOString().split('T')[0]
-    });
-
-    // Update the batch with assembly build information
-    await this.services.batchService.updateBatch(batchId, {
-      workOrderStatus: 'completed',
-      workOrderCompleted: true,
-      workOrderCompletedAt: new Date(),
-      assemblyBuildId: result.assemblyBuild.id,
-      assemblyBuildCreated: true,
-      assemblyBuildCreatedAt: new Date(),
-      
-      // Update NetSuite work order data
-      'netsuiteWorkOrderData.status': 'built',
-      'netsuiteWorkOrderData.completedAt': new Date(),
-      'netsuiteWorkOrderData.assemblyBuildId': result.assemblyBuild.id,
-      'netsuiteWorkOrderData.lastSyncAt': new Date()
-    });
-
-    console.log('✅ Work order completed for batch:', batchId);
-
-    return {
-      success: true,
-      batchId,
-      assemblyBuild: result.assemblyBuild,
-      workOrderCompleted: true
-    };
   }
 
   /**
