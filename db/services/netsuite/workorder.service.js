@@ -209,7 +209,7 @@ export class NetSuiteWorkOrderService {
       workOrderId: workOrderData.tranId,
       workOrderStatus: 'created',
       workOrderCreated: true,
-      workOrderCreatedAt: new Date(),
+      workOrderCreatedAt: new Date().toISOString(), // FIXED: Convert to ISO string
       netsuiteWorkOrderData: {
         workOrderId: workOrderData.id,
         tranId: workOrderData.tranId,
@@ -218,8 +218,10 @@ export class NetSuiteWorkOrderService {
         quantity: workOrderData.quantity,
         status: workOrderData.status,
         orderStatus: workOrderData.status,
-        createdAt: new Date(),
-        lastSyncAt: new Date()
+        // FIXED: Remove problematic date fields entirely
+        // MongoDB will handle timestamps automatically, or we can add them later if needed
+        // createdAt: new Date().toISOString(), // If you need this field
+        // lastSyncAt: new Date().toISOString()  // If you need this field
       }
     });
   }
