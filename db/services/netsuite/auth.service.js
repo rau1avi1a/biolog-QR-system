@@ -76,137 +76,158 @@ export class NetSuiteAuth {
     return db.connect();
   }
 
-  /**
+/**
    * FIXED: Make authenticated requests to NetSuite REST API
    */
-  async makeRequest(endpoint, method = 'GET', body = null) {
-    const url = `${this.baseUrl}${endpoint}`;
+async makeRequest(endpoint, method = 'GET', body = null, customHeaders = {}) {
+  const url = `${this.baseUrl}${endpoint}`;
+  
+  console.log('🚀 Making NetSuite API request:', {
+    method,
+    endpoint,
+    url,
+    hasBody: !!body
+  });
+
+  // Step 1: Create the request data for OAuth
+  const requestData = { 
+    url, 
+    method: method.toUpperCase() 
+  };
+
+  // Step 2: Generate OAuth authorization data
+  const oauthData = this.oauth.authorize(requestData, this.token);
+  
+  console.log('🔑 OAuth data generated:', {
+    oauth_consumer_key: oauthData.oauth_consumer_key,
+    oauth_token: oauthData.oauth_token,
+    oauth_signature_method: oauthData.oauth_signature_method,
+    oauth_timestamp: oauthData.oauth_timestamp,
+    oauth_nonce: oauthData.oauth_nonce,
+    oauth_version: oauthData.oauth_version,
+    oauth_signature: oauthData.oauth_signature ? 'present' : 'missing'
+  });
+
+  // Step 3: Create the Authorization header
+  const authHeader = this.oauth.toHeader(oauthData);
+  
+  // CRITICAL FIX: Add realm parameter correctly
+  authHeader.Authorization = authHeader.Authorization.replace(
+    'OAuth ',
+    `OAuth realm="${this.realmAccountId}", `
+  );
+
+  console.log('📋 Authorization header created:', {
+    authHeaderLength: authHeader.Authorization?.length,
+    hasRealm: authHeader.Authorization?.includes('realm='),
+    realmValue: this.realmAccountId
+  });
+
+  // Step 4: Prepare request headers (merge custom headers)
+  const headers = {
+    ...authHeader,
+    'Content-Type': 'application/json',
+    'User-Agent': 'Custom-NetSuite-Client/1.0',
+    ...customHeaders  // Add custom headers like Prefer: transient
+  };
+
+  // Step 5: Prepare request options
+  const options = { 
+    method: method.toUpperCase(), 
+    headers 
+  };
+  
+  if (body && (method.toUpperCase() === 'POST' || method.toUpperCase() === 'PATCH' || method.toUpperCase() === 'PUT')) {
+    options.body = JSON.stringify(body);
+    console.log('📤 Request body:', JSON.stringify(body, null, 2));
+  }
+
+  console.log('📋 Final request details:', {
+    url,
+    method: options.method,
+    headerCount: Object.keys(headers).length,
+    hasContentType: !!headers['Content-Type'],
+    hasAuthorization: !!headers.Authorization
+  });
+
+  // Step 6: Make the request
+  try {
+    const response = await fetch(url, options);
     
-    console.log('🚀 Making NetSuite API request:', {
-      method,
-      endpoint,
-      url,
-      hasBody: !!body
+    console.log('📥 Response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      headers: Object.fromEntries(response.headers.entries())
     });
 
-    // Step 1: Create the request data for OAuth
-    const requestData = { 
-      url, 
-      method: method.toUpperCase() 
-    };
-
-    // Step 2: Generate OAuth authorization data
-    const oauthData = this.oauth.authorize(requestData, this.token);
-    
-    console.log('🔑 OAuth data generated:', {
-      oauth_consumer_key: oauthData.oauth_consumer_key,
-      oauth_token: oauthData.oauth_token,
-      oauth_signature_method: oauthData.oauth_signature_method,
-      oauth_timestamp: oauthData.oauth_timestamp,
-      oauth_nonce: oauthData.oauth_nonce,
-      oauth_version: oauthData.oauth_version,
-      oauth_signature: oauthData.oauth_signature ? 'present' : 'missing'
-    });
-
-    // Step 3: Create the Authorization header
-    const authHeader = this.oauth.toHeader(oauthData);
-    
-    // CRITICAL FIX: Add realm parameter correctly
-    authHeader.Authorization = authHeader.Authorization.replace(
-      'OAuth ',
-      `OAuth realm="${this.realmAccountId}", `
-    );
-
-    console.log('📋 Authorization header created:', {
-      authHeaderLength: authHeader.Authorization?.length,
-      hasRealm: authHeader.Authorization?.includes('realm='),
-      realmValue: this.realmAccountId
-    });
-
-    // Step 4: Prepare request headers
-    const headers = {
-      ...authHeader,
-      'Content-Type': 'application/json',
-      'User-Agent': 'Custom-NetSuite-Client/1.0'
-    };
-
-    // Step 5: Prepare request options
-    const options = { 
-      method: method.toUpperCase(), 
-      headers 
-    };
-    
-    if (body && (method.toUpperCase() === 'POST' || method.toUpperCase() === 'PATCH' || method.toUpperCase() === 'PUT')) {
-      options.body = JSON.stringify(body);
-      console.log('📤 Request body:', JSON.stringify(body, null, 2));
-    }
-
-    console.log('📋 Final request details:', {
-      url,
-      method: options.method,
-      headerCount: Object.keys(headers).length,
-      hasContentType: !!headers['Content-Type'],
-      hasAuthorization: !!headers.Authorization
-    });
-
-    // Step 6: Make the request
-    try {
-      const response = await fetch(url, options);
-      
-      console.log('📥 Response received:', {
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ NetSuite API Error Details:', {
         status: response.status,
         statusText: response.statusText,
-        ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries())
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ NetSuite API Error Details:', {
-          status: response.status,
-          statusText: response.statusText,
-          url,
-          method,
-          error: errorText,
-          responseHeaders: Object.fromEntries(response.headers.entries()),
-          requestHeaders: headers
-        });
-        
-        // Log OAuth debugging info for 401 errors
-        if (response.status === 401) {
-          console.error('🔐 OAuth Debug Info for 401 error:', {
-            realmAccountId: this.realmAccountId,
-            consumerKey: this.credentials.consumerKey,
-            tokenId: this.credentials.tokenId,
-            baseUrl: this.baseUrl,
-            oauthSignature: oauthData.oauth_signature,
-            oauthTimestamp: oauthData.oauth_timestamp,
-            oauthNonce: oauthData.oauth_nonce
-          });
-        }
-        
-        throw new Error(`NetSuite API Error: ${response.status} - ${errorText}`);
-      }
-
-      const responseData = await response.json();
-      console.log('✅ Request successful:', {
-        dataType: typeof responseData,
-        isArray: Array.isArray(responseData),
-        hasItems: responseData.items ? responseData.items.length : 'N/A'
-      });
-
-      return responseData;
-      
-    } catch (fetchError) {
-      console.error('💥 Fetch error:', {
-        message: fetchError.message,
-        name: fetchError.name,
         url,
-        method
+        method,
+        error: errorText,
+        responseHeaders: Object.fromEntries(response.headers.entries()),
+        requestHeaders: headers
       });
-      throw fetchError;
+      
+      // Log OAuth debugging info for 401 errors
+      if (response.status === 401) {
+        console.error('🔐 OAuth Debug Info for 401 error:', {
+          realmAccountId: this.realmAccountId,
+          consumerKey: this.credentials.consumerKey,
+          tokenId: this.credentials.tokenId,
+          baseUrl: this.baseUrl,
+          oauthSignature: oauthData.oauth_signature,
+          oauthTimestamp: oauthData.oauth_timestamp,
+          oauthNonce: oauthData.oauth_nonce
+        });
+      }
+      
+      throw new Error(`NetSuite API Error: ${response.status} - ${errorText}`);
     }
+
+    let responseData;
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
+      // 204 No Content or empty response - extract ID from location header
+      const locationHeader = response.headers.get('location');
+      if (locationHeader) {
+        // Extract ID from location URL like: .../assemblybuild/403779
+        const idMatch = locationHeader.match(/\/([^\/]+)$/);
+        if (idMatch) {
+          responseData = { id: idMatch[1] };
+          console.log('✅ Extracted ID from location header:', responseData.id);
+        } else {
+          responseData = { success: true, location: locationHeader };
+        }
+      } else {
+        responseData = { success: true };
+      }
+    } else {
+      // Normal response with content
+      responseData = await response.json();
+    }
+        console.log('✅ Request successful:', {
+      dataType: typeof responseData,
+      isArray: Array.isArray(responseData),
+      hasItems: responseData.items ? responseData.items.length : 'N/A'
+    });
+
+    return responseData;
+    
+  } catch (fetchError) {
+    console.error('💥 Fetch error:', {
+      message: fetchError.message,
+      name: fetchError.name,
+      url,
+      method
+    });
+    throw fetchError;
   }
+}
+
 
   /**
    * Test the connection to NetSuite with detailed logging
