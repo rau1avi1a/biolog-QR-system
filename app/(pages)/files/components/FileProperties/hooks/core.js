@@ -34,8 +34,10 @@ export function useCore(props) {
   const solutionSearchTimeoutRef = useRef(null);
 
   // computed
-  const canEdit = useMemo(() => !readOnly, [readOnly]);
-  const isOriginalFile = useMemo(() => !file?.isBatch, [file?.isBatch]);
+const canEdit = useMemo(() => {
+  // Read-only if explicitly set OR if opened from a batch
+  return !readOnly && !file?.isFromBatch;
+}, [readOnly, file?.isFromBatch]);  const isOriginalFile = useMemo(() => !file?.isBatch, [file?.isBatch]);
   const hasSolution = useMemo(() => !!selectedSolution, [selectedSolution]);
   const canImportBOM = useMemo(() => hasSolution && selectedSolution?.netsuiteInternalId && canEdit, [hasSolution, selectedSolution, canEdit]);
   const totalComponents = useMemo(() => components?.length || 0, [components]);

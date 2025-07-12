@@ -215,58 +215,90 @@ const models = Object.entries(schemas).reduce((acc, [schemaKey, schema]) => {
 // =============================================================================
 // ITEM DISCRIMINATORS - HOT RELOAD SAFE
 // =============================================================================
-if (models.Item) {
-    // More thorough cleanup for development hot reloads
-    if (process.env.NODE_ENV !== 'production') {
-        ['Chemical', 'Solution', 'Product'].forEach(modelName => {
-          if (mongoose.models[modelName]) {
-            delete mongoose.models[modelName];
-          }
-        });
-        if (models.Item.discriminators) {
-          Object.keys(models.Item.discriminators).forEach(key => {
-            delete models.Item.discriminators[key];
-          });
-          models.Item.discriminators = {};
-        }
+function createDiscriminators() {
+  if (!models.Item) {
+    console.warn('Base Item model not available for discriminators');
+    return;
+  }
+
+  // More aggressive cleanup for development hot reloads
+  if (process.env.NODE_ENV !== 'production') {
+    // Clean up discriminator models
+    ['Chemical', 'Solution', 'Product'].forEach(modelName => {
+      if (mongoose.models[modelName]) {
+        console.log(`🧹 Cleaning up ${modelName} model for hot reload`);
+        delete mongoose.models[modelName];
       }
-  
-    // Wrap in try-catch for extra safety
-    try {
-      models.Chemical = models.Item.discriminator(
-        'chemical',
-        new mongoose.Schema({
-          casNumber: { type: String },
-          location: { type: String },
-          safetyData: { type: mongoose.Schema.Types.Mixed }
-        })
-      );
-  
-      models.Solution = models.Item.discriminator(
-        'solution',
-        new mongoose.Schema({
-          bom: [{
-            itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
-            qty: { type: Number },
-            uom: { type: String }
-          }]
-        })
-      );
-  
-      models.Product = models.Item.discriminator(
-        'product',
-        new mongoose.Schema({
-          bom: [{
-            itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
-            qty: { type: Number },
-            uom: { type: String }
-          }]
-        })
-      );
-    } catch (error) {
-      console.warn('Discriminator creation warning (hot reload):', error.message);
+    });
+    
+    // Clean up discriminators from base model
+    if (models.Item.discriminators) {
+      Object.keys(models.Item.discriminators).forEach(key => {
+        console.log(`🧹 Cleaning up discriminator: ${key}`);
+        delete models.Item.discriminators[key];
+      });
+      models.Item.discriminators = {};
     }
+  }
+
+  // Check if discriminators already exist (for production stability)
+  if (models.Chemical || models.Solution || models.Product) {
+    console.log('🔄 Discriminators already exist, skipping creation');
+    return;
+  }
+
+  try {
+    console.log('🏗️ Creating Item discriminators...');
+    
+    // Create Chemical discriminator
+    models.Chemical = models.Item.discriminator(
+      'chemical',
+      new mongoose.Schema({
+        casNumber: { type: String },
+        location: { type: String },
+        safetyData: { type: mongoose.Schema.Types.Mixed }
+      })
+    );
+    console.log('✅ Chemical discriminator created');
+
+    // Create Solution discriminator
+    models.Solution = models.Item.discriminator(
+      'solution',
+      new mongoose.Schema({
+        bom: [{
+          itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
+          qty: { type: Number },
+          uom: { type: String }
+        }]
+      })
+    );
+    console.log('✅ Solution discriminator created');
+
+    // Create Product discriminator
+    models.Product = models.Item.discriminator(
+      'product',
+      new mongoose.Schema({
+        bom: [{
+          itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
+          qty: { type: Number },
+          uom: { type: String }
+        }]
+      })
+    );
+    console.log('✅ Product discriminator created');
+    
+  } catch (error) {
+    console.error('❌ Discriminator creation error:', error.message);
+    
+    // Fallback: try to get existing discriminators
+    if (mongoose.models.Chemical) models.Chemical = mongoose.models.Chemical;
+    if (mongoose.models.Solution) models.Solution = mongoose.models.Solution;
+    if (mongoose.models.Product) models.Product = mongoose.models.Product;
+  }
 }
+
+// Call the discriminator creation function
+createDiscriminators();
 
 // =============================================================================
 // EXPORTS

@@ -105,7 +105,6 @@ export default function FilesPage() {
             const allFiles = fullData.files || [];
             // Filter to only include original files (not batches)
             filesData = allFiles.filter(file => !file.isBatch && !file.runNumber && !file.status);
-            console.log('📄 Page: Filtered root original files:', filesData);
           }
           
           setRoot(foldersData);
@@ -240,7 +239,7 @@ export default function FilesPage() {
     }
   }, [currentFolder, triggerRefresh]);
 
-// === ENHANCED FILE OPENING LOGIC - FIXED ===
+// === ENHANCED FILE OPENING LOGIC - FIXED BASE64 HANDLING ===
 const openFile = useCallback(async (file) => {
   try {
     
@@ -250,6 +249,89 @@ const openFile = useCallback(async (file) => {
 
     // Show loading state
     setError(null);
+
+    // Helper function to validate and clean base64 data
+// Helper function to validate and clean base64 data - FIXED to handle object format
+const validateAndCleanBase64 = (data, contentType = 'application/pdf') => {
+  if (!data) return null;
+  
+  try {
+    let cleanedData = data;
+    
+    // FIXED: Handle object format from backend (most common now)
+    if (typeof data === 'object' && data !== null && !Buffer.isBuffer(data)) {
+      console.log('📄 Processing PDF object format:', {
+        hasData: !!data.data,
+        dataType: typeof data.data,
+        hasContentType: !!data.contentType,
+        contentType: data.contentType
+      });
+      
+      if (data.data) {
+        // Use the contentType from the object if available
+        const objContentType = data.contentType || contentType;
+        
+        // Recursively call this function to handle the inner data
+        return validateAndCleanBase64(data.data, objContentType);
+      } else {
+        console.error('📄 PDF object has no data property');
+        return null;
+      }
+    }
+    
+    // If it's already a data URL, extract just the base64 part for validation
+    if (typeof data === 'string' && data.startsWith('data:')) {
+      const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
+      if (base64Match) {
+        const base64Part = base64Match[2];
+        // Test if the base64 is valid
+        atob(base64Part);
+        return data; // Return original data URL if valid
+      }
+    }
+    
+    // If it's a Buffer, convert to base64 string
+    if (Buffer.isBuffer(data)) {
+      const base64String = data.toString('base64');
+      // Test if the base64 is valid
+      atob(base64String);
+      return `data:${contentType};base64,${base64String}`;
+    }
+    
+    // FIXED: Handle serialized Buffer from MongoDB/API
+    if (typeof data === 'object' && data.type === 'Buffer' && Array.isArray(data.data)) {
+      console.log('📄 Processing serialized Buffer from API');
+      const buffer = Buffer.from(data.data);
+      const base64String = buffer.toString('base64');
+      // Test if the base64 is valid
+      atob(base64String);
+      return `data:${contentType};base64,${base64String}`;
+    }
+    
+    // If it's a plain string, assume it's base64 and test it
+    if (typeof data === 'string') {
+      // Remove any whitespace/newlines that might cause issues
+      const cleanBase64 = data.replace(/\s/g, '');
+      // Test if the base64 is valid
+      atob(cleanBase64);
+      return `data:${contentType};base64,${cleanBase64}`;
+    }
+    
+    console.error('📄 Unknown data format:', typeof data, data?.constructor?.name);
+    return null;
+    
+  } catch (error) {
+    console.error('📄 Base64 validation failed:', error.message);
+    console.error('📄 Data info:', {
+      type: typeof data,
+      constructor: data?.constructor?.name,
+      isBuffer: Buffer.isBuffer(data),
+      hasData: data?.data ? 'yes' : 'no',
+      preview: typeof data === 'string' ? data.substring(0, 100) : 'Not a string'
+    });
+    return null;
+  }
+};
 
     // FIXED: Better detection of file type
     const isBatchFile = file.sourceType === 'batch' || 
@@ -281,62 +363,51 @@ const openFile = useCallback(async (file) => {
           hasFileIdPdf: !!(batch.fileId?.pdf)
         });
         
-        // FIXED: Check PDF sources in priority order
+        // FIXED: Check PDF sources in priority order with proper validation
         if (batch.signedPdf && batch.signedPdf.data) {
           // Use the baked PDF that has overlays burned in
-          try {
-            let pdfDataString = batch.signedPdf.data;
-            if (Buffer.isBuffer(pdfDataString)) {
-              pdfDataString = pdfDataString.toString('base64');
-            }
-            pdfData = `data:${batch.signedPdf.contentType || 'application/pdf'};base64,${pdfDataString}`;
+          console.log('📄 Processing signed PDF data...');
+          pdfData = validateAndCleanBase64(
+            batch.signedPdf.data, 
+            batch.signedPdf.contentType || 'application/pdf'
+          );
+          if (pdfData) {
             console.log('📄 Using signed PDF with overlays');
-          } catch (err) {
-            console.error('Error processing signed PDF:', err);
+          } else {
+            console.error('📄 Signed PDF data validation failed');
           }
         } 
-        else if (batch.pdf) {
+        
+        if (!pdfData && batch.pdf) {
           // Use stored PDF data
-          pdfData = batch.pdf;
-          console.log('📄 Using batch PDF data');
-        }
-        // FIXED: Check fileId.pdf BEFORE making API call
-        else if (batch.fileId && batch.fileId.pdf && batch.fileId.pdf.data) {
-          // Use PDF data from populated fileId object
-          console.log('📄 Processing fileId PDF object:', {
-            hasData: !!batch.fileId.pdf.data,
-            dataType: typeof batch.fileId.pdf.data,
-            isBuffer: Buffer.isBuffer(batch.fileId.pdf.data),
-            contentType: batch.fileId.pdf.contentType
-          });
-          
-          try {
-            const pdfObj = batch.fileId.pdf;
-            
-            if (pdfObj.data && Buffer.isBuffer(pdfObj.data)) {
-              // Convert Buffer to base64 data URL
-              const base64String = pdfObj.data.toString('base64');
-              const contentType = pdfObj.contentType || 'application/pdf';
-              pdfData = `data:${contentType};base64,${base64String}`;
-              console.log('📄 Using fileId embedded PDF data (converted from Buffer)');
-            } else if (typeof pdfObj.data === 'string') {
-              // Already a string, might be base64 or data URL
-              if (pdfObj.data.startsWith('data:')) {
-                pdfData = pdfObj.data;
-              } else {
-                // Assume it's base64, add data URL prefix
-                const contentType = pdfObj.contentType || 'application/pdf';
-                pdfData = `data:${contentType};base64,${pdfObj.data}`;
-              }
-              console.log('📄 Using fileId embedded PDF data (string format)');
-            } else {
-              console.error('📄 Unknown PDF data type:', typeof pdfObj.data);
-            }
-          } catch (err) {
-            console.error('Error processing fileId PDF:', err);
+          console.log('📄 Processing batch PDF data...');
+          pdfData = validateAndCleanBase64(batch.pdf);
+          if (pdfData) {
+            console.log('📄 Using batch PDF data');
+          } else {
+            console.error('📄 Batch PDF data validation failed');
           }
         }
-        else if (batch.fileId) {
+        
+        // FIXED: Check fileId.pdf BEFORE making API call
+        if (!pdfData && batch.fileId && batch.fileId.pdf && batch.fileId.pdf.data) {
+          // Use PDF data from populated fileId object
+          console.log('📄 Processing fileId PDF object...');
+          
+          const pdfObj = batch.fileId.pdf;
+          pdfData = validateAndCleanBase64(
+            pdfObj.data,
+            pdfObj.contentType || 'application/pdf'
+          );
+          
+          if (pdfData) {
+            console.log('📄 Using fileId embedded PDF data');
+          } else {
+            console.error('📄 FileId PDF data validation failed');
+          }
+        }
+        
+        if (!pdfData && batch.fileId) {
           // Fallback: load from original file API
           const originalFileId = typeof batch.fileId === 'object' ? batch.fileId._id : batch.fileId;
           console.log('📄 Loading PDF from original file API:', originalFileId);
@@ -346,8 +417,13 @@ const openFile = useCallback(async (file) => {
             if (!hasApiError(originalResult)) {
               const originalData = extractApiData(originalResult);
               if (originalData?.pdf) {
-                pdfData = originalData.pdf;
-                console.log('📄 Using original file PDF from API');
+                console.log('📄 Processing original file PDF from API...');
+                pdfData = validateAndCleanBase64(originalData.pdf);
+                if (pdfData) {
+                  console.log('📄 Using original file PDF from API');
+                } else {
+                  console.error('📄 Original file PDF data validation failed');
+                }
               } else {
                 console.warn('📄 Original file API returned no PDF data');
               }
@@ -361,7 +437,7 @@ const openFile = useCallback(async (file) => {
         
         if (!pdfData) {
           // FIXED: More detailed error logging
-          console.error('📄 No PDF data found anywhere. Full batch analysis:', {
+          console.error('📄 No valid PDF data found anywhere. Full batch analysis:', {
             batchId: batch._id,
             hasSignedPdf: !!batch.signedPdf,
             signedPdfKeys: batch.signedPdf ? Object.keys(batch.signedPdf) : [],
@@ -372,18 +448,7 @@ const openFile = useCallback(async (file) => {
             fileIdPdfExists: !!(batch.fileId?.pdf),
             allBatchKeys: Object.keys(batch)
           });
-          throw new Error(`No PDF data found for this batch. The batch exists but contains no accessible PDF data.`);
-        }
-        
-        // Validate PDF data format
-        if (typeof pdfData !== 'string') {
-          console.error('📄 PDF data is not a string:', typeof pdfData);
-          throw new Error('PDF data is not in the correct format');
-        }
-        
-        if (!pdfData.startsWith('data:')) {
-          console.error('📄 PDF data does not start with data URL format:', pdfData.substring(0, 50));
-          throw new Error('PDF data is not in the correct base64 data URL format');
+          throw new Error(`No valid PDF data found for this batch. The batch exists but contains no accessible or valid PDF data.`);
         }
         
         const docData = { 
@@ -398,7 +463,7 @@ const openFile = useCallback(async (file) => {
           runNumber: batch.runNumber
         };
         
-        console.log('✅ Page: Batch loaded successfully with PDF data');
+        console.log('✅ Page: Batch loaded successfully with valid PDF data');
         setCurrentDoc(docData);
       } else {
         throw new Error('No batch data returned from API');
@@ -413,22 +478,7 @@ const openFile = useCallback(async (file) => {
       // This is an original file
       console.log('📄 Page: Opening original file:', file._id);
       
-      // DEBUG: Test the raw API first
-      const rawResponse = await fetch(`/api/files?id=${file._id}&action=with-pdf`);
-      const rawData = await rawResponse.json();
-      console.log('📡 RAW API Response for original file:', rawData);
-      console.log('📡 RAW API has PDF:', !!rawData.data?.pdf);
-      
-      // DEBUG: Test the low-level apiClient call directly
-      console.log('🔍 Testing low-level apiClient call...');
-      const { apiClient } = await import('@/app/api');
-      const lowLevelResult = await apiClient('files').get(file._id, { action: 'with-pdf' });
-      console.log('📡 Low-level apiClient result:', lowLevelResult);
-      console.log('📡 Low-level has PDF:', !!lowLevelResult.data?.pdf);
-      
-      // Now test the wrapper with debug enabled
       const result = await filesApi.files.getWithPdf(file._id);
-      
       
       if (hasApiError(result)) {
         throw new Error('Failed to load file: ' + handleApiError(result));
@@ -436,32 +486,22 @@ const openFile = useCallback(async (file) => {
       
       const fileData = extractApiData(result);
       
-
-      
       if (!fileData) {
         throw new Error('No data returned from file API');
       }
       
-      const pdfData = fileData.pdf;
+      console.log('📄 Processing original file PDF data...');
+      const pdfData = validateAndCleanBase64(fileData.pdf);
       
       if (!pdfData) {
-        console.error('📄 Page: No PDF data in original file response. Full response:', {
+        console.error('📄 Page: No valid PDF data in original file response. Full response:', {
           fileId: fileData._id,
           fileName: fileData.fileName,
           keys: Object.keys(fileData),
           hasPdf: !!fileData.pdf,
           pdfType: typeof fileData.pdf
         });
-        throw new Error('No PDF data found in original file - check that the file was uploaded correctly');
-      }
-      
-      // Validate PDF data format
-      if (typeof pdfData !== 'string' || !pdfData.startsWith('data:')) {
-        console.error('📄 Page: Invalid PDF data format in original file:', { 
-          type: typeof pdfData, 
-          starts: pdfData?.substring(0, 20) 
-        });
-        throw new Error('PDF data is not in the correct base64 data URL format');
+        throw new Error('No valid PDF data found in original file - check that the file was uploaded correctly');
       }
       
       const docData = { 
@@ -471,6 +511,7 @@ const openFile = useCallback(async (file) => {
         fileName: fileData.fileName || file.fileName || 'Untitled File'
       };
       
+      console.log('✅ Page: Original file loaded successfully with valid PDF data');
       setCurrentDoc(docData);
     }
     
@@ -481,27 +522,87 @@ const openFile = useCallback(async (file) => {
   }
 }, []);
 
+
   // === DRAWER HANDLERS ===
   const handleToggleDrawer = useCallback(() => setDrawer(true), []);
   const handleCloseDrawer = useCallback(() => setDrawer(false), []);
 
   // === PROPERTIES HANDLERS ===
- const handleOpenProperties = useCallback(
-  async (doc) => {
-    if (!doc?._id) return;
-    try {
-      const metaResult = await filesApi.files.get(doc._id);
-      if (hasApiError(metaResult)) throw new Error(handleApiError(metaResult));
-      const fullFile = extractApiData(metaResult);
-      setPropertiesDoc(fullFile);
-    } catch (err) {
-      console.error('❌ get item failed:', err.message);
-      // fallback to whatever we already had
-      setPropertiesDoc(doc);
-    }
-  },
-  [filesApi.files, hasApiError, extractApiData, handleApiError]);
+const handleOpenProperties = useCallback(async (doc) => {
+  if (!doc?._id) return;
   
+  try {
+    console.log('🔍 Opening properties for:', {
+      docId: doc._id,
+      isBatch: doc.isBatch || !!doc.runNumber || !!doc.status,
+      hasFileId: !!doc.fileId,
+      fileId: doc.fileId
+    });
+
+    let targetFileId = doc._id;
+    let isFromBatch = false;
+
+    // FIXED: If this is a batch, get the original file ID
+    if (doc.isBatch || doc.runNumber || doc.status || doc.batchId) {
+      isFromBatch = true;
+      
+      // If the batch has a fileId reference, use that
+      if (doc.fileId) {
+        targetFileId = typeof doc.fileId === 'object' ? doc.fileId._id : doc.fileId;
+        console.log('✅ Using fileId from batch:', targetFileId);
+      } else {
+        // If no fileId in the batch object, we need to fetch the full batch first
+        console.log('🔍 Fetching full batch data to get fileId...');
+        const batchResult = await filesApi.batches.get(doc._id);
+        
+        if (hasApiError(batchResult)) {
+          throw new Error(handleApiError(batchResult));
+        }
+        
+        const fullBatch = extractApiData(batchResult);
+        if (fullBatch?.fileId) {
+          targetFileId = typeof fullBatch.fileId === 'object' ? fullBatch.fileId._id : fullBatch.fileId;
+          console.log('✅ Got fileId from full batch:', targetFileId);
+        } else {
+          throw new Error('Batch has no associated file ID');
+        }
+      }
+    }
+
+    // Now fetch the original file metadata
+    console.log('📄 Fetching original file metadata:', targetFileId);
+    const metaResult = await filesApi.files.get(targetFileId);
+    
+    if (hasApiError(metaResult)) {
+      throw new Error(handleApiError(metaResult));
+    }
+    
+    const fullFile = extractApiData(metaResult);
+    
+    // Add context flags for the FileProperties component
+    const fileWithContext = {
+      ...fullFile,
+      isFromBatch,
+      originalBatchId: isFromBatch ? doc._id : null
+    };
+    
+    console.log('✅ File properties data prepared:', {
+      fileId: fullFile._id,
+      fileName: fullFile.fileName,
+      isFromBatch,
+      hasComponents: fullFile.components?.length > 0,
+      hasSolutionRef: !!fullFile.solutionRef
+    });
+    
+    setPropertiesDoc(fileWithContext);
+    
+  } catch (err) {
+    console.error('❌ get item failed:', err.message);
+    setError(`Failed to load file properties: ${err.message}`);
+    // Don't set propertiesDoc on error
+  }
+}, []);
+
   const handlePropertiesClose = useCallback((open) => {
     if (!open) setPropertiesDoc(null);
   }, []);

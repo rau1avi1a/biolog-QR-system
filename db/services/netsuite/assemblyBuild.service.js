@@ -1,4 +1,4 @@
-// services/netsuite/assemblyBuild.service.js
+// services/netsuite/assemblyBuild.service.js - FIXED
 import { createNetSuiteAuth } from './auth.service.js';
 import db from '@/db/index.js';
 
@@ -231,21 +231,29 @@ export class NetSuiteAssemblyBuildService {
     // Fetch details for the created assembly build
     const details = await this.getAssemblyBuildDetails(assemblyBuildId);
 
-    // Update the batch
+    // FIXED: Update the batch using the entire netsuiteWorkOrderData object
+    const updatedNetsuiteData = {
+      // Preserve all existing fields from the batch
+      ...batch.netsuiteWorkOrderData,
+      // Update specific fields - all dates as proper Date objects
+      status: 'built',
+      completedAt: new Date(), // This will properly trigger the schema setter
+      assemblyBuildId: assemblyBuildId,
+      assemblyBuildTranId: details?.tranId || null,
+      lastSyncAt: new Date()
+    };
+
     await this.services.batchService.updateBatch(batchId, {
       workOrderStatus: 'completed',
       workOrderCompleted: true,
-      workOrderCompletedAt: new Date().toISOString(),
+      workOrderCompletedAt: new Date(), // Use Date object
       assemblyBuildId: assemblyBuildId,
       assemblyBuildTranId: details?.tranId || null,
       assemblyBuildCreated: true,
-      assemblyBuildCreatedAt: new Date().toISOString(),
+      assemblyBuildCreatedAt: new Date(), // Use Date object
       
-      'netsuiteWorkOrderData.status': 'built',
-      'netsuiteWorkOrderData.completedAt': new Date().toISOString(),
-      'netsuiteWorkOrderData.assemblyBuildId': assemblyBuildId,
-      'netsuiteWorkOrderData.assemblyBuildTranId': details?.tranId || null,
-      'netsuiteWorkOrderData.lastSyncAt': new Date().toISOString()
+      // FIXED: Update the entire nested object instead of using dot notation
+      netsuiteWorkOrderData: updatedNetsuiteData
     });
 
     console.log('✅ Work order completed for batch:', batchId);

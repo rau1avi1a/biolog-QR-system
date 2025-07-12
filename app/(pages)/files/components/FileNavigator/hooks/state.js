@@ -127,7 +127,6 @@ export function useComponentState(core, props) {
 
   // FIXED: Search input change handler
   const handleSearchInputChange = useCallback((value) => {
-    console.log('🔍 Search input changed:', value);
     setSearchInputValue(value);
     
     // Update core search query
@@ -146,7 +145,6 @@ export function useComponentState(core, props) {
 
   // FIXED: Search clear handler
   const handleSearchClear = useCallback(() => {
-    console.log('🧹 Clearing search');
     setSearchInputValue('');
     if (core && typeof core.clearSearch === 'function') {
       core.clearSearch();

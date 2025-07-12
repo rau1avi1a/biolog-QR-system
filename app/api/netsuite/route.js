@@ -698,98 +698,132 @@ export async function POST(request) {
       }
 
 
-    case 'import': {
-        const { bomData, fileId, overwriteExisting = false } = body;
+case 'import': {
+  const { bomData, fileId, overwriteExisting = false } = body;
 
-        console.log('🔧 NetSuite import action called with components:', bomData.components?.map(c => ({
-            ingredient: c.ingredient,
-            units: c.units,
-            quantity: c.quantity
-          })));
+  console.log('🔧 NetSuite import action called with components:', bomData.components?.map(c => ({
+    ingredient: c.ingredient,
+    units: c.units,
+    quantity: c.quantity
+  })));
 
+  if (!bomData || !fileId) {
+    return NextResponse.json({
+      success: false,
+      data: null,
+      error: 'BOM data and file ID are required'
+    }, { status: 400 });
+  }
 
-        if (!bomData || !fileId) {
-        return NextResponse.json({
-            success: false,
-            data: null,
-            error: 'BOM data and file ID are required'
-        }, { status: 400 });
-        }
+  // FIXED: Find the solution item by NetSuite ID BEFORE processing components
+  const solutionNetsuiteId = bomData.assemblyItemId;
+  let solutionItem = null;
+
+  if (solutionNetsuiteId) {
+    console.log('🔍 Looking for solution with NetSuite ID:', solutionNetsuiteId);
     
-        // Import the unit mapping function
-        const { mapNetSuiteUnit } = await import('@/db/lib/netsuite-units.js');
-    
-        // Map NetSuite components to local format
-        const mappingResults = await db.netsuite.mapNetSuiteComponents(bomData.components || []);
-        const components = mappingResults.map(result => {
-        const comp = result.netsuiteComponent;
-        const match = result.bestMatch;
+    solutionItem = await db.models.Item.findOne({ 
+      netsuiteInternalId: solutionNetsuiteId,
+      itemType: 'solution' 
+    });
 
-        
-        
-        // FIXED: Map the NetSuite unit ID to symbol
-        const mappedUnit = mapNetSuiteUnit(comp.units);
-
-
-        console.log('🔧 Unit mapping in backend:', {
-            ingredient: comp.ingredient,
-            originalUnit: comp.units,
-            mappedUnit: mappedUnit
-
-        });
-        
-        return {
-            itemId: match?.chemical?._id || null,
-            amount: comp.quantity || comp.bomQuantity || 0,
-            unit: mappedUnit, // ← Now using mapped symbol (e.g., 'mL' instead of '35')
-            netsuiteData: {
-            itemId: comp.itemId,
-            itemRefName: comp.itemRefName || comp.ingredient,
-            ingredient: comp.ingredient,
-            bomQuantity: comp.bomQuantity || comp.quantity,
-            componentYield: comp.componentYield || 100,
-            units: comp.units, // ← Keep original NetSuite ID for reference
-            mappedUnit: mappedUnit, // ← Store mapped symbol
-            lineId: comp.lineId,
-            bomComponentId: comp.bomComponentId,
-            itemSource: comp.itemSource,
-            type: 'netsuite'
-            }
-        };
-        });
-    
-        const updateData = {
-        recipeQty: 1,
-        recipeUnit: 'mL',
-        components,
-        netsuiteImportData: {
-            bomId: bomData.bomId,
-            bomName: bomData.bomName,
-            revisionId: bomData.revisionId,
-            revisionName: bomData.revisionName,
-            importedAt: new Date(),
-            solutionNetsuiteId: bomData.assemblyItemId,
-            lastSyncAt: new Date()
-        }
-        };
-    
-        const updatedFile = await db.services.fileService.updateFileMeta(fileId, updateData);
-    
-        return NextResponse.json({
-        success: true,
-        data: {
-            file: updatedFile,
-            mappingResults,
-            summary: {
-            totalComponents: components.length,
-            mappedComponents: components.filter(c => c.itemId).length,
-            unmappedComponents: components.filter(c => !c.itemId).length
-            }
-        },
-        error: null,
-        message: 'BOM imported successfully'
-        });
+    if (solutionItem) {
+      console.log('✅ Found solution item:', {
+        id: solutionItem._id,
+        displayName: solutionItem.displayName,
+        sku: solutionItem.sku,
+        netsuiteId: solutionItem.netsuiteInternalId
+      });
+    } else {
+      console.warn('⚠️ Solution with NetSuite ID not found in database:', solutionNetsuiteId);
+      // You might want to create the solution item here, or return an error
+      // For now, we'll continue without it but log the warning
     }
+  }
+
+  // Import the unit mapping function
+  const { mapNetSuiteUnit } = await import('@/db/lib/netsuite-units.js');
+
+  // Map NetSuite components to local format
+  const mappingResults = await db.netsuite.mapNetSuiteComponents(bomData.components || []);
+  const components = mappingResults.map(result => {
+    const comp = result.netsuiteComponent;
+    const match = result.bestMatch;
+    
+    // FIXED: Map the NetSuite unit ID to symbol
+    const mappedUnit = mapNetSuiteUnit(comp.units);
+
+    console.log('🔧 Unit mapping in backend:', {
+      ingredient: comp.ingredient,
+      originalUnit: comp.units,
+      mappedUnit: mappedUnit
+    });
+    
+    return {
+      itemId: match?.chemical?._id || null,
+      amount: comp.quantity || comp.bomQuantity || 0,
+      unit: mappedUnit, // ← Now using mapped symbol (e.g., 'mL' instead of '35')
+      netsuiteData: {
+        itemId: comp.itemId,
+        itemRefName: comp.itemRefName || comp.ingredient,
+        ingredient: comp.ingredient,
+        bomQuantity: comp.bomQuantity || comp.quantity,
+        componentYield: comp.componentYield || 100,
+        units: comp.units, // ← Keep original NetSuite ID for reference
+        mappedUnit: mappedUnit, // ← Store mapped symbol
+        lineId: comp.lineId,
+        bomComponentId: comp.bomComponentId,
+        itemSource: comp.itemSource,
+        type: 'netsuite'
+      }
+    };
+  });
+
+  // FIXED: Include solutionRef in the update data
+  const updateData = {
+    recipeQty: 1,
+    recipeUnit: 'mL',
+    components,
+    solutionRef: solutionItem?._id || null, // ← ADD THIS LINE - Set the solution reference
+    netsuiteImportData: {
+      bomId: bomData.bomId,
+      bomName: bomData.bomName,
+      revisionId: bomData.revisionId,
+      revisionName: bomData.revisionName,
+      importedAt: new Date(),
+      solutionNetsuiteId: bomData.assemblyItemId,
+      lastSyncAt: new Date()
+    }
+  };
+
+  console.log('📝 Update data being saved:', {
+    fileId,
+    hasSolutionRef: !!updateData.solutionRef,
+    solutionRefId: updateData.solutionRef,
+    solutionNetsuiteId: updateData.netsuiteImportData.solutionNetsuiteId,
+    componentCount: updateData.components.length
+  });
+
+  const updatedFile = await db.services.fileService.updateFileMeta(fileId, updateData);
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      file: updatedFile,
+      mappingResults,
+      summary: {
+        totalComponents: components.length,
+        mappedComponents: components.filter(c => c.itemId).length,
+        unmappedComponents: components.filter(c => !c.itemId).length,
+        solutionFound: !!solutionItem,
+        solutionRef: solutionItem?._id
+      }
+    },
+    error: null,
+    message: `BOM imported successfully${solutionItem ? ' with solution reference' : ' (solution not found in database)'}`
+  });
+}
+
 
     case 'assemblybuild': {
       const { 
