@@ -2,7 +2,7 @@
 import { apiClient, useApi } from '@/app/api'
 
 // 🔇 TEMPORARILY ENABLE dev logging to debug PDF issue
-const isDev = true // Set to false when fixed
+const isDev = false // Set to false when fixed
 
 /**
  * FIXED: Simplified response normalization - don't modify data structure

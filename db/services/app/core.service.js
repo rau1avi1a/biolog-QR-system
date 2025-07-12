@@ -188,38 +188,123 @@ export class CoreService {
     }
   }
 
-  /**
-   * Update document by ID
-   */
-  async updateById(id, data) {
-    try {
-      await this.connect();
+/**
+ * Update document by ID - FIXED to handle nested Date objects properly
+ */
+async updateById(id, data) {
+  try {
+    await this.connect();
+    
+    // FIXED: Special handling for nested objects with Date fields
+    const sanitizedData = this.sanitizeForMongoose(data);
+    
+    console.log('🔍 CoreService updateById:', {
+      id,
+      hasSignedPdf: !!sanitizedData.signedPdf,
+      signedPdfDataType: sanitizedData.signedPdf?.data ? typeof sanitizedData.signedPdf.data : 'no data',
+      isBuffer: sanitizedData.signedPdf?.data ? Buffer.isBuffer(sanitizedData.signedPdf.data) : false,
+      hasNetsuiteData: !!sanitizedData.netsuiteWorkOrderData,
+      netsuiteDataKeys: sanitizedData.netsuiteWorkOrderData ? Object.keys(sanitizedData.netsuiteWorkOrderData) : 'none'
+    });
+    
+    // CRITICAL FIX: Use dot notation for nested objects instead of $set with the entire object
+    let updateOperation;
+    
+    if (sanitizedData.netsuiteWorkOrderData) {
+      // Build update operation using dot notation for nested fields
+      updateOperation = {};
       
-      // FIXED: Handle Buffer objects before saving to prevent serialization issues
-      const sanitizedData = this.sanitizeBuffers(data);
-      
-      console.log('🔍 CoreService updateById:', {
-        id,
-        hasSignedPdf: !!sanitizedData.signedPdf,
-        signedPdfDataType: sanitizedData.signedPdf?.data ? typeof sanitizedData.signedPdf.data : 'no data',
-        isBuffer: sanitizedData.signedPdf?.data ? Buffer.isBuffer(sanitizedData.signedPdf.data) : false
+      // Handle nested netsuiteWorkOrderData fields individually
+      Object.entries(sanitizedData.netsuiteWorkOrderData).forEach(([key, value]) => {
+        updateOperation[`netsuiteWorkOrderData.${key}`] = value;
       });
       
-      const result = await this.model.findByIdAndUpdate(
-        id,
-        { $set: sanitizedData },
-        { new: true, runValidators: false, lean: false }
-      );
+      // Add all other non-nested fields
+      Object.entries(sanitizedData).forEach(([key, value]) => {
+        if (key !== 'netsuiteWorkOrderData') {
+          updateOperation[key] = value;
+        }
+      });
       
-      if (!result) {
-        throw new Error(`${this.modelName} not found`);
+      console.log('🔧 Using dot notation update for nested fields:', {
+        operationKeys: Object.keys(updateOperation),
+        nestedFields: Object.keys(updateOperation).filter(k => k.startsWith('netsuiteWorkOrderData.')),
+        regularFields: Object.keys(updateOperation).filter(k => !k.startsWith('netsuiteWorkOrderData.'))
+      });
+      
+    } else {
+      // No nested fields, use direct update
+      updateOperation = sanitizedData;
+    }
+    
+    const result = await this.model.findByIdAndUpdate(
+      id,
+      updateOperation, // Use the prepared operation instead of $set
+      { 
+        new: true, 
+        runValidators: false, // Keep this false to avoid validation issues with complex nested objects
+        lean: false 
       }
-      
-      return result;
-    } catch (error) {
-      throw new Error(`Error updating ${this.modelName}: ${error.message}`);
+    );
+    
+    if (!result) {
+      throw new Error(`${this.modelName} not found`);
+    }
+    
+    return result;
+  } catch (error) {
+    throw new Error(`Error updating ${this.modelName}: ${error.message}`);
+  }
+}
+
+// FIXED: Enhanced sanitization method that properly handles Date objects
+sanitizeForMongoose(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  
+  // Handle Date objects - keep them as-is
+  if (obj instanceof Date) return obj;
+  
+  // Handle Buffer objects - keep them as-is
+  if (Buffer.isBuffer(obj)) return obj;
+  
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => this.sanitizeForMongoose(item));
+  }
+  
+  const sanitized = {};
+  
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === null || value === undefined) {
+      sanitized[key] = value;
+    } else if (value instanceof Date) {
+      // CRITICAL: Keep Date objects as-is, don't process them further
+      sanitized[key] = value;
+      console.log(`✅ Preserved Date object for ${key}:`, value);
+    } else if (Buffer.isBuffer(value)) {
+      // Keep Buffer objects as-is
+      sanitized[key] = value;
+    } else if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+      // Convert serialized Buffer back to Buffer
+      console.log(`🔧 Converting serialized Buffer back to Buffer for ${key}`);
+      sanitized[key] = Buffer.from(value.data);
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      // Check for empty objects that could cause issues
+      if (Object.keys(value).length === 0) {
+        console.warn(`⚠️ Found empty object for ${key}, setting to null`);
+        sanitized[key] = null;
+      } else {
+        // Recursively sanitize nested objects, but be careful with Date objects
+        sanitized[key] = this.sanitizeForMongoose(value);
+      }
+    } else {
+      // Primitive values - keep as-is
+      sanitized[key] = value;
     }
   }
+  
+  return sanitized;
+}
   
   // Helper method to sanitize Buffer objects
   sanitizeBuffers(obj) {

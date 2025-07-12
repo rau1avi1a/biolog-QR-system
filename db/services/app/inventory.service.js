@@ -32,6 +32,22 @@ class ItemService extends CoreService {
     return db.models.Chemical; 
   }
 
+  get Solution() { 
+    const model = db.models.Solution || mongoose.models.Solution;
+    if (!model) {
+      console.warn('⚠️ Solution discriminator model not found');
+    }
+    return model;
+  }
+  
+  get Product() { 
+    const model = db.models.Product || mongoose.models.Product;
+    if (!model) {
+      console.warn('⚠️ Product discriminator model not found');
+    }
+    return model;
+  }
+
   /**
    * Create item with type-specific handling
    */
@@ -100,21 +116,62 @@ class ItemService extends CoreService {
    */
   async getById(id) {
     await this.connect();
+    console.log(`🔍 ItemService.getById called with ID: ${id}`);
     
     // First get the item to check its type
     const item = await this.Item.findById(id).lean();
-    if (!item) return null;
+    if (!item) {
+      console.log(`❌ Item not found: ${id}`);
+      return null;
+    }
     
-    // Only populate BOM for solution and product types
+    console.log(`📋 Item found - Type: ${item.itemType}, SKU: ${item.sku}, Name: ${item.displayName}`);
+    
+    // Check if BOM exists
+    if (item.bom && item.bom.length > 0) {
+      console.log(`🔗 Item has BOM with ${item.bom.length} components`);
+    } else {
+      console.log(`🚫 Item has no BOM or empty BOM`);
+    }
+    
+    // For solutions and products, try to populate BOM if discriminator models exist
     if (item.itemType === 'solution' || item.itemType === 'product') {
-      return this.Item.findById(id)
-        .populate('bom.itemId', 'displayName sku')
-        .lean();
+      const ModelClass = item.itemType === 'solution' ? this.Solution : this.Product;
+      
+      if (!ModelClass) {
+        console.warn(`⚠️ ${item.itemType} discriminator model not available, returning unpopulated item`);
+        return item;
+      }
+      
+      console.log(`🧪 Processing ${item.itemType} - attempting BOM population`);
+      try {
+        const populatedItem = await ModelClass.findById(id)
+          .populate('bom.itemId', 'displayName sku itemType')
+          .lean();
+        
+        console.log(`✅ ${item.itemType} BOM populated successfully`);
+        if (populatedItem.bom && populatedItem.bom.length > 0) {
+          console.log(`🔗 Populated BOM:`, populatedItem.bom.map(b => ({
+            itemId: b.itemId?._id || b.itemId,
+            name: b.itemId?.displayName || 'No name populated',
+            qty: b.qty,
+            uom: b.uom
+          })));
+        }
+        
+        return populatedItem;
+      } catch (error) {
+        console.error(`❌ Error populating ${item.itemType} BOM:`, error.message);
+        console.log(`⚠️ Falling back to unpopulated item`);
+        return item;
+      }
     }
     
     // For chemicals, return without BOM population
+    console.log(`⚗️ Chemical item - no BOM population needed`);
     return item;
   }
+
 
     /**
      * Search items - FIXED with fuzzy search like file search
@@ -248,28 +305,52 @@ class ItemService extends CoreService {
   /**
    * Get lots for an item - matches the interface your route expects
    */
-  async getLots(itemId, lotId = null) {
-    await this.connect();
-    const item = await this.Item.findById(itemId).select('itemType uom Lots').lean();
-    
-    if (!item || item.itemType !== 'chemical') {
-      return [];
-    }
-    
-    let lots = (item.Lots || []).filter(l => (l.quantity || 0) > 0);
-    
-    if (lotId) {
-      lots = lots.filter(l => l._id.toString() === lotId);
-    }
-    
-    return lots.map(l => ({
-      id: l._id.toString(),
-      lotNumber: l.lotNumber,
-      availableQty: l.quantity,
-      unit: item.uom || 'ea',
-      expiryDate: l.expiryDate?.toISOString().slice(0, 10) || null
-    }));
+/**
+ * Get lots for an item - FIXED to work for all item types
+ */
+async getLots(itemId, lotId = null) {
+  await this.connect();
+  console.log(`🔍 [ItemService.getLots] Fetching lots for item: ${itemId}`);
+  
+  const item = await this.Item.findById(itemId).select('itemType displayName sku uom Lots').lean();
+  
+  if (!item) {
+    console.log(`❌ [ItemService.getLots] Item not found: ${itemId}`);
+    return [];
   }
+  
+  console.log(`📋 [ItemService.getLots] Item found - Type: ${item.itemType}, Name: ${item.displayName}`);
+  
+  // FIXED: Remove the chemical-only restriction
+  // Both chemicals AND solutions can have lots!
+  if (!item.Lots || !Array.isArray(item.Lots)) {
+    console.log(`ℹ️ [ItemService.getLots] Item has no Lots array or it's not an array`);
+    return [];
+  }
+  
+  let lots = item.Lots.filter(l => (l.quantity || 0) > 0);
+  console.log(`📦 [ItemService.getLots] Found ${lots.length} lots with quantity > 0`);
+  
+  if (lotId) {
+    lots = lots.filter(l => l._id.toString() === lotId);
+    console.log(`🔍 [ItemService.getLots] Filtered to specific lot ID: ${lotId}, found: ${lots.length}`);
+  }
+  
+  const formattedLots = lots.map(l => ({
+    id: l._id.toString(),
+    lotNumber: l.lotNumber,
+    availableQty: l.quantity,
+    unit: item.uom || 'ea',
+    expiryDate: l.expiryDate?.toISOString().slice(0, 10) || null
+  }));
+  
+  console.log(`✅ [ItemService.getLots] Returning ${formattedLots.length} formatted lots for ${item.itemType} "${item.displayName}"`);
+  formattedLots.forEach(lot => {
+    console.log(`  📦 Lot: ${lot.lotNumber}, Qty: ${lot.availableQty} ${lot.unit}, Expiry: ${lot.expiryDate || 'None'}`);
+  });
+  
+  return formattedLots;
+}
 
   /**
    * Delete a specific lot - matches the interface your route expects
@@ -556,14 +637,28 @@ class TransactionService {
   /**
    * Get transaction by ID with full details
    */
-  async getById(txnId) {
+  async getById(id) {
     await this.connect();
     
-    return this.InventoryTxn.findById(txnId)
-      .populate('lines.item', 'sku displayName uom itemType')
-      .populate('createdBy._id', 'name email')
-      .populate('batchId', 'runNumber fileId status')
-      .lean();
+    // First get the item to check its type
+    const item = await this.Item.findById(id).lean();
+    if (!item) return null;
+    
+    // Use the appropriate discriminator model for population
+    if (item.itemType === 'solution') {
+      return this.Solution.findById(id)
+        .populate('bom.itemId', 'displayName sku')
+        .lean();
+    }
+    
+    if (item.itemType === 'product') {
+      return this.Product.findById(id)
+        .populate('bom.itemId', 'displayName sku')
+        .lean();
+    }
+    
+    // For chemicals, return without BOM population
+    return item;
   }
 
   /**

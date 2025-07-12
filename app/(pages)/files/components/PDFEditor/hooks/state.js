@@ -37,102 +37,126 @@ export function useComponentState(core, props) {
   const compact = mobileModeActive;
 
   // === WORK ORDER BADGE LOGIC ===
-  const getWorkOrderBadgeProps = useCallback(() => {
-    const workOrderInfo = core.workOrderInfo;
+const getWorkOrderBadgeProps = useCallback(() => {
+  const workOrderInfo = core.workOrderInfo;
+  
+  if (!workOrderInfo && !core.isCreatingWorkOrder && !core.userInitiatedCreation) {
+    return null;
+  }
+
+  // FIXED: Better status detection and display logic
+  const getBadgeColor = () => {
+    if (workOrderInfo?.isFailed) return 'bg-red-50 text-red-700 border-red-200';
     
-    console.log('🏷️ Building work order badge:', {
-      workOrderInfo,
-      isCreatingWorkOrder: core.isCreatingWorkOrder,
-      userInitiatedCreation: core.userInitiatedCreation,
-      workOrderStatus: core.workOrderStatus,
-      workOrderLoading: core.workOrderLoading
-    });
-  
-    if (!workOrderInfo && !core.isCreatingWorkOrder && !core.userInitiatedCreation) {
-      return null;
+    // ADDED: Green for completed assembly builds
+    if (doc?.assemblyBuildCreated || doc?.workOrderCompleted) {
+      return 'bg-green-50 text-green-700 border-green-200';
     }
-  
-    // FIXED: Better status detection and display logic
-    const getBadgeColor = () => {
-      if (workOrderInfo?.isFailed) return 'bg-red-50 text-red-700 border-red-200';
-      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation) {
-        return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-      }
-      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
-        return workOrderInfo.isNetSuite ? 
-          'bg-blue-50 text-blue-700 border-blue-200' : 
-          'bg-green-50 text-green-700 border-green-200';
-      }
-      return 'bg-gray-50 text-gray-700 border-gray-200';
-    };
-  
-    const getDisplayText = () => {
-      // FIXED: Show work order number when created
-      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber && !workOrderInfo?.isPending) {
-        const number = workOrderInfo.workOrderNumber;
-        return compact ? number : `WO: ${number}`;
-      }
-      
-      // Show creating status
-      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation || core.workOrderLoading) {
-        return compact ? 'Creating...' : 'Creating Work Order';
-      }
-      
-      // Show failed status
-      if (workOrderInfo?.isFailed) {
-        return compact ? 'WO Failed' : 'Work Order Failed';
-      }
-      
-      // Fallback
-      return compact ? 'WO' : 'Work Order';
-    };
-  
-    const getIcon = () => {
-      if (workOrderInfo?.isFailed) return '❌';
-      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation || core.workOrderLoading) {
-        return '⏳';
-      }
-      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
-        return workOrderInfo.isNetSuite ? '🔗' : '📝';
-      }
-      return '📋';
-    };
-  
-    const getTitle = () => {
-      if (workOrderInfo?.isFailed) {
-        return `Work order creation failed: ${workOrderInfo.error || 'Unknown error'}`;
-      }
-      if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation) {
-        return 'Work order is being created in NetSuite...';
-      }
-      if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
-        return workOrderInfo.isNetSuite ? 
-          `NetSuite Work Order: ${workOrderInfo.workOrderNumber}` : 
-          `Local Work Order: ${workOrderInfo.workOrderNumber}`;
-      }
-      return 'Work Order';
-    };
-  
-    const isAnimating = workOrderInfo?.isPending || 
-                       core.isCreatingWorkOrder || 
-                       core.userInitiatedCreation || 
-                       core.workOrderLoading;
-  
-    return {
-      className: `text-xs flex items-center gap-1 shrink-0 ${getBadgeColor()} transition-colors duration-200`,
-      title: getTitle(),
-      isAnimating: isAnimating,
-      icon: getIcon(),
-      text: getDisplayText()
-    };
-  }, [
-    core.workOrderInfo, 
-    core.isCreatingWorkOrder, 
-    core.userInitiatedCreation,
-    core.workOrderStatus, 
-    core.workOrderLoading,
-    compact
-  ]);
+    
+    if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation) {
+      return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+    }
+    if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
+      return workOrderInfo.isNetSuite ? 
+        'bg-blue-50 text-blue-700 border-blue-200' : 
+        'bg-green-50 text-green-700 border-green-200';
+    }
+    return 'bg-gray-50 text-gray-700 border-gray-200';
+  };
+
+  const getDisplayText = () => {
+    // PRIORITY 1: Show Assembly Build number if completed
+    if (doc?.assemblyBuildCreated && doc?.assemblyBuildTranId) {
+      const assemblyBuildNumber = doc.assemblyBuildTranId;
+      return compact ? assemblyBuildNumber : `${assemblyBuildNumber}`;
+    }
+    
+    // PRIORITY 2: Show Work Order number if created but not completed
+    if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber && !workOrderInfo?.isPending) {
+      const number = workOrderInfo.workOrderNumber;
+      return compact ? number : `${number}`;
+    }
+    
+    // PRIORITY 3: Show creating status
+    if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation || core.workOrderLoading) {
+      return compact ? 'Creating...' : 'Creating Work Order';
+    }
+    
+    // PRIORITY 4: Show failed status
+    if (workOrderInfo?.isFailed) {
+      return compact ? 'WO Failed' : 'Work Order Failed';
+    }
+    
+    // Fallback
+    return compact ? 'WO' : 'Work Order';
+  };
+
+  const getIcon = () => {
+    if (workOrderInfo?.isFailed) return '❌';
+    
+    // ADDED: Show completed icon for assembly builds
+    if (doc?.assemblyBuildCreated || doc?.workOrderCompleted) {
+      return '✅';
+    }
+    
+    if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation || core.workOrderLoading) {
+      return '⏳';
+    }
+    if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
+      return workOrderInfo.isNetSuite ? '🔗' : '📝';
+    }
+    return '📋';
+  };
+
+  const getTitle = () => {
+    if (workOrderInfo?.isFailed) {
+      return `Work order creation failed: ${workOrderInfo.error || 'Unknown error'}`;
+    }
+    
+    // ADDED: Enhanced titles for assembly builds
+    if (doc?.assemblyBuildCreated && doc?.assemblyBuildTranId) {
+      return `Assembly Build Completed: ${doc.assemblyBuildTranId} (from Work Order: ${workOrderInfo?.workOrderNumber || 'Unknown'})`;
+    }
+    
+    if (doc?.workOrderCompleted) {
+      return `Work Order Completed: ${workOrderInfo?.workOrderNumber || 'Unknown'}`;
+    }
+    
+    if (workOrderInfo?.isPending || core.isCreatingWorkOrder || core.userInitiatedCreation) {
+      return 'Work order is being created in NetSuite...';
+    }
+    if (workOrderInfo?.isCreated && workOrderInfo?.workOrderNumber) {
+      return workOrderInfo.isNetSuite ? 
+        `NetSuite Work Order: ${workOrderInfo.workOrderNumber}` : 
+        `Local Work Order: ${workOrderInfo.workOrderNumber}`;
+    }
+    return 'Work Order';
+  };
+
+  const isAnimating = workOrderInfo?.isPending || 
+                     core.isCreatingWorkOrder || 
+                     core.userInitiatedCreation || 
+                     core.workOrderLoading;
+
+  return {
+    className: `text-xs flex items-center gap-1 shrink-0 ${getBadgeColor()} transition-colors duration-200`,
+    title: getTitle(),
+    isAnimating: isAnimating,
+    icon: getIcon(),
+    text: getDisplayText()
+  };
+}, [
+  core.workOrderInfo, 
+  core.isCreatingWorkOrder, 
+  core.userInitiatedCreation,
+  core.workOrderStatus, 
+  core.workOrderLoading,
+  // ADDED: Include assembly build fields in dependencies
+  doc?.assemblyBuildCreated,
+  doc?.assemblyBuildTranId,
+  doc?.workOrderCompleted,
+  compact
+]);
 
   // === BUTTON CONFIGURATION LOGIC ===
   const getButtonConfig = useCallback(() => {
@@ -488,81 +512,148 @@ export function useComponentState(core, props) {
 
 
 
+// Fixed handleSaveConfirm function for your state hook
+
 const handleSaveConfirm = useCallback(async (confirmationData) => {
+  console.log('✅ HANDLE SAVE CONFIRM CALLED:', { saveAction, confirmationData });
 
-    console.log('✅ HANDLE SAVE CONFIRM CALLED:', { saveAction, confirmationData });
+  try {
+    // Show loading for work order creation when confirm button is clicked
+    if (saveAction === 'create_work_order') {
+      core.setIsCreatingWorkOrder(true);
+      core.setUserInitiatedCreation(true);
+    }
 
-    try {
-      // Show loading for work order creation when confirm button is clicked
-      if (saveAction === 'create_work_order') {
-        core.setIsCreatingWorkOrder(true);
-        core.setUserInitiatedCreation(true);
+    const finalConfirmationData = {
+      batchQuantity: parseFloat(batchQuantity) || 1000,
+      batchUnit: batchUnit,
+      solutionLotNumber: solutionLotNumber.trim(),
+      solutionQuantity: parseFloat(solutionQuantity) || parseFloat(batchQuantity) || 1000,
+      solutionUnit: solutionUnit,
+      components: confirmedComponents,
+      scaledComponents: scaledComponents,
+      reason: confirmationData?.reason || '',
+      ...confirmationData
+    };
+
+
+    // Perform the save and wait for result
+    const result = await core.save(saveAction, finalConfirmationData);
+    setShowSaveDialog(false);
+    
+    console.log('💾 Save completed, result:', result);
+    
+    // FIXED: Handle Work Order creation specially to preserve PDF state
+    if (saveAction === 'create_work_order' && result?.data) {
+      console.log('🔄 Work Order created - updating document with proper PDF handling');
+      
+      // FIXED: Better PDF data handling - use the validateAndCleanBase64 function
+      let newPdfData = doc.pdf; // Start with current PDF as fallback
+      
+      if (result.data.signedPdf?.data) {
+        console.log('🔧 Processing signedPdf from work order creation result');
+        
+        // Use the same validation function as in the core hook
+        const validateAndCleanBase64 = (data, contentType = 'application/pdf') => {
+          if (!data) return null;
+          
+          try {
+            // Handle object format from backend
+            if (typeof data === 'object' && data !== null && !Buffer.isBuffer(data)) {
+              if (data.data) {
+                const objContentType = data.contentType || contentType;
+                return validateAndCleanBase64(data.data, objContentType);
+              }
+              return null;
+            }
+            
+            // Handle data URL
+            if (typeof data === 'string' && data.startsWith('data:')) {
+              const base64Match = data.match(/^data:([^;]+);base64,(.+)$/);
+              if (base64Match) {
+                atob(base64Match[2]); // Validate
+                return data;
+              }
+            }
+            
+            // Handle Buffer
+            if (Buffer.isBuffer(data)) {
+              const base64String = data.toString('base64');
+              atob(base64String); // Validate
+              return `data:${contentType};base64,${base64String}`;
+            }
+            
+            // Handle serialized Buffer
+            if (typeof data === 'object' && data.type === 'Buffer' && Array.isArray(data.data)) {
+              const buffer = Buffer.from(data.data);
+              const base64String = buffer.toString('base64');
+              atob(base64String); // Validate
+              return `data:${contentType};base64,${base64String}`;
+            }
+            
+            // Handle plain base64 string
+            if (typeof data === 'string') {
+              const cleanBase64 = data.replace(/\s/g, '');
+              atob(cleanBase64); // Validate
+              return `data:${contentType};base64,${cleanBase64}`;
+            }
+            
+            return null;
+          } catch (error) {
+            console.error('📄 PDF validation failed:', error);
+            return null;
+          }
+        };
+        
+        newPdfData = validateAndCleanBase64(
+          result.data.signedPdf.data,
+          result.data.signedPdf.contentType || 'application/pdf'
+        );
+        
+        if (newPdfData) {
+          console.log('✅ Successfully processed PDF from work order creation');
+        } else {
+          console.error('❌ Failed to process PDF from work order creation, using fallback');
+          newPdfData = doc.pdf;
+        }
       }
-  
-      const finalConfirmationData = {
-        batchQuantity: Number(batchQuantity),
-        batchUnit: batchUnit,
-        solutionLotNumber: solutionLotNumber.trim(),
-        solutionQuantity: solutionQuantity ? Number(solutionQuantity) : null,
-        solutionUnit: solutionUnit.trim() || 'L',
-        components: confirmedComponents.map(comp => ({
-          itemId: typeof comp.itemId === 'object' ? comp.itemId._id : comp.itemId,
-          amount: comp.amount,
-          scaledAmount: comp.scaledAmount,
-          originalAmount: comp.originalAmount,
-          plannedAmount: comp.plannedAmount,
-          actualAmount: comp.actualAmount,
-          lotNumber: comp.lotNumber,
-          lotId: comp.lotId,
-          displayName: comp.displayName,
-          sku: comp.sku,
-          unit: comp.unit
-        })),
-        scaledComponents: scaledComponents.map(comp => ({
-          itemId: typeof comp.itemId === 'object' ? comp.itemId._id : comp.itemId,
-          amount: comp.amount,
-          scaledAmount: comp.scaledAmount,
-          originalAmount: comp.originalAmount,
-          plannedAmount: comp.plannedAmount,
-          actualAmount: comp.actualAmount,
-          lotNumber: comp.lotNumber,
-          lotId: comp.lotId,
-          displayName: comp.displayName,
-          sku: comp.sku,
-          unit: comp.unit
-        })),
-        action: saveAction
+      
+      // Create new document data with preserved PDF
+      const newBatchData = {
+        ...result.data,
+        isBatch: true,
+        originalFileId: result.data.fileId || doc._id,
+        pdf: newPdfData, // Use the properly validated PDF
+        overlays: null, // Clear overlays since they'll be baked into the new PDF
+        status: 'In Progress',
+        workOrderCreated: true,
+        workOrderStatus: 'creating'
       };
-  
-      console.log('🔍 Final confirmation data:', finalConfirmationData);
-  
-      // Perform the save and wait for result
-      const result = await core.save(saveAction, finalConfirmationData);
-      setShowSaveDialog(false);
       
-      console.log('💾 Save completed, result:', result);
+      console.log('📄 Setting new batch document with validated PDF');
       
-      // FIXED: Different handling for simple saves vs baking actions
-      const actionsThatBakePDF = ['create_work_order', 'submit_review', 'complete'];
+      // Update document with stable key to prevent complete re-mount
+      if (setCurrentDoc) {
+        setCurrentDoc(newBatchData);
+      }
+      
+    } else {
+      // Handle other actions normally
+      const actionsThatBakePDF = ['submit_review', 'complete'];
       const shouldClearOverlays = actionsThatBakePDF.includes(saveAction);
       
       if (shouldClearOverlays) {
         console.log('🔥 Action bakes PDF - clearing overlays');
         
-        // Clear overlays immediately since they're now baked into the PDF
         setTimeout(() => {
           console.log('🧹 Clearing overlays from memory...');
           
-          // Clear all overlays and history since they're now baked
           core.overlaysRef.current = {};
           core.historiesRef.current = {};
+          // core.setHistIdx(-1);
+          // core.setHistory([]);
+          // core.setOverlay(null);
           
-          // Reset drawing state
-          core.setHistIdx(-1);
-          core.setHistory([]);
-          core.setOverlay(null);
-          
-          // Clear the canvas
           const canvas = core.canvasRef.current;
           const ctx = core.ctxRef.current;
           
@@ -572,71 +663,30 @@ const handleSaveConfirm = useCallback(async (confirmationData) => {
           }
           
           console.log('✅ Overlays cleared - drawings are now baked into PDF');
-          
         }, 100);
         
       } else {
         console.log('💾 Simple save - preserving and redrawing overlays');
         
-        // For simple saves, we need to refresh the canvas to show the preserved overlays
-        setTimeout(() => {
-          const canvas = core.canvasRef.current;
-          const ctx = core.ctxRef.current;
-          
-          if (canvas && ctx) {
-            console.log('🎨 Refreshing canvas after simple save...');
-            
-            // Get the current page overlay
-            const currentPageOverlay = core.overlaysRef.current[core.pageNo];
-            
-            if (currentPageOverlay) {
-              console.log('🖌️ Redrawing overlay for page:', core.pageNo);
-              
-              // Clear canvas first
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              
-              // Redraw the overlay
-              const img = new Image();
-              img.onload = () => {
-                try {
-                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                  console.log('✅ Overlay redrawn successfully after simple save');
-                } catch (err) {
-                  console.error('❌ Failed to redraw overlay:', err);
-                }
-              };
-              img.onerror = () => {
-                console.error('❌ Failed to load overlay image for redraw');
-              };
-              img.src = currentPageOverlay;
-              
-            } else {
-              console.log('ℹ️ No overlay to redraw for current page');
-            }
-          } else {
-            console.warn('⚠️ Canvas or context not available for refresh');
-          }
-          
-        }, 200); // Give save time to complete
-      }
-      
-      // Always refresh files to update the UI with new document data
-      if (refreshFiles) {
-        console.log('🔄 Refreshing file list...');
-        setTimeout(() => {
-          refreshFiles();
-        }, 300);
-      }
-      
-    } catch (error) {
-      console.error('❌ Save confirm error:', error);
-      // Error handling
-      if (saveAction === 'create_work_order') {
-        core.setUserInitiatedCreation(false);
-        core.setIsCreatingWorkOrder(false);
       }
     }
-  }, [saveAction, core, refreshFiles, batchQuantity, batchUnit, solutionLotNumber, solutionQuantity, solutionUnit, confirmedComponents, scaledComponents]);
+    
+    // Always refresh files to update the UI with new document data
+    if (refreshFiles) {
+      console.log('🔄 Refreshing file list...');
+      setTimeout(() => {
+        refreshFiles();
+      }, 500); // Increased delay for work order creation
+    }
+    
+  } catch (error) {
+    console.error('❌ Save confirm error:', error);
+    if (saveAction === 'create_work_order') {
+      core.setUserInitiatedCreation(false);
+      core.setIsCreatingWorkOrder(false);
+    }
+  }
+}, [saveAction, core, refreshFiles, doc, setCurrentDoc, batchQuantity, batchUnit, solutionLotNumber, solutionQuantity, solutionUnit, confirmedComponents, scaledComponents]);
 
   const handleSaveDialogClose = useCallback(() => {
     setShowSaveDialog(false);
@@ -787,9 +837,7 @@ const handleSaveConfirm = useCallback(async (confirmationData) => {
         text: compact ? (core.isArchived ? 'Arc' : 'Done') : (core.isArchived ? 'Archived' : 'Completed')
       });
     }
-  
-    console.log('🏷️ Final workflow indicators:', indicators);
-  
+    
     return indicators;
   }, [
     getWorkOrderBadgeProps, 

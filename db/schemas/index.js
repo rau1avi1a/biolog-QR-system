@@ -159,6 +159,19 @@ const batchSchema = new Schema({
     contentType: { type: String, default: 'application/pdf' }
   },
 
+  overlays: {
+    type: Map,
+    of: String,
+    default: new Map()
+  },
+    pageOverlays: {
+    type: Schema.Types.Mixed,
+    default: {}
+  },
+    overlayPages: [{
+    type: Number
+  }],
+
   // Status
   status: {
     type: String,
@@ -171,11 +184,47 @@ const batchSchema = new Schema({
   isArchived: { type: Boolean, default: false },
   archivedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   folderPath: { type: String },
 
@@ -189,20 +238,92 @@ const batchSchema = new Schema({
   },
   workOrderCreatedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   workOrderError: { type: String },
   workOrderFailedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   
   // Assembly Build fields (when work order is completed)
@@ -211,29 +332,137 @@ const batchSchema = new Schema({
   assemblyBuildCreated: { type: Boolean, default: false },
   assemblyBuildCreatedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   workOrderCompleted: { type: Boolean, default: false },
   workOrderCompletedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   workOrderCompletionError: { type: String },
   workOrderCompletionFailedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
 
   // NetSuite work order data
@@ -286,11 +515,47 @@ const batchSchema = new Schema({
   chemicalsTransacted: { type: Boolean, default: false },
   transactionDate: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
 
   // Solution creation fields
@@ -300,11 +565,47 @@ const batchSchema = new Schema({
   solutionUnit: { type: String },
   solutionCreatedDate: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
 
   // Rejection handling
@@ -313,11 +614,47 @@ const batchSchema = new Schema({
   rejectedBy: { type: String },
   rejectedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
 
   // Confirmed components
@@ -348,27 +685,135 @@ const batchSchema = new Schema({
   signedBy: { type: String },
   signedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   submittedForReviewAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   completedAt: { 
     type: Date,
-    set: function(value) {
-      // Handle ISO string conversion for date serialization
-      if (typeof value === 'string') return new Date(value);
-      return value;
+set: function(value) {
+  // Handle null/undefined
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // Handle empty object (the problematic case)
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    console.warn('⚠️ Empty object passed to date setter, using current date');
+    return new Date();
+  }
+  
+  // Handle ISO string conversion for date serialization
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) {
+      console.warn('⚠️ Invalid date string passed to setter:', value);
+      return new Date();
     }
+    return date;
+  }
+  
+  // Handle Date objects
+  if (value instanceof Date) {
+    return value;
+  }
+  
+  // Handle timestamp numbers
+  if (typeof value === 'number') {
+    return new Date(value);
+  }
+  
+  // Handle other object types (like moment objects)
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  
+  // Last resort - log the problematic value and return current date
+  console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+  return new Date();
+}
   },
   
   ...auditFields

@@ -2,6 +2,7 @@
 'use client';
 
 import React from 'react';
+import { useMemo } from 'react';
 import { Document, Page } from 'react-pdf';
 import { ui } from '@/components/ui';
 import { useCore } from '../hooks/core';
@@ -129,7 +130,7 @@ const MobileActions = ({ config, handleSave, core, saveAction }) => {
   );
 };
 
-/* Page Navigation Component */
+/* FIXED Page Navigation Component */
 const PageNavigation = ({ config, onNavigate }) => {
   if (!config.showNavigation) return null;
 
@@ -139,8 +140,12 @@ const PageNavigation = ({ config, onNavigate }) => {
         size="icon" 
         variant="ghost" 
         className="h-6 w-6"
-        onClick={() => onNavigate('prev')} 
+        onClick={() => {
+          console.log('📄 Previous page clicked');
+          onNavigate('prev');
+        }} 
         disabled={!config.canGoBack}
+        title={`Go to page ${config.currentPage - 1}`}
       >
         <ui.icons.ChevronLeft size={12} />
       </ui.Button>
@@ -151,8 +156,12 @@ const PageNavigation = ({ config, onNavigate }) => {
         size="icon" 
         variant="ghost" 
         className="h-6 w-6"
-        onClick={() => onNavigate('next')} 
+        onClick={() => {
+          console.log('📄 Next page clicked');
+          onNavigate('next');
+        }} 
         disabled={!config.canGoForward}
+        title={`Go to page ${config.currentPage + 1}`}
       >
         <ui.icons.ChevronRight size={12} />
       </ui.Button>
@@ -664,15 +673,21 @@ export default function PDFEditor(props) {
   const core = useCore(props);
   const state = useComponentState(core, props);
 
+  const componentKey = useMemo(() => {
+    // Use original file ID as stable key - even when switching to batch
+    const baseId = props.doc?.originalFileId || props.doc?.fileId || props.doc?._id;
+    return `pdf-editor-${baseId}`;
+  }, [props.doc?.originalFileId, props.doc?.fileId, props.doc?._id]);
+
   // Early return if no PDF data
   if (!state.isValid) {
-    return <div className="p-4">No PDF data.</div>;
+    return <div className="p-4">No PDF data available.</div>;
   }
 
   const { doc } = props;
 
   return (
-    <div className="flex flex-col h-full">
+    <div key={componentKey} className="flex flex-col h-full">
       {/* Enhanced Header */}
       <div className={state.headerConfig.className}>
         <div className="flex items-center gap-1 sm:gap-3 min-w-0 flex-1">

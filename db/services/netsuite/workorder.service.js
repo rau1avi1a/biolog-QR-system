@@ -201,33 +201,57 @@ export class NetSuiteWorkOrderService {
     }
   }
 
-  /**
-   * Update batch with work order info
-   */
-  async updateBatchWithWorkOrder(batchId, workOrderData) {
-    await this.services.batchService.updateBatch(batchId, {
-      workOrderId: workOrderData.tranId,
-      workOrderStatus: 'created',
-      workOrderCreated: true,
-      workOrderCreatedAt: new Date().toISOString(),
-      netsuiteWorkOrderData: {
-        workOrderId: workOrderData.id,
-        tranId: workOrderData.tranId,
-        bomId: workOrderData.bomId,
-        revisionId: workOrderData.revisionId,
-        quantity: workOrderData.quantity,
-        status: workOrderData.status,
-        orderStatus: workOrderData.status,
-        createdAt: new Date().toISOString(),
-        lastSyncAt: new Date().toISOString(),
-        // Add placeholders for fields that will be set later
-        completedAt: null,
-        assemblyBuildId: null,
-        assemblyBuildTranId: null
-      }
-    });
-  }
 
+/**
+ * Update batch with work order info
+ */
+async updateBatchWithWorkOrder(batchId, workOrderData) {
+  // FIXED: Create proper Date objects for all date fields
+  const currentDate = new Date();
+  
+  // FIXED: Build a clean netsuiteWorkOrderData object with proper Date objects
+  const netsuiteWorkOrderData = {
+    workOrderId: workOrderData.id || null,
+    tranId: workOrderData.tranId || null,
+    bomId: workOrderData.bomId || null,
+    revisionId: workOrderData.revisionId || null,
+    quantity: workOrderData.quantity || null,
+    status: workOrderData.status || 'created',
+    orderStatus: workOrderData.status || 'created',
+    createdAt: currentDate, // Use proper Date object
+    lastSyncAt: currentDate, // Use proper Date object
+    // Initialize these as null - they'll be set later during completion
+    completedAt: null,
+    assemblyBuildId: null,
+    assemblyBuildTranId: null
+  };
+
+  // FIXED: Prepare the update payload with proper data types
+  const updatePayload = {
+    workOrderId: workOrderData.tranId,
+    workOrderStatus: 'created',
+    workOrderCreated: true,
+    workOrderCreatedAt: currentDate, // Use proper Date object instead of ISO string
+    netsuiteWorkOrderData: netsuiteWorkOrderData
+  };
+
+  console.log('🔍 WorkOrder Service - Update payload prepared:', {
+    workOrderId: updatePayload.workOrderId,
+    workOrderStatus: updatePayload.workOrderStatus,
+    createdAtType: typeof updatePayload.workOrderCreatedAt,
+    createdAtValue: updatePayload.workOrderCreatedAt,
+    netsuiteDataKeys: Object.keys(updatePayload.netsuiteWorkOrderData),
+    allDatesAreValid: Object.entries(updatePayload.netsuiteWorkOrderData)
+      .filter(([key, value]) => key.includes('At') && value !== null)
+      .every(([key, value]) => value instanceof Date),
+    dateFields: Object.entries(updatePayload.netsuiteWorkOrderData)
+      .filter(([key, value]) => key.includes('At'))
+      .map(([key, value]) => ({ key, type: typeof value, isDate: value instanceof Date, value }))
+  });
+
+  // Call the batch service update method
+  await this.services.batchService.updateBatch(batchId, updatePayload);
+}
   /**
    * Log work order creation
    */
