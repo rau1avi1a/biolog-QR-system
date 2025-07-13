@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { filesApi } from '../../../../lib/api';
+import { filesApi } from '../../../../../lib/api';
 
 /**
  * Save Dialog State Hook
