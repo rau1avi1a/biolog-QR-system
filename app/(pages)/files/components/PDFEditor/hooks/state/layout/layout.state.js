@@ -101,11 +101,22 @@ export function useLayout(doc, onToggleDrawer, mobileModeActive = false, onOpenP
     console.log('File deleted - should close editor');
   }, []);
 
-  const handleOpenProperties = useCallback(() => {
-    if (onOpenProperties) {
-      onOpenProperties(doc);
-    }
-  }, [onOpenProperties, doc]);
+const handleOpenProperties = useCallback(() => {
+  console.log('🔧 handleOpenProperties called:', {
+    hasOnOpenProperties: !!onOpenProperties,
+    hasDoc: !!doc,
+    docId: doc?._id,
+    docType: doc?.isBatch ? 'batch' : 'original',
+    docKeys: doc ? Object.keys(doc) : null
+  });
+  
+  if (onOpenProperties) {
+    console.log('✅ Calling onOpenProperties with doc:', doc);
+    onOpenProperties(doc);
+  } else {
+    console.error('❌ onOpenProperties prop is missing!');
+  }
+}, [onOpenProperties, doc]);
 
   // === WORKFLOW INDICATORS LAYOUT ===
   const getWorkflowIndicatorsLayout = useCallback((indicators) => {
