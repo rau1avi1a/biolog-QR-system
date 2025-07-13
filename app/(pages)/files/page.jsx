@@ -13,6 +13,9 @@ const PDFEditor = dynamic(() => import('./components/PDFEditor'), { ssr: false }
 const FileProperties = dynamic(() => import('./components/FileProperties'), { ssr: false });
 
 export default function FilesPage() {
+  // === FILE PROPERTIES ===
+  const [batchContext, setBatchContext] = useState(null);
+
   // === PAGE-LEVEL STATE ===
   const [currentDoc, setCurrentDoc] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -536,7 +539,8 @@ const handleOpenProperties = useCallback(async (doc) => {
       docId: doc._id,
       isBatch: doc.isBatch || !!doc.runNumber || !!doc.status,
       hasFileId: !!doc.fileId,
-      fileId: doc.fileId
+      fileId: doc.fileId,
+      docKeys: Object.keys(doc) // Add this to see what's in the doc
     });
 
     let targetFileId = doc._id;
@@ -545,6 +549,8 @@ const handleOpenProperties = useCallback(async (doc) => {
     // FIXED: If this is a batch, get the original file ID
     if (doc.isBatch || doc.runNumber || doc.status || doc.batchId) {
       isFromBatch = true;
+      console.log('✅ Detected batch file, setting batch context:', doc);
+      setBatchContext(doc);
       
       // If the batch has a fileId reference, use that
       if (doc.fileId) {
@@ -556,17 +562,25 @@ const handleOpenProperties = useCallback(async (doc) => {
         const batchResult = await filesApi.batches.get(doc._id);
         
         if (hasApiError(batchResult)) {
+          console.error('❌ Error fetching batch:', handleApiError(batchResult));
           throw new Error(handleApiError(batchResult));
         }
         
         const fullBatch = extractApiData(batchResult);
+        console.log('✅ Got full batch data:', fullBatch);
+        setBatchContext(fullBatch); // Update with full batch data
+        
         if (fullBatch?.fileId) {
           targetFileId = typeof fullBatch.fileId === 'object' ? fullBatch.fileId._id : fullBatch.fileId;
           console.log('✅ Got fileId from full batch:', targetFileId);
         } else {
+          console.error('❌ Batch has no fileId:', fullBatch);
           throw new Error('Batch has no associated file ID');
         }
       }
+    } else {
+      console.log('📄 Not a batch file, clearing batch context');
+      setBatchContext(null);
     }
 
     // Now fetch the original file metadata
@@ -574,10 +588,12 @@ const handleOpenProperties = useCallback(async (doc) => {
     const metaResult = await filesApi.files.get(targetFileId);
     
     if (hasApiError(metaResult)) {
+      console.error('❌ Error fetching file metadata:', handleApiError(metaResult));
       throw new Error(handleApiError(metaResult));
     }
     
     const fullFile = extractApiData(metaResult);
+    console.log('✅ Got file metadata:', fullFile);
     
     // Add context flags for the FileProperties component
     const fileWithContext = {
@@ -591,17 +607,30 @@ const handleOpenProperties = useCallback(async (doc) => {
       fileName: fullFile.fileName,
       isFromBatch,
       hasComponents: fullFile.components?.length > 0,
-      hasSolutionRef: !!fullFile.solutionRef
+      hasSolutionRef: !!fullFile.solutionRef,
+      fileWithContextKeys: Object.keys(fileWithContext)
     });
     
+console.log('🔧 Setting propertiesDoc with:', {
+  hasFullFile: !!fullFile,
+  isFromBatch,
+  fileWithContextKeys: Object.keys(fileWithContext),
+  isFromBatchInContext: fileWithContext.isFromBatch,
+  fullFileId: fullFile?._id,
+  fullFileName: fullFile?.fileName
+});
+
     setPropertiesDoc(fileWithContext);
+    console.log('✅ propertiesDoc set successfully');
     
   } catch (err) {
-    console.error('❌ get item failed:', err.message);
+    console.error('❌ handleOpenProperties failed:', err.message, err);
     setError(`Failed to load file properties: ${err.message}`);
+    setBatchContext(null);
     // Don't set propertiesDoc on error
   }
 }, []);
+
 
   const handlePropertiesClose = useCallback((open) => {
     if (!open) setPropertiesDoc(null);
@@ -650,7 +679,6 @@ const handleOpenProperties = useCallback(async (doc) => {
     closeDrawer: handleCloseDrawer,
     refreshTrigger,
   };
-
 
 
   // === RENDER ===
@@ -770,15 +798,18 @@ const handleOpenProperties = useCallback(async (doc) => {
         </div>
       </div>
 
+      
+
       {/* File Properties Drawer (Page-Level) */}
-      <FileProperties
-        file={propertiesDoc}
-        open={!!propertiesDoc}
-        onOpenChange={handlePropertiesClose}
-        onSaved={handlePropertiesSaved}
-        onFileDeleted={handleFileDeleted}
-        readOnly={propertiesDoc?.isBatch || propertiesDoc?.status === 'Completed' || propertiesDoc?.isArchived}
-      />
+<FileProperties
+  file={propertiesDoc}
+  open={!!propertiesDoc}
+  onOpenChange={handlePropertiesClose}
+  onSaved={handlePropertiesSaved}
+  onFileDeleted={handleFileDeleted}
+  readOnly={propertiesDoc?.isBatch || propertiesDoc?.status === 'Completed' || propertiesDoc?.isArchived}
+  batchContext={batchContext}
+/>
     </div>
   );
 }
