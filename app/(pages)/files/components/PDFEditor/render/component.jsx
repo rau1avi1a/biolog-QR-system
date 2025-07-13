@@ -5,8 +5,8 @@ import React from 'react';
 import { useMemo } from 'react';
 import { Document, Page } from 'react-pdf';
 import { ui } from '@/components/ui';
-import { useCore } from '../hooks/core';
-import { useComponentState } from '../hooks/state';
+import { useMain as useCoreMain } from '../hooks/core/index';
+import { useMain as useStateMain } from '../hooks/state/index';
 
 /* Tiny icon button component */
 const Tool = ({ icon, label, onClick, disabled, className, style }) => {
@@ -670,11 +670,10 @@ const SaveConfirmationDialog = ({
 
 /* Main PDFEditor Component */
 export default function PDFEditor(props) {
-  const core = useCore(props);
-  const state = useComponentState(core, props);
+  const core = useCoreMain(props);
+  const state = useStateMain(core, props);
 
   const componentKey = useMemo(() => {
-    // Use original file ID as stable key - even when switching to batch
     const baseId = props.doc?.originalFileId || props.doc?.fileId || props.doc?._id;
     return `pdf-editor-${baseId}`;
   }, [props.doc?.originalFileId, props.doc?.fileId, props.doc?._id]);
