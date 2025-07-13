@@ -47,6 +47,13 @@ export function useMain(core, props) {
       ...permissionsState.completionIndicators
     ];
 
+    // ✅ FIXED: Return the indicators array directly, not the layout object
+    return indicators;
+  };
+
+  // === GET WORKFLOW INDICATORS LAYOUT ===
+  const getWorkflowIndicatorsLayout = () => {
+    const indicators = getWorkflowIndicators();
     return layoutState.workflowIndicatorsLayout(indicators);
   };
 
@@ -58,10 +65,12 @@ export function useMain(core, props) {
 
   // === COMBINED TOOLBAR CONFIGURATION ===
   const getToolbarConfig = () => {
+    const layoutConfig = layoutState.toolbarLayout;
+    
     return {
       ...drawingState.toolbarConfig,
-      ...layoutState.toolbarLayout,
       showPageNavigation: navigationState.pageNavConfig.showNavigation,
+      showPrint: layoutConfig.rightSection.showPrint, // ✅ PASS through print visibility
       pageNavigation: navigationState.pageNavConfig
     };
   };
@@ -114,7 +123,8 @@ export function useMain(core, props) {
     toolbarConfig: getToolbarConfig(),
     pageNavConfig: navigationState.pageNavConfig,
     mobileActionsConfig: getMobileActionsConfig(),
-    workflowIndicators: getWorkflowIndicators(),
+    workflowIndicators: getWorkflowIndicators(),           // ✅ FIXED: Return indicators array
+    workflowIndicatorsLayout: getWorkflowIndicatorsLayout(), // ✅ NEW: Layout object if needed
     headerConfig: layoutState.headerConfig,
     viewerConfig: layoutState.viewerConfig,
     printConfig: getPrintConfig(),

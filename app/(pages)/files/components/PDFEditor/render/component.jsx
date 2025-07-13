@@ -3,10 +3,16 @@
 
 import React from 'react';
 import { useMemo } from 'react';
-import { Document, Page } from 'react-pdf';
+import { Document, Page, pdfjs } from 'react-pdf';
 import { ui } from '@/components/ui';
 import { useMain as useCoreMain } from '../hooks/core/index';
 import { useMain as useStateMain } from '../hooks/state/index';
+
+// Configure PDF.js worker (matching your old core.js exactly)
+if (typeof window !== 'undefined') {
+  const { pdfjs } = await import('react-pdf');
+  pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+}
 
 /* Tiny icon button component */
 const Tool = ({ icon, label, onClick, disabled, className, style }) => {
@@ -103,7 +109,7 @@ const MobileActions = ({ config, handleSave, core, saveAction }) => {
 
   return (
     <>
-      {config.buttons.map((buttonConfig, index) => {
+      {config.buttons?.map((buttonConfig, index) => {
         const IconComponent = ui.icons[buttonConfig.icon];
         return (
           <ui.Button
@@ -125,14 +131,14 @@ const MobileActions = ({ config, handleSave, core, saveAction }) => {
             )}
           </ui.Button>
         );
-      })}
+      }) || null}
     </>
   );
 };
 
 /* FIXED Page Navigation Component */
 const PageNavigation = ({ config, onNavigate }) => {
-  if (!config.showNavigation) return null;
+  if (!config?.showNavigation) return null;
 
   return (
     <div className="flex items-center gap-1">
@@ -169,11 +175,16 @@ const PageNavigation = ({ config, onNavigate }) => {
   );
 };
 
-/* Workflow Indicators Component */
+/* FIXED Workflow Indicators Component */
 const WorkflowIndicators = ({ indicators }) => {
+  // ✅ FIX: Always ensure indicators is an array
+  const indicatorArray = Array.isArray(indicators) ? indicators : [];
+  
+  if (indicatorArray.length === 0) return null;
+
   return (
     <>
-      {indicators.map((indicator, index) => {
+      {indicatorArray.map((indicator, index) => {
         if (indicator.type === 'work_order') {
           return <WorkOrderBadge key={index} badgeProps={indicator} />;
         }
@@ -187,7 +198,8 @@ const WorkflowIndicators = ({ indicators }) => {
           </ui.Badge>
         );
       })}
-    </>);
+    </>
+  );
 };
 
 /* Save Confirmation Dialog Component */
@@ -217,6 +229,9 @@ const SaveConfirmationDialog = ({
   updateComponent,
   onOpenProperties
 }) => {
+  // ✅ FIX: Guard against missing actionInfo
+  if (!actionInfo) return null;
+
   // Handle setup requirement
   if (actionInfo.requiresSetup) {
     return (
@@ -238,7 +253,7 @@ const SaveConfirmationDialog = ({
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
             <h4 className="font-medium text-amber-900 mb-2">Setup Required:</h4>
             <ul className="space-y-1">
-              {actionInfo.actions.map((actionItem, index) => (
+              {(actionInfo.actions || []).map((actionItem, index) => (
                 <li key={index} className="flex items-center gap-2 text-amber-800">
                   <ui.icons.Settings className="h-4 w-4" />
                   <span className="text-sm">{actionItem}</span>
@@ -289,7 +304,7 @@ const SaveConfirmationDialog = ({
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h4 className="font-medium text-blue-900 mb-2">This action will:</h4>
             <ul className="space-y-1">
-              {actionInfo.actions.map((actionItem, index) => (
+              {(actionInfo.actions || []).map((actionItem, index) => (
                 <li key={index} className="flex items-center gap-2 text-blue-800">
                   <ui.icons.CheckCircle className="h-4 w-4" />
                   <span className="text-sm">{actionItem}</span>
@@ -353,7 +368,7 @@ const SaveConfirmationDialog = ({
               </div>
 
               {/* Scaled Components Preview */}
-              {scaledComponents.length > 0 && batchQuantity && Number(batchQuantity) > 0 && (
+              {(scaledComponents || []).length > 0 && batchQuantity && Number(batchQuantity) > 0 && (
                 <div className="space-y-2">
                   <ui.Label>Scaled Component Quantities ({scaledComponents.length} components)</ui.Label>
                   <div className="border rounded-lg p-1">
@@ -467,11 +482,11 @@ const SaveConfirmationDialog = ({
                       <span>Loading available lots...</span>
                     </div>
                   </div>
-                ) : confirmedComponents.length > 0 ? (
+                ) : (confirmedComponents || []).length > 0 ? (
                   <div className="space-y-4">
                     {confirmedComponents.map((component, index) => {
                       const itemKey = getItemKey(component);
-                      const componentLots = availableLots[itemKey] || [];
+                      const componentLots = (availableLots && availableLots[itemKey]) || [];
                       
                       return (
                         <div key={index} className="border rounded-lg p-4 space-y-4 bg-white">
@@ -685,13 +700,29 @@ export default function PDFEditor(props) {
 
   const { doc } = props;
 
+  // ✅ FIX: Provide fallback values for all state properties
+  const safeState = {
+    // Provide defaults for any potentially undefined values
+    headerConfig: state.headerConfig || {},
+    pageNavConfig: state.pageNavConfig || { showNavigation: false },
+    statusBadgeProps: state.statusBadgeProps || { className: '', text: 'Unknown' },
+    workflowIndicators: Array.isArray(state.workflowIndicators) ? state.workflowIndicators : [],
+    toolbarConfig: state.toolbarConfig || {},
+    mobileActionsConfig: state.mobileActionsConfig || null,
+    viewerConfig: state.viewerConfig || {},
+    showSaveDialog: state.showSaveDialog || false,
+    actionInfo: state.actionInfo || null,
+    isDialogValid: state.isDialogValid || false,
+    ...state // Spread all other state properties
+  };
+
   return (
     <div key={componentKey} className="flex flex-col h-full">
       {/* Enhanced Header */}
-      <div className={state.headerConfig.className}>
+      <div className={safeState.headerConfig.className || 'border-b bg-white/95 backdrop-blur-sm flex items-center justify-between px-2 sm:px-4 py-2'}>
         <div className="flex items-center gap-1 sm:gap-3 min-w-0 flex-1">
           {/* Menu Button */}
-          {state.headerConfig.showMenu && (
+          {safeState.headerConfig.showMenu && (
             <ui.Button 
               size="icon" 
               variant="ghost" 
@@ -706,28 +737,28 @@ export default function PDFEditor(props) {
           {/* File Info & Navigation */}
           <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
             {/* File Name */}
-            {state.headerConfig.showFileName && (
+            {safeState.headerConfig.showFileName && (
               <span className="font-semibold text-xs sm:text-sm truncate max-w-[20vw] sm:max-w-[30vw] hidden xl:block">
-                {state.headerConfig.fileName}
+                {safeState.headerConfig.fileName}
               </span>
             )}
 
             {/* Page Navigation */}
             <PageNavigation 
-              config={state.pageNavConfig} 
-              onNavigate={state.handlePageNavigation} 
+              config={safeState.pageNavConfig} 
+              onNavigate={safeState.handlePageNavigation} 
             />
 
             {/* Status Badge */}
             <ui.Badge 
               variant="outline" 
-              className={state.statusBadgeProps.className}
+              className={safeState.statusBadgeProps.className}
             >
-              {state.statusBadgeProps.text}
+              {safeState.statusBadgeProps.text}
             </ui.Badge>
 
             {/* Workflow Indicators */}
-            <WorkflowIndicators indicators={state.workflowIndicators} />
+            <WorkflowIndicators indicators={safeState.workflowIndicators} />
           </div>
         </div>
 
@@ -736,20 +767,20 @@ export default function PDFEditor(props) {
           {/* Tools */}
           <div className="flex items-center gap-1">
             {/* Settings */}
-            {state.toolbarConfig.showSettings && (
+            {safeState.toolbarConfig.showSettings && (
               <Tool 
                 icon="Settings" 
                 label="File properties" 
-                onClick={state.handleOpenProperties} 
+                onClick={safeState.handleOpenProperties} 
               />
             )}
 
             {/* Drawing Toggle */}
-            {state.toolbarConfig.showDrawingToggle ? (
+            {safeState.toolbarConfig.showDrawingToggle ? (
               <Tool 
                 icon="Pencil" 
                 label={core.isDraw ? 'Draw off' : 'Draw on'}
-                onClick={state.handleToggleDrawing}
+                onClick={safeState.handleToggleDrawing}
                 style={core.isDraw ? { color: 'var(--primary)' } : {}} 
               />
             ) : (
@@ -766,22 +797,22 @@ export default function PDFEditor(props) {
               icon="Undo" 
               label="Undo" 
               onClick={core.undo}
-              disabled={!state.toolbarConfig.undoEnabled}
-              className={!state.toolbarConfig.undoEnabled ? 'opacity-50' : ''} 
+              disabled={!safeState.toolbarConfig.undoEnabled}
+              className={!safeState.toolbarConfig.undoEnabled ? 'opacity-50' : ''} 
             />
 
-            {/* Print */}
-            {state.toolbarConfig.showPrint && (
+            {/* Print - Only show on desktop, not mobile/tablet */}
+            {!safeState.compact && (typeof window === 'undefined' || window.innerWidth >= 1024) && (
               <Tool icon="Printer" label="Print" onClick={core.print} />
             )}
           </div>
 
           {/* Dynamic Action Buttons */}
           <MobileActions 
-            config={state.mobileActionsConfig}
-            handleSave={state.handleSave}
+            config={safeState.mobileActionsConfig}
+            handleSave={safeState.handleSave}
             core={core}
-            saveAction={state.saveAction}
+            saveAction={safeState.saveAction}
           />
 
           {/* Work Order Creation Loading Indicator */}
@@ -795,7 +826,7 @@ export default function PDFEditor(props) {
       </div>
 
       {/* PDF Viewer */}
-      <div className={state.viewerConfig.className}>
+      <div className={safeState.viewerConfig.className || 'flex-1 overflow-auto bg-gray-100 flex justify-center'}>
         <div ref={core.pageContainerRef} className="relative bg-white shadow my-4">
           <Document
             file={core.blobUri}
@@ -832,30 +863,30 @@ export default function PDFEditor(props) {
 
       {/* Save Confirmation Dialog */}
       <SaveConfirmationDialog
-        open={state.showSaveDialog}
-        onClose={state.handleSaveDialogClose}
-        onConfirm={state.handleSaveConfirm}
+        open={safeState.showSaveDialog}
+        onClose={safeState.handleSaveDialogClose}
+        onConfirm={safeState.handleSaveConfirm}
         currentDoc={doc}
-        actionInfo={state.actionInfo}
-        isValid={state.isDialogValid}
+        actionInfo={safeState.actionInfo}
+        isValid={safeState.isDialogValid}
         // Dialog state
-        batchQuantity={state.batchQuantity}
-        batchUnit={state.batchUnit}
-        solutionLotNumber={state.solutionLotNumber}
-        solutionQuantity={state.solutionQuantity}
-        solutionUnit={state.solutionUnit}
-        confirmedComponents={state.confirmedComponents}
-        availableLots={state.availableLots}
-        isLoadingLots={state.isLoadingLots}
-        scaledComponents={state.scaledComponents}
+        batchQuantity={safeState.batchQuantity}
+        batchUnit={safeState.batchUnit}
+        solutionLotNumber={safeState.solutionLotNumber}
+        solutionQuantity={safeState.solutionQuantity}
+        solutionUnit={safeState.solutionUnit}
+        confirmedComponents={safeState.confirmedComponents}
+        availableLots={safeState.availableLots}
+        isLoadingLots={safeState.isLoadingLots}
+        scaledComponents={safeState.scaledComponents}
         // Dialog handlers
-        setBatchQuantity={state.setBatchQuantity}
-        setBatchUnit={state.setBatchUnit}
-        setSolutionLotNumber={state.setSolutionLotNumber}
-        setSolutionQuantity={state.setSolutionQuantity}
-        setSolutionUnit={state.setSolutionUnit}
-        updateComponent={state.updateComponent}
-        onOpenProperties={state.handleOpenProperties}
+        setBatchQuantity={safeState.setBatchQuantity}
+        setBatchUnit={safeState.setBatchUnit}
+        setSolutionLotNumber={safeState.setSolutionLotNumber}
+        setSolutionQuantity={safeState.setSolutionQuantity}
+        setSolutionUnit={safeState.setSolutionUnit}
+        updateComponent={safeState.updateComponent}
+        onOpenProperties={safeState.handleOpenProperties}
       />
     </div>
   );
