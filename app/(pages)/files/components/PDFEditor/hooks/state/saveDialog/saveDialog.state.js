@@ -1,4 +1,4 @@
-// app/files/components/PDFEditor/hooks/state/saveDialog/saveDialog.state.js
+// app/(pages)/files/components/PDFEditor/hooks/state/saveDialog/saveDialog.state.js
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
@@ -60,19 +60,29 @@ export function useSaveDialog(doc, core, refreshFiles, setCurrentDoc) {
     }
     
     if (saveAction === 'submit_review') {
-      if (!hasTransaction || wasRejected) {
+      // ✅ NEW: Handle previously rejected files differently
+      if (wasRejected) {
+        return {
+          title: 'Resubmit for Review',
+          description: 'This batch was previously rejected and will be moved back to Review status. No additional transactions needed.',
+          icon: 'RefreshCw',
+          requiresChemicals: false,
+          requiresLot: false,
+          requiresBatchSize: false,
+          wasRejected: true, // ✅ Flag to identify rejected resubmission
+          actions: ['Move to Review Status']
+        };
+      }
+      
+      if (!hasTransaction) {
         return {
           title: 'Transact Chemicals & Create Solution',
-          description: wasRejected 
-            ? 'This will create the solution lot using the scaled quantities.'
-            : 'This will transact the scaled chemical quantities and create the solution lot.',
+          description: 'This will transact the scaled chemical quantities and create the solution lot.',
           icon: 'Beaker',
-          requiresChemicals: !wasRejected,
+          requiresChemicals: true,
           requiresLot: true,
           requiresBatchSize: false,
-          actions: wasRejected 
-            ? ['Create Solution Lot', 'Move to Review Status']
-            : ['Transact Scaled Chemical Quantities', 'Create Solution Lot', 'Move to Review Status']
+          actions: ['Transact Scaled Chemical Quantities', 'Create Solution Lot', 'Move to Review Status']
         };
       } else {
         return {
@@ -125,11 +135,18 @@ export function useSaveDialog(doc, core, refreshFiles, setCurrentDoc) {
 
   const shouldShowConfirmation = useCallback((action) => {
     if (action === 'create_work_order') return true;
-    if (action === 'submit_review') return true;
+    if (action === 'submit_review') {
+      // ✅ NEW: For previously rejected files, you can choose to skip dialog or show simplified version
+      // Option 1: Skip dialog entirely for rejected files
+      // if (doc?.wasRejected) return false;
+      
+      // Option 2: Show simplified dialog for rejected files (current implementation)
+      return true;
+    }
     if (action === 'complete') return true;
     if (action === 'reject') return true;
     return false;
-  }, []);
+  }, [doc?.wasRejected]);
 
   // Scale components based on batch quantity
   useEffect(() => {
@@ -291,12 +308,16 @@ export function useSaveDialog(doc, core, refreshFiles, setCurrentDoc) {
     if (actionInfo.requiresBatchSize && (!batchQuantity || Number(batchQuantity) <= 0)) return false;
     if (actionInfo.requiresLot && !solutionLotNumber.trim()) return false;
     if (actionInfo.requiresChemicals && confirmedComponents.some(c => !c.lotNumber)) return false;
+    
+    // ✅ NEW: Previously rejected files submitting for review are always valid (no requirements)
+    if (actionInfo.wasRejected && saveAction === 'submit_review') return true;
+    
     return true;
-  }, [getActionInfo, batchQuantity, solutionLotNumber, confirmedComponents]);
+  }, [getActionInfo, batchQuantity, solutionLotNumber, confirmedComponents, saveAction]);
 
   // === EVENT HANDLERS ===
   const handleSave = useCallback(async (action = 'save') => {
-    console.log('🚀 HANDLE SAVE CALLED:', { action, needsConfirmation: shouldShowConfirmation(action) });
+    console.log('🚀 HANDLE SAVE CALLED:', { action, needsConfirmation: shouldShowConfirmation(action), wasRejected: doc?.wasRejected });
 
     setSaveAction(action);
     
@@ -311,11 +332,11 @@ export function useSaveDialog(doc, core, refreshFiles, setCurrentDoc) {
         // Error handling is done in core
       }
     }
-  }, [core.save, shouldShowConfirmation]);
+  }, [core.save, shouldShowConfirmation, doc?.wasRejected]);
 
   // EXTRACTED: handleSaveConfirm from your state.js
   const handleSaveConfirm = useCallback(async (confirmationData) => {
-    console.log('✅ HANDLE SAVE CONFIRM CALLED:', { saveAction, confirmationData });
+    console.log('✅ HANDLE SAVE CONFIRM CALLED:', { saveAction, confirmationData, wasRejected: doc?.wasRejected });
 
     try {
       // Show loading for work order creation when confirm button is clicked
@@ -324,7 +345,14 @@ export function useSaveDialog(doc, core, refreshFiles, setCurrentDoc) {
         core.setUserInitiatedCreation(true);
       }
 
-      const finalConfirmationData = {
+      // ✅ NEW: Handle previously rejected files with minimal data
+      const finalConfirmationData = doc?.wasRejected && saveAction === 'submit_review' ? {
+        // Minimal data for rejected file resubmission
+        reason: '',
+        wasRejected: true,
+        ...confirmationData
+      } : {
+        // Normal confirmation data for other cases
         batchQuantity: parseFloat(batchQuantity) || 1000,
         batchUnit: batchUnit,
         solutionLotNumber: solutionLotNumber.trim(),

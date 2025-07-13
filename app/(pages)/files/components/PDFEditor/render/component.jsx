@@ -202,7 +202,7 @@ const WorkflowIndicators = ({ indicators }) => {
   );
 };
 
-/* Save Confirmation Dialog Component */
+/* Save Confirmation Dialog Component - Updated for rejected files */
 const SaveConfirmationDialog = ({ 
   open, 
   onClose, 
@@ -278,6 +278,128 @@ const SaveConfirmationDialog = ({
     );
   }
 
+  // ✅ NEW: Handle previously rejected files with simplified dialog
+  if (actionInfo.wasRejected) {
+    return (
+      <ui.Dialog open={open} onOpenChange={onClose}>
+        <ui.DialogContent className="sm:max-w-2xl">
+          <ui.DialogHeader className="space-y-4">
+            <div className="flex items-center gap-3">
+              {(() => {
+                const IconComponent = ui.icons[actionInfo.icon];
+                return <IconComponent className="h-5 w-5 text-blue-500" />;
+              })()}
+              <ui.DialogTitle className="text-xl">{actionInfo.title}</ui.DialogTitle>
+            </div>
+            <ui.DialogDescription className="text-base">
+              {actionInfo.description}
+            </ui.DialogDescription>
+            
+            {/* What will happen */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-medium text-blue-900 mb-2">This action will:</h4>
+              <ul className="space-y-1">
+                {(actionInfo.actions || []).map((actionItem, index) => (
+                  <li key={index} className="flex items-center gap-2 text-blue-800">
+                    <ui.icons.CheckCircle className="h-4 w-4" />
+                    <span className="text-sm">{actionItem}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Previously Rejected Notice */}
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-orange-800 mb-2">
+                <ui.icons.AlertTriangle className="h-4 w-4" />
+                <span className="font-medium">Previously Rejected</span>
+              </div>
+              <p className="text-sm text-orange-700">
+                This batch was previously rejected and returned to In Progress. Since chemicals have already been transacted and the solution created, resubmitting will simply move it back to Review status without any additional transactions.
+              </p>
+            </div>
+          </ui.DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Current Status Overview */}
+            <div className="bg-gray-50 rounded-lg p-4 border">
+              <h4 className="font-medium mb-3 flex items-center gap-2">
+                <ui.icons.FileText className="h-4 w-4" />
+                Current Batch Status
+              </h4>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Work Order:</span>
+                  <span className="font-medium">
+                    {currentDoc?.workOrderCreated ? (
+                      currentDoc?.assemblyBuildCreated && currentDoc?.assemblyBuildTranId ? (
+                        <span className="text-green-600">Built ({currentDoc.assemblyBuildTranId})</span>
+                      ) : (
+                        <span className="text-blue-600">Created ({currentDoc?.workOrderId || currentDoc?.netsuiteWorkOrderData?.tranId || 'Unknown'})</span>
+                      )
+                    ) : (
+                      <span className="text-gray-500">Not Created</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Chemicals:</span>
+                  <span className="font-medium">
+                    {currentDoc?.chemicalsTransacted ? (
+                      <span className="text-green-600">Transacted</span>
+                    ) : (
+                      <span className="text-gray-500">Not Transacted</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Solution:</span>
+                  <span className="font-medium">
+                    {currentDoc?.solutionCreated ? (
+                      <span className="text-green-600">Created ({currentDoc?.solutionLotNumber})</span>
+                    ) : (
+                      <span className="text-gray-500">Not Created</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Status:</span>
+                  <ui.Badge variant="outline" className="h-5">
+                    {currentDoc?.status || 'Draft'}
+                  </ui.Badge>
+                </div>
+              </div>
+              
+              {/* Show rejection info without asking for reason */}
+              <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                <div className="flex items-center gap-2 text-yellow-800">
+                  <ui.icons.AlertTriangle className="h-4 w-4" />
+                  <span className="font-medium">Previously Rejected</span>
+                </div>
+                <p className="text-sm text-yellow-700 mt-1">
+                  This batch was previously moved back to In Progress from Review status. All transactions and solution creation remain intact.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <ui.DialogFooter className="gap-2">
+            <ui.Button variant="outline" onClick={onClose}>
+              Cancel
+            </ui.Button>
+            <ui.Button 
+              onClick={onConfirm}
+              disabled={!isValid}
+              className="min-w-[140px]"
+            >
+              {actionInfo.title}
+            </ui.Button>
+          </ui.DialogFooter>
+        </ui.DialogContent>
+      </ui.Dialog>
+    );
+  }
+
   const getItemKey = (component) => {
     if (typeof component.itemId === 'object' && component.itemId !== null) {
       return component.itemId._id || component.itemId.toString();
@@ -285,6 +407,7 @@ const SaveConfirmationDialog = ({
     return component.itemId;
   };
 
+  // Regular dialog for non-rejected files (existing code)
   return (
     <ui.Dialog open={open} onOpenChange={onClose}>
       <ui.DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">

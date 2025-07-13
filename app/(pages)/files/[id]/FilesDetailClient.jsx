@@ -74,7 +74,7 @@ export default function FilesDetailClient({ batch }) {
         window.close();
       } else {
         // Otherwise, navigate to home page
-        router.push('/home');
+        router.push('/files');
       }
     }
   };
@@ -87,11 +87,26 @@ export default function FilesDetailClient({ batch }) {
 
     setIsDownloading(true);
     try {
-      // Create a download for the signed PDF
-      const response = await fetch(`/api/files/${batch._id}/download`);
-      if (response.ok) {
-        const blob = await response.blob();
+      // ✅ FIXED: Use your new apiClient structure
+      // Create a blob from the base64 PDF data directly
+      const pdfData = batch.signedPdf.data;
+      
+      // Handle different PDF data formats
+      let binaryString;
+      if (typeof pdfData === 'string') {
+        if (pdfData.startsWith('data:')) {
+          // Data URL format
+          binaryString = atob(pdfData.split(',')[1]);
+        } else {
+          // Plain base64
+          binaryString = atob(pdfData);
+        }
+      } else if (pdfData.type === 'Buffer' && Array.isArray(pdfData.data)) {
+        // Serialized Buffer format
+        const uint8Array = new Uint8Array(pdfData.data);
+        const blob = new Blob([uint8Array], { type: 'application/pdf' });
         const url = window.URL.createObjectURL(blob);
+        
         const a = document.createElement('a');
         a.href = url;
         
@@ -105,12 +120,37 @@ export default function FilesDetailClient({ batch }) {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        return;
       } else {
-        alert('Failed to download file');
+        throw new Error('Unsupported PDF data format');
       }
+      
+      // Convert binary string to blob
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      
+      // Build filename: original-filename-lot-number.pdf
+      const originalFileName = batch.fileId?.fileName || 'file';
+      const baseName = originalFileName.replace(/\.pdf$/i, ''); // Remove .pdf extension if present
+      const lotNumber = batch.solutionLotNumber || `run-${batch.runNumber}`;
+      a.download = `${baseName}-${lotNumber}.pdf`;
+      
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
     } catch (error) {
       console.error('Download error:', error);
-      alert('Error downloading file');
+      alert('Error downloading file: ' + error.message);
     } finally {
       setIsDownloading(false);
     }
@@ -195,10 +235,13 @@ export default function FilesDetailClient({ batch }) {
                 <label className="text-sm font-medium text-muted-foreground">Batch ID</label>
                 <p className="font-mono text-sm">{batch._id}</p>
               </div>
-              {batch.workOrderId && (
+              {/* ✅ UPDATED: Show Assembly Build or Work Order based on completion status */}
+              {(batch.workOrderId || batch.assemblyBuildTranId) && (
                 <div>
-                  <label className="text-sm font-medium text-muted-foreground">Work Order</label>
-                  <p>{batch.workOrderId}</p>
+                  <label className="text-sm font-medium text-muted-foreground">
+                    {batch.assemblyBuildCreated && batch.assemblyBuildTranId ? 'Assembly Build' : 'Work Order'}
+                  </label>
+                  <p>{batch.assemblyBuildTranId || batch.workOrderId}</p>
                 </div>
               )}
               {batch.solutionLotNumber && (
@@ -278,6 +321,12 @@ export default function FilesDetailClient({ batch }) {
                   <span className="text-muted-foreground">Solution Created:</span>
                   <Badge variant={batch.solutionCreated ? "secondary" : "outline"} className="ml-2">
                     {batch.solutionCreated ? "Yes" : "No"}
+                  </Badge>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Assembly Build:</span>
+                  <Badge variant={batch.assemblyBuildCreated ? "secondary" : "outline"} className="ml-2">
+                    {batch.assemblyBuildCreated ? "Yes" : "No"}
                   </Badge>
                 </div>
                 <div>

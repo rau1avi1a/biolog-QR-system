@@ -1,4 +1,4 @@
-// app/files/components/PDFEditor/hooks/state/permissions/permissions.state.js
+// app/(pages)/files/components/PDFEditor/hooks/state/permissions/permissions.state.js
 'use client';
 
 import { useCallback } from 'react';
@@ -109,7 +109,7 @@ export function usePermissions(core, doc, mobileModeActive = false) {
       return [
         {
           action: 'save',
-          text: compact ? 'Save' : 'Save',
+          text: compact ? '' : 'Save', // ✅ FIX: Empty text in compact mode
           icon: 'Save',
           variant: 'outline',
           disabled: core.isSaving,
@@ -117,7 +117,7 @@ export function usePermissions(core, doc, mobileModeActive = false) {
         },
         {
           action: 'reject',
-          text: compact ? 'Reject' : 'Reject',
+          text: compact ? '' : 'Reject', // ✅ FIX: Empty text in compact mode
           icon: 'XCircle',
           variant: 'outline',
           disabled: core.isSaving,
@@ -126,7 +126,7 @@ export function usePermissions(core, doc, mobileModeActive = false) {
         },
         {
           action: 'complete',
-          text: compact ? 'Complete' : 'Complete',
+          text: compact ? '' : 'Complete', // ✅ FIX: Empty text in compact mode
           icon: 'CheckCircle',
           variant: 'outline',
           disabled: core.isSaving,

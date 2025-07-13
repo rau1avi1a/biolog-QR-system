@@ -1,38 +1,38 @@
 // app/files/[id]/page.jsx
 import { notFound } from 'next/navigation';
-import connectMongoDB from '@/db/index';
-import Batch from '@/db/schemas/Batch';
-import File from '@/db/schemas/File';
+import { filesApi, extractApiData, hasApiError, handleApiError } from '../lib/api';
 import FilesDetailClient from './FilesDetailClient';
 
 async function getBatchWithFile(id) {
   try {
-    await connectMongoDB();
+    console.log('📄 Fetching batch with file for ID:', id);
     
-    const batch = await Batch.findById(id)
-      .populate('fileId', 'fileName fileSize uploadedAt createdAt')
-      .populate({
-        path: 'snapshot.solutionRef',
-        select: 'displayName sku'
-      })
-      .populate({
-        path: 'snapshot.productRef', 
-        select: 'displayName sku'
-      })
-      .populate({
-        path: 'snapshot.components.itemId',
-        select: 'displayName sku'
-      })
-      .lean();
-
+    // ✅ FIXED: Use your new apiClient structure
+    const result = await filesApi.batches.get(id);
+    
+    if (hasApiError(result)) {
+      console.error('❌ Error fetching batch:', handleApiError(result));
+      return null;
+    }
+    
+    const batch = extractApiData(result);
+    
     if (!batch) {
+      console.log('❌ No batch found for ID:', id);
       return null;
     }
 
-    // Convert ObjectIds to strings for client-side usage
-    return JSON.parse(JSON.stringify(batch));
+    console.log('✅ Successfully fetched batch:', {
+      id: batch._id,
+      runNumber: batch.runNumber,
+      status: batch.status,
+      hasFile: !!batch.fileId,
+      hasSignedPdf: !!batch.signedPdf?.data
+    });
+
+    return batch;
   } catch (error) {
-    console.error('Error fetching batch:', error);
+    console.error('💥 Exception fetching batch:', error);
     return null;
   }
 }

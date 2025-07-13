@@ -88,14 +88,14 @@ async function handleApiCall(operation, resource, params, apiCall) {
 /**
  * Check if a normalized result has an error
  */
-export function hasError(result) {
+function hasError(result) {
   return result && result.error !== null && result.error !== undefined
 }
 
 /**
  * FIXED: Simplified data extraction - just return the data as-is
  */
-export function extractData(result, fallback = null) {
+function extractData(result, fallback = null) {
   if (hasError(result)) {
     if (isDev) console.warn('🚨 Attempting to extract data from error result:', result.error)
     return fallback
@@ -128,7 +128,7 @@ export function extractData(result, fallback = null) {
 /**
  * NEW: Extract just the array from wrapped list responses
  */
-export function extractList(result, listField, fallback = []) {
+function extractList(result, listField, fallback = []) {
   if (hasError(result)) {
     return fallback
   }
@@ -150,7 +150,7 @@ export function extractList(result, listField, fallback = []) {
 /**
  * NEW: Extract metadata from wrapped responses
  */
-export function extractMetadata(result, fallback = {}) {
+function extractMetadata(result, fallback = {}) {
   if (hasError(result)) {
     return fallback
   }
@@ -174,7 +174,7 @@ export function extractMetadata(result, fallback = {}) {
 /**
  * Get error message from normalized result
  */
-export function getError(result) {
+function getError(result) {
   return hasError(result) ? result.error : null
 }
 
