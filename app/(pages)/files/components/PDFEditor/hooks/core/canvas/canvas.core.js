@@ -1,17 +1,27 @@
-// app/files/components/PDFEditor/hooks/core/canvas/canvas.core.js
+// app/(pages)/files/components/PDFEditor/hooks/core/canvas/canvas.core.js
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
 
 /**
- * Canvas Core Hook
- * Handles all canvas-related functionality:
- * - Canvas initialization, sizing, DPI handling
- * - Drawing events and pointer handling
- * - Drawing state management
- * - Palm rejection
+ * FIXED Canvas Core Hook
+ * Properly integrates with the overlay hook's baked/session separation
  */
-export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlaysRef, historiesRef, setHistory, setHistIdx, setOverlay, setPageReady, canDraw, histIdx) {
+export function useCanvas(
+  pageNo, 
+  overlaysRef, 
+  bakedOverlaysRef, 
+  sessionOverlaysRef, 
+  historiesRef, 
+  setHistory, 
+  setHistIdx, 
+  setOverlay, 
+  setPageReady, 
+  canDraw, 
+  histIdx, 
+  addSessionOverlay,     // ✅ CRITICAL: Add this parameter
+  handleUndoForPage      // ✅ CRITICAL: Add this parameter
+) {
   // === DRAWING STATE ===
   const [isDraw, setIsDraw] = useState(true);
   const [isDown, setIsDown] = useState(false);
@@ -100,18 +110,22 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
     // Clear canvas first before drawing overlay
     ctx.clearRect(0, 0, cvs.width / devicePixelRatio, cvs.height / devicePixelRatio);
 
+    // ✅ FIXED: Better overlay debugging
     const bakedOverlay = bakedOverlaysRef.current[pageNo];
     const sessionOverlay = sessionOverlaysRef.current[pageNo];
+    const displayOverlay = overlaysRef.current[pageNo];
     
     console.log(`🎨 Initializing canvas for page ${pageNo}:`, {
       hasBakedOverlay: !!bakedOverlay,
       hasSessionOverlay: !!sessionOverlay,
-      combinedOverlay: overlaysRef.current[pageNo] ? 'exists' : 'none'
+      hasDisplayOverlay: !!displayOverlay,
+      overlaySource: displayOverlay === bakedOverlay ? 'baked' : 
+                    displayOverlay === sessionOverlay ? 'session' : 'unknown'
     });
 
-    // Paint existing overlay for this page
-    const o = overlaysRef.current[pageNo];
-    if (o) {
+    // Paint existing overlay for this page (display overlay is the combination)
+    const overlayToPaint = displayOverlay;
+    if (overlayToPaint) {
       const img = new Image();
       img.onload = () => {
         ctx.clearRect(0, 0, cvs.width / devicePixelRatio, cvs.height / devicePixelRatio);
@@ -122,7 +136,7 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
       img.onerror = () => {
         console.error('🎨 Failed to load overlay for page:', pageNo);
       };
-      img.src = o;
+      img.src = overlayToPaint;
     }
     
     // Load page-specific history and overlay state
@@ -222,7 +236,7 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
     activePointerRef.current = null;
     strokeStartedRef.current = false;
 
-    // ✅ IMPROVED: High-quality snapshot with proper timing
+    // ✅ IMPROVED: High-quality snapshot with proper session overlay tracking
     (window.requestIdleCallback || window.requestAnimationFrame)(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -230,7 +244,19 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
       // ✅ QUALITY FIX: Use maximum quality for the snapshot
       const snap = canvas.toDataURL('image/png', 1.0); // Maximum quality
       
-      // Update the overlay for this page
+      // ✅ CRITICAL FIX: Add to session overlays (new drawings)
+      console.log('📸 Saving canvas snapshot for page', pageNo);
+      
+      if (addSessionOverlay && typeof addSessionOverlay === 'function') {
+        console.log('✅ Using addSessionOverlay to track new drawing');
+        addSessionOverlay(pageNo, snap);
+      } else {
+        console.warn('⚠️ addSessionOverlay not available, using fallback method');
+        // Fallback to old method
+        overlaysRef.current[pageNo] = snap;
+      }
+      
+      // Also ensure the display overlay is updated
       overlaysRef.current[pageNo] = snap;
 
       // Get current history
@@ -252,9 +278,9 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
       setHistory(newHistory);
       setOverlay(snap);
       
-      console.log(`📸 High-quality snapshot saved for page ${pageNo} (history: ${newHistory.length} items)`);
+      console.log(`📸 High-quality snapshot saved for page ${pageNo} (history: ${newHistory.length} items, session overlay updated)`);
     });
-  }, [isDraw, setPageReady, canDraw, pageNo, histIdx]);
+  }, [isDraw, setPageReady, canDraw, pageNo, histIdx, addSessionOverlay, overlaysRef, historiesRef, setHistory, setHistIdx, setOverlay]);
 
   const pointerCancel = useCallback((e) => {
     if (activePointerRef.current === e.pointerId) {
@@ -280,6 +306,21 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
     // Update the index
     setHistIdx(newIdx);
     
+    // ✅ CRITICAL FIX: Use the overlay hook's undo handler
+    let targetOverlay = null;
+    if (handleUndoForPage) {
+      targetOverlay = handleUndoForPage(pageNo);
+    } else {
+      // Fallback to old method
+      if (newIdx >= 0 && newIdx < currentHistory.length) {
+        targetOverlay = currentHistory[newIdx];
+        overlaysRef.current[pageNo] = targetOverlay;
+      } else {
+        delete overlaysRef.current[pageNo];
+        targetOverlay = null;
+      }
+    }
+    
     // Clear the canvas
     const canvas = canvasRef.current;
     const ctx = ctxRef.current;
@@ -288,10 +329,8 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
     const devicePixelRatio = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, canvas.width / devicePixelRatio, canvas.height / devicePixelRatio);
 
-    if (newIdx >= 0 && newIdx < currentHistory.length) {
-      // Show the state at newIdx
-      const targetState = currentHistory[newIdx];
-      
+    if (targetOverlay) {
+      // Restore the target overlay
       const img = new Image();
       img.onload = () => {
         // ✅ QUALITY FIX: Restore with proper scaling
@@ -300,18 +339,20 @@ export function useCanvas(pageNo, overlaysRef, bakedOverlaysRef, sessionOverlays
       img.onerror = () => {
         console.error('🎨 Failed to restore overlay state for page:', pageNo);
       };
-      img.src = targetState;
+      img.src = targetOverlay;
       
-      overlaysRef.current[pageNo] = targetState;
-      setOverlay(targetState);
+      setOverlay(targetOverlay);
     } else {
-      // Clear everything (newIdx is -1)
-      delete overlaysRef.current[pageNo];
+      // Clear everything
       setOverlay(null);
     }
     
-    console.log(`↶ Undo on page ${pageNo}: restored to state ${newIdx + 1}/${currentHistory.length}`);
-  }, [histIdx, pageNo, canDraw]);
+    console.log(`↶ Undo on page ${pageNo}: restored to state ${newIdx + 1}/${currentHistory.length}`, {
+      targetOverlay: !!targetOverlay,
+      isSessionOverlay: targetOverlay && sessionOverlaysRef.current[pageNo] === targetOverlay,
+      isBakedOverlay: targetOverlay && bakedOverlaysRef.current[pageNo] === targetOverlay
+    });
+  }, [histIdx, pageNo, canDraw, handleUndoForPage, historiesRef, overlaysRef, sessionOverlaysRef, bakedOverlaysRef, setHistIdx, setOverlay]);
 
   return {
     // === STATE ===

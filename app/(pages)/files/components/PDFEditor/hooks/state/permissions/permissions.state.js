@@ -8,7 +8,17 @@ import { useCallback } from 'react';
  * Handles permission checks, status-based UI logic, and access control
  */
 export function usePermissions(core, doc, mobileModeActive = false) {
-  const compact = mobileModeActive;
+
+  const isTabletOrMobile = mobileModeActive || (typeof window !== 'undefined' && window.innerWidth < 1024);
+  const compact = isTabletOrMobile;
+
+    console.log('🔍 Permissions Debug:', {
+    mobileModeActive,
+    windowWidth: typeof window !== 'undefined' ? window.innerWidth : 'undefined',
+    isTabletOrMobile,
+    compact,
+    isInReview: core.isInReview
+  });
 
   // === STATUS BADGE LOGIC ===
   const getStatusBadgeProps = useCallback(() => {

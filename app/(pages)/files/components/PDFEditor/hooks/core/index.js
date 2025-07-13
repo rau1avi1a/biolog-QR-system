@@ -16,6 +16,7 @@ import { usePrint } from './print/print.core.js';
  * Core Orchestrator Hook (replaces your original useCore)
  * 
  * FIXED: Removed circular dependency by reordering hook initialization
+ * FIXED: Added proper function connections between hooks
  */
 export function useMain(props) {
   console.log('🔧 Core useMain called with props:', !!props);
@@ -51,9 +52,9 @@ export function useMain(props) {
   // 5. Page navigation - initialize with minimal dependencies first
   const [currentPageNo, setCurrentPageNo] = useState(1);
   
-  // 6. Canvas handling - now can use the currentPageNo state
+  // 6. Canvas handling - now with proper overlay integration
   const canvasCore = useCanvas(
-    currentPageNo,  // ✅ FIXED: Use state instead of pageNavCore.pageNo
+    currentPageNo,
     overlayCore.overlaysRef,
     overlayCore.bakedOverlaysRef,
     overlayCore.sessionOverlaysRef,
@@ -63,7 +64,9 @@ export function useMain(props) {
     overlayCore.setOverlay,
     setPageReady,
     canDraw,
-    overlayCore.histIdx
+    overlayCore.histIdx,
+    overlayCore.addSessionOverlay,    // ✅ CRITICAL: Add this parameter
+    overlayCore.handleUndoForPage     // ✅ CRITICAL: Add this parameter
   );
 
   // 7. Page navigation - now initialize with proper refs
@@ -88,10 +91,10 @@ export function useMain(props) {
     }
   }, [pageNavCore.pageNo, currentPageNo]);
 
-  // 9. Save operations (depends on multiple hooks)
+  // 9. Save operations (depends on multiple hooks) - now with proper overlay integration
   const saveCore = useSave(
     doc,
-    currentPageNo, // ✅ FIXED: Use currentPageNo instead of pageNavCore.pageNo
+    currentPageNo,
     canvasCore.canvasRef,
     canvasCore.ctxRef,
     canvasCore.pageContainerRef,
@@ -102,9 +105,11 @@ export function useMain(props) {
     overlayCore.setOverlay,
     refreshFiles,
     setCurrentDoc,
-    overlayCore.getMergedOverlays,
+    overlayCore.getMergedOverlays,        // ✅ CRITICAL: Pass overlay merging function
     overlayCore.preserveStateForSave,
-    pdfCore.validateAndCleanBase64
+    pdfCore.validateAndCleanBase64,
+    overlayCore.getNewSessionOverlays,    // ✅ CRITICAL: Add this parameter
+    overlayCore.updateBakedOverlays       // ✅ CRITICAL: Add this parameter
   );
 
   // === COMPUTED PROPERTIES ===
