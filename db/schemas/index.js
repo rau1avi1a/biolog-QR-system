@@ -464,6 +464,56 @@ set: function(value) {
   return new Date();
 }
   },
+  assemblyBuildStatus: { 
+    type: String,
+    enum: ['not_created', 'creating', 'created', 'failed'],
+    default: 'not_created'
+  },
+  assemblyBuildError: { type: String },
+  assemblyBuildFailedAt: { 
+    type: Date,
+    set: function(value) {
+      // Handle null/undefined
+      if (value === null || value === undefined) {
+        return null;
+      }
+      
+      // Handle empty object (the problematic case)
+      if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+        console.warn('⚠️ Empty object passed to date setter, using current date');
+        return new Date();
+      }
+      
+      // Handle ISO string conversion for date serialization
+      if (typeof value === 'string') {
+        const date = new Date(value);
+        if (isNaN(date.getTime())) {
+          console.warn('⚠️ Invalid date string passed to setter:', value);
+          return new Date();
+        }
+        return date;
+      }
+      
+      // Handle Date objects
+      if (value instanceof Date) {
+        return value;
+      }
+      
+      // Handle timestamp numbers
+      if (typeof value === 'number') {
+        return new Date(value);
+      }
+      
+      // Handle other object types (like moment objects)
+      if (typeof value === 'object' && typeof value.toDate === 'function') {
+        return value.toDate();
+      }
+      
+      // Last resort - log the problematic value and return current date
+      console.warn('⚠️ Unexpected value type in date setter:', typeof value, value);
+      return new Date();
+    }
+  },
 
   // NetSuite work order data
   netsuiteWorkOrderData: {
