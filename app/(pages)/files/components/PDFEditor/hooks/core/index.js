@@ -1,4 +1,4 @@
-// app/files/components/PDFEditor/hooks/core/index.js
+// app/(pages)/files/components/PDFEditor/hooks/core/index.js - Enhanced with Assembly Build polling
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -9,14 +9,11 @@ import { useCanvas } from './canvas/canvas.core.js';
 import { useOverlay } from './overlay/overlay.core.js';
 import { usePageNav } from './pageNav/pageNav.core.js';
 import { useSave } from './save/save.core.js';
-import { useWorkOrder } from './workOrder/workOrder.core.js';
+import { useWorkOrder } from './workOrder/workOrder.core.js'; // 🆕 Enhanced with assembly builds
 import { usePrint } from './print/print.core.js';
 
 /**
- * Core Orchestrator Hook (replaces your original useCore)
- * 
- * FIXED: Removed circular dependency by reordering hook initialization
- * FIXED: Added proper function connections between hooks
+ * Core Orchestrator Hook - Enhanced with Assembly Build polling
  */
 export function useMain(props) {
   console.log('🔧 Core useMain called with props:', !!props);
@@ -43,8 +40,8 @@ export function useMain(props) {
   // 2. Overlay management (independent)
   const overlayCore = useOverlay();
   
-  // 3. Work order management (independent) 
-  const workOrderCore = useWorkOrder(doc);
+  // 3. Work order management (enhanced with assembly build support)
+  const workOrderCore = useWorkOrder(doc, refreshFiles, setCurrentDoc);
   
   // 4. Print functionality (depends only on PDF)
   const printCore = usePrint(pdfCore.blobUri);
@@ -65,8 +62,8 @@ export function useMain(props) {
     setPageReady,
     canDraw,
     overlayCore.histIdx,
-    overlayCore.addSessionOverlay,    // ✅ CRITICAL: Add this parameter
-    overlayCore.handleUndoForPage     // ✅ CRITICAL: Add this parameter
+    overlayCore.addSessionOverlay,
+    overlayCore.handleUndoForPage
   );
 
   // 7. Page navigation - now initialize with proper refs
@@ -77,7 +74,7 @@ export function useMain(props) {
     canvasCore.ctxRef,
     canvasCore.activePointerRef,
     canvasCore.strokeStartedRef,
-    canvasCore.setIsDown || (() => {}), // Fallback if setIsDown doesn't exist
+    canvasCore.setIsDown || (() => {}),
     overlayCore.setHistory,
     overlayCore.setHistIdx,
     overlayCore.setOverlay,
@@ -105,11 +102,11 @@ export function useMain(props) {
     overlayCore.setOverlay,
     refreshFiles,
     setCurrentDoc,
-    overlayCore.getMergedOverlays,        // ✅ CRITICAL: Pass overlay merging function
+    overlayCore.getMergedOverlays,
     overlayCore.preserveStateForSave,
     pdfCore.validateAndCleanBase64,
-    overlayCore.getNewSessionOverlays,    // ✅ CRITICAL: Add this parameter
-    overlayCore.updateBakedOverlays       // ✅ CRITICAL: Add this parameter
+    overlayCore.getNewSessionOverlays,
+    overlayCore.updateBakedOverlays
   );
 
   // === COMPUTED PROPERTIES ===
@@ -122,101 +119,164 @@ export function useMain(props) {
   const isArchived = useMemo(() => doc?.isArchived, [doc?.isArchived]);
 
   // === DOCUMENT RESET EFFECT ===
-  useEffect(() => {
-    // Skip reset if this is a save operation
-    if (doc?._skipDocumentReset) {
-      console.log('📄 Skipping document reset - save operation');
-      
-      if (setCurrentDoc) {
-        setTimeout(() => {
-          const { _skipDocumentReset, _preserveOverlays, _preserveHistories, _preservePage, ...cleanDoc } = doc;
-          setCurrentDoc(cleanDoc);
-        }, 1000);
-      }
-      return;
+useEffect(() => {
+  // Skip reset if this is a save operation
+  if (doc?._skipDocumentReset) {
+    console.log('📄 Skipping document reset - save operation');
+    
+    if (setCurrentDoc) {
+      setTimeout(() => {
+        const { _skipDocumentReset, _preserveOverlays, _preserveHistories, _preservePage, ...cleanDoc } = doc;
+        setCurrentDoc(cleanDoc);
+      }, 1000);
+    }
+    return;
+  }
+  
+  if (!doc) return;
+  
+  console.log('📄 Document changed, resetting PDF editor');
+  
+  // Handle post-save state preservation
+  const isPostSave = overlayCore.postSaveRef.current || 
+                     (overlayCore.stateBackupRef.current && (Date.now() - overlayCore.stateBackupRef.current.timestamp < 3000)) ||
+                     doc?._preserveOverlays;
+
+  if (isPostSave) {
+    console.log('🔄 Post-save document update - preserving working overlays');
+    
+    const preservedOverlays = doc?._preserveOverlays || overlayCore.stateBackupRef.current?.overlays || overlayCore.overlaysRef.current;
+    const preservedHistories = doc?._preserveHistories || overlayCore.stateBackupRef.current?.histories || overlayCore.historiesRef.current;
+    const targetPage = doc?._preservePage || overlayCore.stateBackupRef.current?.currentPage || currentPageNo;
+    
+    overlayCore.overlaysRef.current = preservedOverlays;
+    overlayCore.historiesRef.current = preservedHistories;
+    
+    const pageHistory = overlayCore.historiesRef.current[targetPage] || [];
+    const pageOverlay = overlayCore.overlaysRef.current[targetPage] || null;
+    
+    setCurrentPageNo(targetPage);
+    pageNavCore.setPageNo(targetPage);
+    overlayCore.setHistory(pageHistory);
+    overlayCore.setHistIdx(pageHistory.length > 0 ? pageHistory.length - 1 : -1);
+    overlayCore.setOverlay(pageOverlay);
+    
+    console.log('✅ Restored overlays for continued editing on page', targetPage);
+    
+    overlayCore.stateBackupRef.current = null;
+    overlayCore.postSaveRef.current = false;
+    
+    const validPdfData = pdfCore.determinePdfSource(doc);
+    if (validPdfData) {
+      pdfCore.setBlobUri(validPdfData);
     }
     
-    if (!doc) return;
-    
-    console.log('📄 Document changed, resetting PDF editor');
-    
-    // Handle post-save state preservation
-    const isPostSave = overlayCore.postSaveRef.current || 
-                       (overlayCore.stateBackupRef.current && (Date.now() - overlayCore.stateBackupRef.current.timestamp < 3000)) ||
-                       doc?._preserveOverlays;
-
-    if (isPostSave) {
-      console.log('🔄 Post-save document update - preserving working overlays');
-      
-      const preservedOverlays = doc?._preserveOverlays || overlayCore.stateBackupRef.current?.overlays || overlayCore.overlaysRef.current;
-      const preservedHistories = doc?._preserveHistories || overlayCore.stateBackupRef.current?.histories || overlayCore.historiesRef.current;
-      const targetPage = doc?._preservePage || overlayCore.stateBackupRef.current?.currentPage || currentPageNo;
-      
-      overlayCore.overlaysRef.current = preservedOverlays;
-      overlayCore.historiesRef.current = preservedHistories;
-      
-      const pageHistory = overlayCore.historiesRef.current[targetPage] || [];
-      const pageOverlay = overlayCore.overlaysRef.current[targetPage] || null;
-      
-      setCurrentPageNo(targetPage);
-      pageNavCore.setPageNo(targetPage);
-      overlayCore.setHistory(pageHistory);
-      overlayCore.setHistIdx(pageHistory.length > 0 ? pageHistory.length - 1 : -1);
-      overlayCore.setOverlay(pageOverlay);
-      
-      console.log('✅ Restored overlays for continued editing on page', targetPage);
-      
-      overlayCore.stateBackupRef.current = null;
-      overlayCore.postSaveRef.current = false;
-      
-      const validPdfData = pdfCore.determinePdfSource(doc);
-      if (validPdfData) {
-        pdfCore.setBlobUri(validPdfData);
+    setPageReady(false);
+    setTimeout(() => {
+      if (canvasCore.canvasRef.current) {
+        canvasCore.initCanvas();
       }
+    }, 200);
+    
+    return;
+  }
+  
+  // Normal document change
+  const validPdfData = pdfCore.determinePdfSource(doc);
+  pdfCore.debugPdfData('Document Reset', validPdfData);
+  pdfCore.setBlobUri(validPdfData);
+  setCurrentPageNo(1);
+  pageNavCore.setPageNo(1);
+  
+  // Clear drawing state
+  if (canvasCore.activePointerRef) {
+    canvasCore.activePointerRef.current = null;
+  }
+  if (canvasCore.strokeStartedRef) {
+    canvasCore.strokeStartedRef.current = false;
+  }
+  
+  overlayCore.initializeOverlaysFromDocument(doc);
+  setPageReady(false);
+  
+  setTimeout(() => {
+    if (canvasCore.canvasRef.current && validPdfData) {
+      console.log('🎨 Reinitializing canvas after document change');
+      canvasCore.initCanvas();
+    }
+  }, 200);
+}, [
+  doc?._id,
+  doc?.fileName,
+  doc?.pdf,
+  doc?.signedPdf,
+  doc?.pageOverlays,
+  doc?._skipDocumentReset,
+  setCurrentDoc
+]);
+
+useEffect(() => {
+  // FIXED: Handle assembly build completion
+  if (doc?.assemblyBuildCreated && doc?.assemblyBuildTranId && doc?.status === 'Review') {
+    console.log('🔄 Assembly build completed - refreshing PDF data for Review status');
+    
+    const validPdfData = pdfCore.determinePdfSource(doc);
+    if (validPdfData) {
+      pdfCore.setBlobUri(validPdfData);
+      
+      // FIXED: Force canvas reinitialization with longer delay for assembly build
+      setPageReady(false);
+      setTimeout(() => {
+        if (canvasCore.canvasRef.current) {
+          console.log('🎨 Reinitializing canvas after assembly build completion');
+          canvasCore.initCanvas();
+        }
+      }, 800); // Longer delay for assembly build state changes
+    }
+  }
+}, [doc?.assemblyBuildCreated, doc?.assemblyBuildTranId, doc?.status]);
+
+// Handle work order creation PDF refresh (keep existing)
+useEffect(() => {
+  if (doc?.workOrderCreated && doc?.signedPdf?.data && !doc?._skipDocumentReset) {
+    console.log('🔄 Work order created - refreshing PDF data');
+    
+    const validPdfData = pdfCore.determinePdfSource(doc);
+    if (validPdfData) {
+      pdfCore.setBlobUri(validPdfData);
       
       setPageReady(false);
       setTimeout(() => {
         if (canvasCore.canvasRef.current) {
+          console.log('🎨 Reinitializing canvas after work order creation');
           canvasCore.initCanvas();
         }
-      }, 200);
-      
-      return;
+      }, 500);
     }
+  }
+}, [doc?.workOrderCreated, doc?.signedPdf?.data]);
+
+
+  useEffect(() => {
+  // Handle post-work order creation PDF refresh
+  if (doc?.workOrderCreated && doc?.signedPdf?.data && !doc?._skipDocumentReset) {
+    console.log('🔄 Work order created - refreshing PDF data');
     
-    // Normal document change
     const validPdfData = pdfCore.determinePdfSource(doc);
-    pdfCore.debugPdfData('Document Reset', validPdfData);
-    pdfCore.setBlobUri(validPdfData);
-    setCurrentPageNo(1);
-    pageNavCore.setPageNo(1);
-    
-    // Clear drawing state
-    if (canvasCore.activePointerRef) {
-      canvasCore.activePointerRef.current = null;
+    if (validPdfData) {
+      pdfCore.setBlobUri(validPdfData);
+      
+      // Force canvas reinitialization
+      setPageReady(false);
+      setTimeout(() => {
+        if (canvasCore.canvasRef.current) {
+          console.log('🎨 Reinitializing canvas after work order creation');
+          canvasCore.initCanvas();
+        }
+      }, 500); // Longer delay for work order creation
     }
-    if (canvasCore.strokeStartedRef) {
-      canvasCore.strokeStartedRef.current = false;
-    }
-    
-    overlayCore.initializeOverlaysFromDocument(doc);
-    setPageReady(false);
-    
-    setTimeout(() => {
-      if (canvasCore.canvasRef.current && validPdfData) {
-        console.log('🎨 Reinitializing canvas after document change');
-        canvasCore.initCanvas();
-      }
-    }, 200);
-  }, [
-    doc?._id,
-    doc?.fileName,
-    doc?.pdf,
-    doc?.signedPdf,
-    doc?.pageOverlays,
-    doc?._skipDocumentReset,
-    setCurrentDoc
-  ]);
+  }
+}, [doc?.workOrderCreated, doc?.signedPdf?.data]);
 
   // === OTHER EFFECTS ===
   
@@ -239,27 +299,60 @@ export function useMain(props) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Work Order Polling
-  useEffect(() => {
-    if (workOrderCore.shouldPoll() && !workOrderCore.pollingActiveRef.current) {
-      workOrderCore.startWorkOrderPolling();
-    } else if (!workOrderCore.shouldPoll() && workOrderCore.pollingActiveRef.current) {
-      workOrderCore.stopWorkOrderPolling();
-    }
+  // === 🆕 ENHANCED: WORK ORDER + ASSEMBLY BUILD POLLING ===
+useEffect(() => {
+  const { shouldPollWorkOrder, shouldPollAssemblyBuild } = workOrderCore.shouldPoll();
   
-    return () => {
-      if (!doc?._id) {
-        workOrderCore.stopWorkOrderPolling();
-      }
-    };
-  }, [
-    doc?._id, 
-    doc?.isBatch, 
-    doc?.workOrderCreated, 
-    doc?.workOrderStatus,
-    workOrderCore.isCreatingWorkOrder,
-    workOrderCore.userInitiatedCreation
-  ]);
+  console.log('🔍 Enhanced Polling decision:', {
+    shouldPollWorkOrder,
+    shouldPollAssemblyBuild,
+    workOrderPollingActive: workOrderCore.pollingActiveRef.current,
+    assemblyBuildPollingActive: workOrderCore.assemblyBuildPollingActiveRef.current,
+    // Enhanced debugging for assembly build
+    assemblyBuildDebug: {
+      isCreatingAssemblyBuild: workOrderCore.isCreatingAssemblyBuild,
+      assemblyBuildStatus: doc?.assemblyBuildStatus,
+      assemblyBuildCreated: doc?.assemblyBuildCreated,
+      assemblyBuildTranId: doc?.assemblyBuildTranId
+    }
+  });
+  
+  // Work Order Polling
+  if (shouldPollWorkOrder && !workOrderCore.pollingActiveRef.current) {
+    console.log('🔄 Starting work order polling...');
+    workOrderCore.startWorkOrderPolling();
+  } else if (!shouldPollWorkOrder && workOrderCore.pollingActiveRef.current) {
+    console.log('🛑 Stopping work order polling...');
+    workOrderCore.stopWorkOrderPolling();
+  }
+  
+  // FIXED: Assembly Build Polling with better detection
+  if (shouldPollAssemblyBuild && !workOrderCore.assemblyBuildPollingActiveRef.current) {
+    console.log('🔄 Starting assembly build polling...');
+    workOrderCore.startAssemblyBuildPolling();
+  } else if (!shouldPollAssemblyBuild && workOrderCore.assemblyBuildPollingActiveRef.current) {
+    console.log('🛑 Stopping assembly build polling...');
+    workOrderCore.stopAssemblyBuildPolling();
+  }
+
+  return () => {
+    if (!doc?._id) {
+      workOrderCore.stopWorkOrderPolling();
+      workOrderCore.stopAssemblyBuildPolling();
+    }
+  };
+}, [
+  doc?._id, 
+  doc?.isBatch, 
+  doc?.workOrderCreated, 
+  doc?.workOrderStatus,
+  doc?.assemblyBuildStatus,    // Key for assembly build polling
+  doc?.assemblyBuildCreated,   // Also important
+  workOrderCore.isCreatingWorkOrder,
+  workOrderCore.userInitiatedCreation,
+  workOrderCore.isCreatingAssemblyBuild  // Key for triggering polling
+]);
+
 
   console.log('🔧 Core useMain returning interface');
 
@@ -274,20 +367,27 @@ export function useMain(props) {
     // === STATE ===
     blobUri: pdfCore.blobUri,
     pages: pdfCore.pages,
-    pageNo: currentPageNo, // ✅ FIXED: Return our managed page number
+    pageNo: currentPageNo,
     isDraw: canvasCore.isDraw,
     overlay: overlayCore.overlay,
     histIdx: overlayCore.histIdx,
     isSaving: saveCore.isSaving,
     pageReady,
 
-    // === WORK ORDER STATE ===
+    // === WORK ORDER STATE (existing) ===
     workOrderStatus: workOrderCore.workOrderStatus,
     workOrderLoading: workOrderCore.workOrderLoading,
     workOrderError: workOrderCore.workOrderError,
     isCreatingWorkOrder: workOrderCore.isCreatingWorkOrder,
     userInitiatedCreation: workOrderCore.userInitiatedCreation,
     lastWorkOrderNumber: workOrderCore.lastWorkOrderNumber,
+
+    // === 🆕 NEW: ASSEMBLY BUILD STATE ===
+    assemblyBuildStatus: workOrderCore.assemblyBuildStatus,
+    assemblyBuildLoading: workOrderCore.assemblyBuildLoading,
+    assemblyBuildError: workOrderCore.assemblyBuildError,
+    isCreatingAssemblyBuild: workOrderCore.isCreatingAssemblyBuild,
+    lastAssemblyBuildNumber: workOrderCore.lastAssemblyBuildNumber,
 
     // === COMPUTED ===
     canDraw,
@@ -298,7 +398,7 @@ export function useMain(props) {
     isInReview,
     isCompleted,
     isArchived,
-    workOrderInfo: workOrderCore.workOrderInfo,
+    workOrderInfo: workOrderCore.workOrderInfo, // 🆕 Enhanced with assembly build info
 
     // === ACTIONS ===
     setIsDraw: canvasCore.setIsDraw,
@@ -316,13 +416,22 @@ export function useMain(props) {
     print: printCore.print,
     initCanvas: canvasCore.initCanvas,
 
-    // === WORK ORDER ACTIONS ===
+    // === WORK ORDER ACTIONS (existing) ===
     checkWorkOrderStatus: workOrderCore.checkWorkOrderStatus,
     startWorkOrderPolling: workOrderCore.startWorkOrderPolling,
     stopWorkOrderPolling: workOrderCore.stopWorkOrderPolling,
     setIsCreatingWorkOrder: workOrderCore.setIsCreatingWorkOrder,
     setUserInitiatedCreation: workOrderCore.setUserInitiatedCreation,
-    setLastWorkOrderNumber: workOrderCore.setLastWorkOrderNumber
+    setLastWorkOrderNumber: workOrderCore.setLastWorkOrderNumber,
+
+    // === 🆕 NEW: ASSEMBLY BUILD ACTIONS ===
+    checkAssemblyBuildStatus: workOrderCore.checkAssemblyBuildStatus,
+    startAssemblyBuildPolling: workOrderCore.startAssemblyBuildPolling,
+    stopAssemblyBuildPolling: workOrderCore.stopAssemblyBuildPolling,
+    setIsCreatingAssemblyBuild: workOrderCore.setIsCreatingAssemblyBuild,
+    setLastAssemblyBuildNumber: workOrderCore.setLastAssemblyBuildNumber,
+    resetAssemblyBuildCreation: workOrderCore.resetAssemblyBuildCreation,
+    initializeAssemblyBuildCreation: workOrderCore.initializeAssemblyBuildCreation
   };
 }
 

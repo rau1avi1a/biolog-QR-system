@@ -36,6 +36,51 @@ export async function GET(request) {
     await db.connect();
 
     if (id) {
+    if (id && action === 'assemblybuild-status') {
+      try {
+        console.log('🔍 Assembly build status check for batch:', id);
+        
+        if (!id) {
+          return NextResponse.json(
+            { success: false, error: 'Batch ID is required' },
+            { status: 400 }
+          );
+        }
+
+        // FIXED: Use the batch service method instead of async service
+        const statusResult = await db.services.batchService.getAssemblyBuildStatus(id);
+        
+        if (statusResult.error) {
+          console.error('❌ Assembly build status error:', statusResult.error);
+          return NextResponse.json(
+            { success: false, error: statusResult.error },
+            { status: 404 }
+          );
+        }
+
+        console.log('📊 Assembly build status result:', statusResult);
+
+        const response = NextResponse.json({
+          success: true,
+          data: statusResult
+        });
+
+        // Prevent caching
+        response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        response.headers.set('Pragma', 'no-cache');
+        response.headers.set('Expires', '0');
+
+        return response;
+
+      } catch (error) {
+        console.error('💥 Assembly build status check failed:', error);
+        return NextResponse.json(
+          { success: false, error: error.message },
+          { status: 500 }
+        );
+      }
+    }
+
       if (action === 'workorder-status') {
         // GET /api/batches?id=123&action=workorder-status
         const status = await db.services.batchService.getWorkOrderStatus(id);

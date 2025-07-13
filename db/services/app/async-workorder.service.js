@@ -347,6 +347,342 @@ static async createWorkOrderInBackground(batchId, quantity, userId = null) {
   }
 }
 
+
+  // =============================================================================
+  // 🆕 NEW: ASSEMBLY BUILD CREATION
+  // =============================================================================
+  
+  /**
+   * Queue an assembly build creation job (NEW)
+   */
+  static async queueAssemblyBuildCreation(batchId, submissionData, userId = null) {
+    await this.connect();
+    
+    try {
+      console.log('🏗️ Queueing assembly build creation for batch:', batchId);
+      
+      // CRITICAL: Mark batch as assembly build creating
+      const updateResult = await this.Batch.updateOne(
+        { _id: batchId },
+        {
+          $set: {
+            assemblyBuildCreated: false, // Not created yet
+            assemblyBuildStatus: 'creating', // New field to track assembly build status
+            assemblyBuildCreatedAt: null, // Will be set when complete
+            assemblyBuildId: `PENDING-AB-${Date.now()}`, // Temporary ID
+            assemblyBuildError: null,
+            assemblyBuildFailedAt: null,
+            // Keep work order completion status
+            workOrderCompleted: false,
+            workOrderCompletedAt: null
+          }
+        }
+      );
+  
+      if (updateResult.matchedCount === 0) {
+        throw new Error('Batch not found for assembly build creation');
+      }
+  
+      console.log('✓ Batch status set to assembly build creating, starting background job');
+  
+      // Start the background assembly build job
+      setImmediate(() => {
+        this.createAssemblyBuildInBackground(batchId, submissionData, userId)
+          .catch(error => {
+            console.error('❌ Background assembly build creation failed:', error);
+            this.handleAssemblyBuildFailure(batchId, error.message);
+          });
+      });
+  
+      return {
+        success: true,
+        batchId,
+        status: 'creating_assembly_build',
+        message: 'Assembly build creation started in background'
+      };
+  
+    } catch (error) {
+      console.error('Error queuing assembly build creation:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create assembly build in background (NEW)
+   */
+  static async createAssemblyBuildInBackground(batchId, submissionData, userId = null) {
+    try {
+      console.log('🚀 Starting background assembly build creation for batch:', batchId);
+      
+      // CRITICAL: Always start with fresh connection
+      await this.connect();
+      
+      // Get the batch with a fresh query
+      const batch = await this.Batch.findById(batchId)
+        .populate('fileId', 'fileName')
+        .populate('snapshot.solutionRef', 'displayName sku netsuiteInternalId')
+        .lean();
+
+      if (!batch) {
+        throw new Error('Batch not found');
+      }
+
+      // Verify batch has a work order
+      if (!batch.netsuiteWorkOrderData?.workOrderId) {
+        throw new Error('Batch does not have a NetSuite work order ID for assembly build');
+      }
+
+      // Get user if provided
+      let user = null;
+      if (userId) {
+        user = await this.User.findById(userId);
+      }
+
+      const fullUser = await this.getFullUser(user);
+      
+      // Create assembly build using NetSuite service
+      let assemblyBuildResult;
+      
+      if (this.hasNetSuiteAccess(fullUser)) {
+        try {
+          console.log('🔗 Creating NetSuite assembly build...');
+          
+          // Import and use the assembly build service
+          const { createAssemblyBuildService } = await import('@/db/services/netsuite/assemblyBuild.service.js');
+          const assemblyBuildService = createAssemblyBuildService(fullUser);
+          
+          // Complete the work order by creating assembly build
+          assemblyBuildResult = await assemblyBuildService.completeWorkOrderForBatch(batchId, submissionData);
+          
+          console.log('✅ NetSuite assembly build created successfully:', {
+            assemblyBuildId: assemblyBuildResult.assemblyBuild.id,
+            tranId: assemblyBuildResult.assemblyBuild.tranId,
+            workOrderId: assemblyBuildResult.assemblyBuild.workOrderId
+          });
+          
+        } catch (error) {
+          console.error('❌ NetSuite assembly build creation failed:', error);
+          throw error; // Don't fall back for assembly builds - they require NetSuite
+        }
+      } else {
+        throw new Error('NetSuite access required for assembly build creation');
+      }
+
+      // ENHANCED: Prepare update data with detailed logging
+      const updateData = {
+        assemblyBuildId: assemblyBuildResult.assemblyBuild.id,
+        assemblyBuildTranId: assemblyBuildResult.assemblyBuild.tranId,
+        assemblyBuildStatus: 'created', // CRITICAL: Must be 'created'
+        assemblyBuildCreated: true,
+        assemblyBuildCreatedAt: new Date(),
+        assemblyBuildError: null,
+        assemblyBuildFailedAt: null,
+        
+        // Mark work order as completed
+        workOrderCompleted: true,
+        workOrderCompletedAt: new Date(),
+        workOrderStatus: 'completed'
+      };
+
+      // Also update the nested NetSuite data if needed
+      if (batch.netsuiteWorkOrderData) {
+        updateData.netsuiteWorkOrderData = {
+          ...batch.netsuiteWorkOrderData,
+          status: 'built',
+          completedAt: new Date(),
+          assemblyBuildId: assemblyBuildResult.assemblyBuild.id,
+          assemblyBuildTranId: assemblyBuildResult.assemblyBuild.tranId,
+          lastSyncAt: new Date()
+        };
+      }
+
+      console.log('📝 Complete update data prepared:', {
+        assemblyBuildId: updateData.assemblyBuildId,
+        assemblyBuildTranId: updateData.assemblyBuildTranId,
+        assemblyBuildStatus: updateData.assemblyBuildStatus,
+        workOrderCompleted: updateData.workOrderCompleted,
+        hasNetsuiteData: !!updateData.netsuiteWorkOrderData
+      });
+
+      // ENHANCED: Database update with extensive retry logic
+      let updateSuccess = false;
+      let attempts = 0;
+      const maxAttempts = 5;
+      let lastError = null;
+
+      while (!updateSuccess && attempts < maxAttempts) {
+        attempts++;
+        console.log(`🔄 Database update attempt ${attempts}/${maxAttempts} for batch ${batchId}`);
+
+        try {
+          // CRITICAL: Fresh connection each attempt
+          await this.connect();
+          
+          // PERFORM UPDATE with extensive logging
+          const updateResult = await this.Batch.updateOne(
+            { _id: batchId },
+            { $set: updateData },
+            { 
+              upsert: false,
+              writeConcern: { w: 'majority', j: true },
+              maxTimeMS: 10000
+            }
+          );
+
+          console.log(`📊 Update result for attempt ${attempts}:`, {
+            acknowledged: updateResult.acknowledged,
+            matchedCount: updateResult.matchedCount,
+            modifiedCount: updateResult.modifiedCount
+          });
+
+          if (updateResult.acknowledged && updateResult.matchedCount > 0) {
+            updateSuccess = true;
+            console.log(`✅ Database update successful on attempt ${attempts}`);
+          }
+
+          if (!updateSuccess && attempts < maxAttempts) {
+            const delay = 1000 * attempts;
+            console.log(`⏳ Waiting ${delay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+          
+        } catch (updateError) {
+          lastError = updateError;
+          console.error(`❌ Update attempt ${attempts} failed:`, updateError.message);
+          
+          if (attempts < maxAttempts) {
+            const delay = 1000 * attempts;
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+      }
+
+      if (!updateSuccess) {
+        throw new Error(`Failed to update database after ${maxAttempts} attempts: ${lastError?.message}`);
+      }
+
+      // ENHANCED VERIFICATION
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const verificationBatch = await this.Batch.findById(batchId)
+        .select('assemblyBuildStatus assemblyBuildId assemblyBuildTranId assemblyBuildCreated workOrderCompleted')
+        .lean();
+      
+      console.log('🔍 Final verification result:', {
+        found: !!verificationBatch,
+        assemblyBuildStatus: verificationBatch?.assemblyBuildStatus,
+        assemblyBuildId: verificationBatch?.assemblyBuildId,
+        assemblyBuildTranId: verificationBatch?.assemblyBuildTranId,
+        assemblyBuildCreated: verificationBatch?.assemblyBuildCreated,
+        workOrderCompleted: verificationBatch?.workOrderCompleted
+      });
+
+      if (!verificationBatch || verificationBatch.assemblyBuildStatus !== 'created') {
+        throw new Error('Verification failed - assembly build not properly created');
+      }
+
+      console.log('🎉 Background assembly build creation completed successfully:', {
+        batchId: batchId,
+        assemblyBuildId: assemblyBuildResult.assemblyBuild.id,
+        assemblyBuildTranId: assemblyBuildResult.assemblyBuild.tranId,
+        workOrderId: assemblyBuildResult.assemblyBuild.workOrderId,
+        attempts: attempts,
+        verified: true
+      });
+      
+      return {
+        success: true,
+        assemblyBuildId: assemblyBuildResult.assemblyBuild.id,
+        assemblyBuildTranId: assemblyBuildResult.assemblyBuild.tranId,
+        workOrderId: assemblyBuildResult.assemblyBuild.workOrderId,
+        attempts: attempts,
+        verified: true
+      };
+
+    } catch (error) {
+      console.error('💥 Background assembly build creation failed:', error);
+      await this.handleAssemblyBuildFailure(batchId, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle assembly build creation failure (NEW)
+   */
+  static async handleAssemblyBuildFailure(batchId, errorMessage) {
+    try {
+      console.log(`🚨 Recording assembly build failure for batch ${batchId}: ${errorMessage}`);
+      await this.connect();
+      
+      const updateResult = await this.Batch.updateOne(
+        { _id: batchId },
+        {
+          $set: {
+            assemblyBuildStatus: 'failed',
+            assemblyBuildError: errorMessage,
+            assemblyBuildFailedAt: new Date(),
+            assemblyBuildCreated: false
+          }
+        },
+        {
+          writeConcern: { w: 'majority', j: true }
+        }
+      );
+      
+      if (updateResult.modifiedCount > 0) {
+        console.log('✅ Assembly build failure recorded for batch:', batchId);
+      } else {
+        console.error('❌ Failed to record assembly build failure');
+      }
+    } catch (error) {
+      console.error('💥 Error recording assembly build failure:', error);
+    }
+  }
+
+  // =============================================================================
+  // 🆕 NEW: STATUS CHECKING FOR ASSEMBLY BUILDS
+  // =============================================================================
+  
+  /**
+   * Get assembly build status (NEW)
+   */
+  static async getAssemblyBuildStatus(batchId) {
+    try {
+      console.log('🔍 Getting assembly build status for batch:', batchId);
+      
+      await this.connect();
+      
+      const batch = await this.Batch.findOne({ _id: batchId })
+        .select('assemblyBuildCreated assemblyBuildStatus assemblyBuildId assemblyBuildTranId assemblyBuildError assemblyBuildCreatedAt assemblyBuildFailedAt workOrderCompleted workOrderCompletedAt netsuiteWorkOrderData')
+        .lean()
+        .exec();
+
+      if (!batch) {
+        return { error: 'Batch not found' };
+      }
+
+      const result = {
+        created: batch.assemblyBuildCreated,
+        status: batch.assemblyBuildStatus,
+        assemblyBuildId: batch.assemblyBuildId,
+        assemblyBuildTranId: batch.assemblyBuildTranId,
+        workOrderCompleted: batch.workOrderCompleted,
+        error: batch.assemblyBuildError,
+        createdAt: batch.assemblyBuildCreatedAt,
+        failedAt: batch.assemblyBuildFailedAt,
+        workOrderCompletedAt: batch.workOrderCompletedAt
+      };
+      
+      console.log('📤 Returning assembly build status:', result);
+      return result;
+    } catch (error) {
+      console.error('💥 Error getting assembly build status:', error);
+      return { error: error.message };
+    }
+  }
+  
+
+
 /**
  * ENHANCED: Handle work order creation failure with better error tracking and verification
  */

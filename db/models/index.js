@@ -136,6 +136,111 @@ batchSchema.methods.getProductionStatus = function() {
   }
 };
 
+batchSchema.methods.getAssemblyBuildStatus = function() {
+  if (this.assemblyBuildCreated && this.assemblyBuildTranId) {
+    return {
+      status: 'completed',
+      tranId: this.assemblyBuildTranId,
+      id: this.assemblyBuildId,
+      completedAt: this.assemblyBuildCreatedAt
+    };
+  }
+  
+  if (this.assemblyBuildStatus === 'creating') {
+    return {
+      status: 'creating',
+      tranId: null,
+      id: this.assemblyBuildId,
+      createdAt: null
+    };
+  }
+  
+  if (this.assemblyBuildStatus === 'failed') {
+    return {
+      status: 'failed',
+      error: this.assemblyBuildError,
+      failedAt: this.assemblyBuildFailedAt
+    };
+  }
+  
+  return {
+    status: 'not_created',
+    tranId: null,
+    id: null
+  };
+};
+
+batchSchema.methods.getWorkOrderDisplayStatus = function() {
+  const assemblyStatus = this.getAssemblyBuildStatus();
+  const workOrderStatus = this.getProductionStatus();
+  
+  // Priority: Assembly Build > Work Order
+  if (assemblyStatus.status === 'completed') {
+    return {
+      type: 'assembly_build',
+      status: 'completed',
+      displayId: assemblyStatus.tranId,
+      icon: '✅',
+      title: `Assembly Build Completed: ${assemblyStatus.tranId}`,
+      isAnimating: false
+    };
+  }
+  
+  if (assemblyStatus.status === 'creating') {
+    return {
+      type: 'assembly_build',
+      status: 'creating',
+      displayId: 'Creating...',
+      icon: '⏳',
+      title: 'Assembly build is being created in NetSuite...',
+      isAnimating: true
+    };
+  }
+  
+  if (assemblyStatus.status === 'failed') {
+    return {
+      type: 'assembly_build',
+      status: 'failed',
+      displayId: 'AB Failed',
+      icon: '❌',
+      title: `Assembly build creation failed: ${assemblyStatus.error}`,
+      isAnimating: false
+    };
+  }
+  
+  // Fall back to work order status
+  if (workOrderStatus.status === 'in_production') {
+    return {
+      type: 'work_order',
+      status: 'created',
+      displayId: workOrderStatus.workOrder,
+      icon: '🔗',
+      title: `Work Order: ${workOrderStatus.workOrder}`,
+      isAnimating: false
+    };
+  }
+  
+  if (this.isCreatingWorkOrder || this.workOrderStatus === 'creating') {
+    return {
+      type: 'work_order',
+      status: 'creating',
+      displayId: 'Creating...',
+      icon: '⏳',
+      title: 'Work order is being created in NetSuite...',
+      isAnimating: true
+    };
+  }
+  
+  return {
+    type: 'none',
+    status: 'not_created',
+    displayId: null,
+    icon: null,
+    title: null,
+    isAnimating: false
+  };
+};
+
 batchSchema.statics.findByStatus = function(status) {
   return this.find({ status }).populate('fileId', 'fileName');
 };

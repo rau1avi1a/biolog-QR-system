@@ -452,9 +452,11 @@ async createBatch(payload) {
   // =============================================================================
   // BATCH UPDATE - From your original updateBatch function
   // =============================================================================
-// FIXED updateBatch method in batch.service.js - REPLACE THE OVERLAY UPDATE SECTION
 
-// COMPLETE FIXED updateBatch method in batch.service.js - REPLACE THE ENTIRE METHOD
+// =============================================================================
+// COMPLETE FIXED updateBatch method for batch.service.js
+// db/services/app/batch.service.js - Replace the entire updateBatch method
+// =============================================================================
 
 async updateBatch(id, payload) {
   await this.connect();
@@ -659,7 +661,9 @@ async updateBatch(id, payload) {
     totalOverlaysInFinalPayload: finalPayload.pageOverlays ? Object.keys(finalPayload.pageOverlays).length : 0
   });
 
-  // Handle work order creation during update using db.services
+  // =============================================================================
+  // 🆕 FIXED: HANDLE WORK ORDER CREATION DURING UPDATE
+  // =============================================================================
   if (finalPayload.workOrderCreated && !prev.workOrderCreated) {
     try {
       const quantity = finalPayload.confirmedComponents?.reduce((sum, comp) => sum + (comp.actualAmount || comp.amount || 0), 0) || 
@@ -670,20 +674,27 @@ async updateBatch(id, payload) {
     }
   }
 
-  // Handle chemical transactions during update
+  // =============================================================================
+  // 🆕 FIXED: HANDLE CHEMICAL TRANSACTIONS FIRST (before assembly build trigger)
+  // =============================================================================
   if (finalPayload.chemicalsTransacted && finalPayload.confirmedComponents?.length > 0) {
     try {
       const confirmationData = { components: finalPayload.confirmedComponents };
       const transactionResult = await this.transactChemicals({ _id: id, runNumber: prev.runNumber, snapshot: prev.snapshot }, confirmationData, user);
       if (transactionResult.success) {
         console.log('Chemicals transacted successfully during update');
+        // CRITICAL: Set the flag so assembly build trigger can see it
+        finalPayload.chemicalsTransacted = true;
       }
     } catch (e) {
       console.error('Failed to transact chemicals during update:', e);
+      finalPayload.chemicalsTransacted = false; // Mark as failed
     }
   }
 
-  // Handle solution creation during update
+  // =============================================================================
+  // 🆕 FIXED: HANDLE SOLUTION CREATION
+  // =============================================================================
   if (finalPayload.solutionCreated && !prev.solutionCreated && finalPayload.solutionLotNumber) {
     try {
       await this.createSolutionLot(
@@ -699,121 +710,116 @@ async updateBatch(id, payload) {
     }
   }
 
-  // FIXED: Handle assembly build creation BEFORE the main update
-  let assemblyBuildUpdate = {};
-  if (prev.status !== 'Review' && finalPayload.status === 'Review' && finalPayload.chemicalsTransacted) {
-    console.log('🏗️ Batch moving to Review status - checking for work order completion...');
+  // =============================================================================
+  // 🆕 FIXED: ASSEMBLY BUILD TRIGGER - After transactions are complete
+  // =============================================================================
+  
+  const shouldCreateAssemblyBuild = (
+    // Status change: any status -> Review
+    prev.status !== 'Review' && 
+    finalPayload.status === 'Review' && 
     
-    // Check if batch has a NetSuite work order that needs completion
-    if (prev.netsuiteWorkOrderData?.workOrderId && !prev.workOrderCompleted) {
-      console.log('🏗️ Completing NetSuite work order:', prev.netsuiteWorkOrderData.tranId);
+    // Must have transacted chemicals
+    finalPayload.chemicalsTransacted === true &&
+    
+    // Must have a valid work order
+    (prev.netsuiteWorkOrderData?.workOrderId || prev.workOrderCreated) && 
+    
+    // 🔥 CRITICAL: Must NOT already have assembly build in progress or completed
+    !prev.assemblyBuildCreated && 
+    (!prev.assemblyBuildStatus || prev.assemblyBuildStatus === 'not_created') &&
+    !prev.assemblyBuildId?.startsWith('PENDING-AB-') &&
+    
+    // 🔥 CRITICAL: Must NOT be a retry, internal update, or already processing
+    !finalPayload._skipAssemblyBuild &&
+    !finalPayload._isInternalUpdate &&
+    !finalPayload._assemblyBuildInProgress // NEW FLAG
+  );
+
+  console.log('🔍 SINGLE Assembly build trigger analysis:', {
+    statusChange: `${prev.status} → ${finalPayload.status}`,
+    chemicalsTransacted: finalPayload.chemicalsTransacted,
+    hasWorkOrder: !!(prev.netsuiteWorkOrderData?.workOrderId || prev.workOrderCreated),
+    assemblyBuildBlocked: {
+      alreadyCreated: prev.assemblyBuildCreated,
+      hasStatus: prev.assemblyBuildStatus && prev.assemblyBuildStatus !== 'not_created',
+      hasPendingId: prev.assemblyBuildId?.startsWith('PENDING-AB-'),
+      isSkipped: finalPayload._skipAssemblyBuild,
+      isInternal: finalPayload._isInternalUpdate,
+      inProgress: finalPayload._assemblyBuildInProgress
+    },
+    shouldTrigger: shouldCreateAssemblyBuild
+  });
+
+  if (shouldCreateAssemblyBuild) {
+    console.log('🏗️ TRIGGERING SINGLE assembly build creation...');
+    
+    try {
+      // 🔥 IMMEDIATELY set flags to prevent duplicate triggers
+      finalPayload._skipAssemblyBuild = true;
+      finalPayload._assemblyBuildInProgress = true;
+      finalPayload.assemblyBuildStatus = 'creating';
+      finalPayload.assemblyBuildId = `PENDING-AB-${Date.now()}`;
       
-      try {
-        // Get user for NetSuite operations
-        const user = finalPayload.user || this.getSystemUser();
-        
-        // Import and use the assembly build service
-        const { createAssemblyBuildService } = await import('@/db/services/netsuite/assemblyBuild.service.js');
-        const assemblyBuildService = createAssemblyBuildService(user);
-        
-        // Complete the work order by creating assembly build
-        const completionResult = await assemblyBuildService.completeWorkOrderForBatch(prev._id, {
-          solutionQuantity: finalPayload.solutionQuantity || prev.snapshot?.recipeQty || 1,
-          solutionUnit: finalPayload.solutionUnit || prev.snapshot?.recipeUnit || 'mL',
-          confirmedComponents: finalPayload.confirmedComponents || [],
-          solutionLotNumber: finalPayload.solutionLotNumber
-        });
-        
-        if (completionResult.success) {
-          console.log('✅ Work order completed successfully:', completionResult.assemblyBuild.id);
-          
-          // FIXED: Prepare assembly build data for the main update
-          assemblyBuildUpdate = {
-            workOrderCompleted: true,
-            workOrderCompletedAt: new Date(),
-            assemblyBuildId: completionResult.assemblyBuild.id,
-            assemblyBuildTranId: completionResult.assemblyBuild.tranId,
-            assemblyBuildCreated: true,
-            assemblyBuildCreatedAt: new Date(),
-            
-            // FIXED: Create a clean netsuiteWorkOrderData object with proper dates
-            netsuiteWorkOrderData: {
-              workOrderId: prev.netsuiteWorkOrderData?.workOrderId || null,
-              tranId: prev.netsuiteWorkOrderData?.tranId || null,
-              bomId: prev.netsuiteWorkOrderData?.bomId || null,
-              revisionId: prev.netsuiteWorkOrderData?.revisionId || null,
-              quantity: prev.netsuiteWorkOrderData?.quantity || null,
-              status: 'built',
-              orderStatus: 'built',
-              createdAt: prev.netsuiteWorkOrderData?.createdAt || null,
-              completedAt: new Date(), // This should be a proper Date object
-              assemblyBuildId: completionResult.assemblyBuild.id,
-              assemblyBuildTranId: completionResult.assemblyBuild.tranId,
-              lastSyncAt: new Date()
-            }
-          };
-          
-        } else {
-          console.error('❌ Work order completion failed:', completionResult.error);
-          assemblyBuildUpdate = {
-            workOrderCompletionError: completionResult.error,
-            workOrderCompletionFailedAt: new Date()
-          };
-        }
-        
-      } catch (error) {
-        console.error('❌ Work order completion failed with exception:', error);
-        assemblyBuildUpdate = {
-          workOrderCompletionError: error.message,
-          workOrderCompletionFailedAt: new Date()
-        };
+      // Validate work order
+      let workOrderId = prev.netsuiteWorkOrderData?.workOrderId || prev.workOrderId;
+      if (!workOrderId || workOrderId.startsWith('PENDING-') || workOrderId.startsWith('LOCAL-')) {
+        throw new Error('No valid NetSuite work order ID found');
       }
-    } else if (!prev.netsuiteWorkOrderData?.workOrderId) {
-      console.log('ℹ️ Batch has no NetSuite work order - skipping assembly build creation');
-    } else if (prev.workOrderCompleted) {
-      console.log('ℹ️ Work order already completed - skipping assembly build creation');
+      
+      const submissionData = {
+        solutionQuantity: finalPayload.solutionQuantity || prev.solutionQuantity || prev.snapshot?.recipeQty || 1,
+        solutionUnit: finalPayload.solutionUnit || prev.solutionUnit || prev.snapshot?.recipeUnit || 'mL',
+        confirmedComponents: finalPayload.confirmedComponents || prev.confirmedComponents || [],
+        solutionLotNumber: finalPayload.solutionLotNumber || prev.solutionLotNumber,
+        batchId: id,
+        workOrderId: workOrderId,
+        workOrderTranId: prev.netsuiteWorkOrderData?.tranId || workOrderId
+      };
+
+      console.log('🏗️ Queueing assembly build with data:', submissionData);
+
+      const queueResult = await db.services.AsyncWorkOrderService.queueAssemblyBuildCreation(
+        id, 
+        submissionData, 
+        user?._id
+      );
+      
+      console.log('✅ Assembly build queued successfully:', queueResult);
+      
+    } catch (error) {
+      console.error('❌ Failed to queue assembly build creation:', error);
+      finalPayload.assemblyBuildError = error.message;
+      finalPayload.assemblyBuildFailedAt = new Date();
+      finalPayload.assemblyBuildStatus = 'failed';
+      finalPayload._assemblyBuildInProgress = false;
     }
+  } else {
+    console.log('🚫 Assembly build creation skipped - conditions not met');
   }
 
-  // FIXED: Merge assembly build update with the main payload
-  const completePayload = {
-    ...finalPayload,
-    ...assemblyBuildUpdate
-  };
-
-  // CRITICAL: Remove any problematic nested updates that might cause the date casting issue
-  if (completePayload.netsuiteWorkOrderData) {
-    // Ensure all date fields are proper Date objects
-    const cleanNetsuiteData = { ...completePayload.netsuiteWorkOrderData };
-    
-    // Convert any date fields to proper Date objects
-    if (cleanNetsuiteData.createdAt && !(cleanNetsuiteData.createdAt instanceof Date)) {
-      cleanNetsuiteData.createdAt = new Date(cleanNetsuiteData.createdAt);
-    }
-    if (cleanNetsuiteData.completedAt && !(cleanNetsuiteData.completedAt instanceof Date)) {
-      cleanNetsuiteData.completedAt = new Date(cleanNetsuiteData.completedAt);
-    }
-    if (cleanNetsuiteData.lastSyncAt && !(cleanNetsuiteData.lastSyncAt instanceof Date)) {
-      cleanNetsuiteData.lastSyncAt = new Date(cleanNetsuiteData.lastSyncAt);
-    }
-    
-    completePayload.netsuiteWorkOrderData = cleanNetsuiteData;
-  }
-
-  // Update the batch with the complete payload
-  const next = await this.updateById(id, completePayload);
-
+  // =============================================================================
+  // APPLY THE UPDATE TO DATABASE
+  // =============================================================================
+  await this.updateById(id, finalPayload);
+  
   // Get the final updated batch state
   const finalBatch = await this.findById(id);
 
-  // Handle archiving when completed using db.services
+  // =============================================================================
+  // HANDLE ARCHIVING WHEN COMPLETED
+  // =============================================================================
   if (prev.status !== 'Completed' && finalBatch.status === 'Completed') {
-    await db.services.archiveService.createArchiveCopy(finalBatch);
+    try {
+      await db.services.archiveService.createArchiveCopy(finalBatch);
+    } catch (archiveError) {
+      console.error('Failed to create archive copy:', archiveError);
+      // Don't fail the update just because archiving failed
+    }
   }
 
   return finalBatch;
 }
-
 
   // =============================================================================
   // BATCH RETRIEVAL - Enhanced versions
@@ -916,6 +922,69 @@ async updateBatch(id, payload) {
       return db.services.AsyncWorkOrderService.queueWorkOrderCreation(batchId, quantity, userId);
     } catch (error) {
       console.error('Error retrying work order creation:', error);
+      throw error;
+    }
+  }
+
+  /**
+ * Get assembly build status for a batch (NEW)
+ */
+  async getAssemblyBuildStatus(batchId) {
+    try {
+      await this.connect();
+      
+      const batch = await this.Batch.findOne({ _id: batchId })
+        .select('assemblyBuildCreated assemblyBuildStatus assemblyBuildId assemblyBuildTranId assemblyBuildError assemblyBuildCreatedAt assemblyBuildFailedAt workOrderCompleted')
+        .lean()
+        .exec();
+
+      if (!batch) {
+        return { error: 'Batch not found' };
+      }
+
+      return {
+        created: batch.assemblyBuildCreated,
+        status: batch.assemblyBuildStatus,
+        assemblyBuildId: batch.assemblyBuildId,
+        assemblyBuildTranId: batch.assemblyBuildTranId,
+        error: batch.assemblyBuildError,
+        createdAt: batch.assemblyBuildCreatedAt,
+        failedAt: batch.assemblyBuildFailedAt,
+        workOrderCompleted: batch.workOrderCompleted
+      };
+    } catch (error) {
+      console.error('Error getting assembly build status:', error);
+      return { error: error.message };
+    }
+  }
+
+
+  /**
+ * Retry assembly build creation (NEW)
+ */
+  async retryAssemblyBuildCreation(batchId, submissionData, userId = null) {
+    try {
+      // Reset assembly build status and retry
+      const resetResult = await this.Batch.updateOne(
+        { _id: batchId },
+        {
+          $set: {
+            assemblyBuildStatus: 'creating',
+            assemblyBuildError: null,
+            assemblyBuildFailedAt: null,
+            assemblyBuildId: `PENDING-AB-RETRY-${Date.now()}`,
+            assemblyBuildCreated: false
+          }
+        }
+      );
+
+      if (resetResult.matchedCount === 0) {
+        throw new Error('Batch not found for assembly build retry');
+      }
+
+      return db.services.AsyncWorkOrderService.queueAssemblyBuildCreation(batchId, submissionData, userId);
+    } catch (error) {
+      console.error('Error retrying assembly build creation:', error);
       throw error;
     }
   }
@@ -1274,27 +1343,44 @@ validateOverlayQuality(overlayPng, expectedDimensions = null) {
     }
   }
 
-  async createSolutionLot(batch, solutionLotNumber, solutionQty = null, solutionUnit = 'L', user = null) {
+async createSolutionLot(batch, solutionLotNumber, solutionQty = null, solutionUnit = 'L', user = null) {
+  try {
+    const solutionItemId = batch.snapshot?.solutionRef;
+    if (!solutionItemId) {
+      throw new Error('Batch snapshot missing solutionRef');
+    }
+    
+    // ✅ FIXED: Get the solution item with proper ObjectId handling
+    let solutionItem;
     try {
-      const solutionItemId = batch.snapshot?.solutionRef;
-      if (!solutionItemId) {
-        throw new Error('Batch snapshot missing solutionRef');
-      }
-      
-      const solutionItem = await this.Item.findById(solutionItemId).lean();
-      if (!solutionItem?.netsuiteInternalId) {
-        throw new Error('Solution item does not have a NetSuite Internal ID');
-      }
+      solutionItem = await this.Item.findById(solutionItemId).lean();
+    } catch (error) {
+      console.error('❌ Failed to find solution item:', solutionItemId, error);
+      throw new Error(`Solution item not found: ${solutionItemId}`);
+    }
+    
+    if (!solutionItem?.netsuiteInternalId) {
+      throw new Error('Solution item does not have a NetSuite Internal ID');
+    }
 
-      const quantity = solutionQty || batch.snapshot?.recipeQty || 1;
-      const unit = solutionUnit || batch.snapshot?.recipeUnit || 'L';
-      const actor = user || this.getSystemUser();
+    const quantity = solutionQty || batch.snapshot?.recipeQty || 1;
+    const unit = solutionUnit || batch.snapshot?.recipeUnit || 'L';
+    const actor = user || this.getSystemUser();
 
-      // Use db.services for transaction service
+    console.log('🧪 Creating solution lot transaction:', {
+      solutionItemId: solutionItemId,
+      solutionLotNumber: solutionLotNumber,
+      quantity: quantity,
+      unit: unit,
+      netsuiteInternalId: solutionItem.netsuiteInternalId
+    });
+
+    // ✅ FIXED: Use db.services for transaction service with proper error handling
+    try {
       await db.services.txnService.post({
         txnType: 'build',
         lines: [{
-          item: solutionItemId,
+          item: solutionItemId, // ✅ Use the ObjectId directly, not string
           lot: solutionLotNumber,
           qty: quantity
         }],
@@ -1311,18 +1397,23 @@ validateOverlayQuality(overlayPng, expectedDimensions = null) {
         refDoc: batch.fileId,
         refDocType: 'batch'
       });
-      
-      return { 
-        lotNumber: solutionLotNumber, 
-        quantity,
-        unit,
-        created: true 
-      };
-    } catch (error) {
-      console.error('Error creating solution lot:', error);
-      throw error;
+    } catch (txnError) {
+      console.error('❌ Transaction service error:', txnError);
+      throw new Error(`Failed to create solution transaction: ${txnError.message}`);
     }
+    
+    return { 
+      lotNumber: solutionLotNumber, 
+      quantity,
+      unit,
+      created: true 
+    };
+  } catch (error) {
+    console.error('❌ Error creating solution lot:', error);
+    throw error;
   }
+}
+
 
   getSystemUser() {
     return {
