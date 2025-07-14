@@ -386,7 +386,7 @@ export async function GET(request) {
         
         if (assemblyBuildId) {
           // Get specific assembly build
-          const { createAssemblyBuildService } = await import('@/services/netsuite/assemblyBuild.service.js');
+          const { createAssemblyBuildService } = await import('@/db/services/netsuite/assemblyBuild.service.js');
           const assemblyBuildService = createAssemblyBuildService(user);
           const result = await assemblyBuildService.getAssemblyBuildStatus(assemblyBuildId);
           
@@ -398,7 +398,7 @@ export async function GET(request) {
           
         } else if (workOrderId) {
           // Get assembly builds for a work order
-          const { createAssemblyBuildService } = await import('@/services/netsuite/assemblyBuild.service.js');
+          const { createAssemblyBuildService } = await import('@/db/services/netsuite/assemblyBuild.service.js');
           const assemblyBuildService = createAssemblyBuildService(user);
           const result = await assemblyBuildService.getAssemblyBuildsForWorkOrder(workOrderId);
           
@@ -842,7 +842,7 @@ case 'import': {
         }, { status: 400 });
       }
     
-      const { createAssemblyBuildService } = await import('@/services/netsuite/assemblyBuild.service.js');
+      const { createAssemblyBuildService } = await import('@/db/services/netsuite/assemblyBuild.service.js');
       const assemblyBuildService = createAssemblyBuildService(user);
       let result;
     
