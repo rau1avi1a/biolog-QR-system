@@ -6,6 +6,9 @@ import db from '@/db';
 import { jwtVerify } from 'jose';
 import mongoose from 'mongoose';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 // Helper to get authenticated user
 async function getAuthUser(request) {
   try {

@@ -5,6 +5,9 @@ import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 // Helper to get authenticated user
 async function getAuthUser(request) {
   try {
