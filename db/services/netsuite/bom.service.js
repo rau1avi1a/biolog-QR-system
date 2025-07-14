@@ -195,7 +195,7 @@ export class NetSuiteBOMService {
       const item = c.item || {};
       const id = item.id || item.internalId || c.itemId;
       const name = item.refName || item.itemid || 'Unknown';
-      const qty = parseFloat(c.quantity || c.bomQuantity || 0);
+      const qty = parseFloat(c.bomQuantity || c.quantity || 0);
            // map the Netsuite‐ID to a human symbol (e.g. 35 → mL)
            const rawUnitId = c.units || c.unit || item.units || '';
            const unitDef   = netsuiteUnits[rawUnitId];
