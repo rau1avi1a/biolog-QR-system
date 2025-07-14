@@ -6,6 +6,8 @@ import { jwtVerify } from 'jose';
 import db from '@/db';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 
 // Helper function to get user from JWT token
 async function getUserFromRequest(request) {
@@ -579,90 +581,49 @@ export async function POST(request) {
         }
       }
 
-      case 'workorder': {
-        const { 
-          batchId, 
-          assemblyItemId, 
-          quantity, 
-          startDate, 
-          endDate,
-          location,
-          subsidiary,
-          department 
-        } = body;
+case 'workorder': {
+  const { batchId, quantity } = body;
 
-        if (!quantity || quantity <= 0) {
-          return NextResponse.json({
-            success: false,
-            data: null,
-            error: 'Quantity is required and must be greater than 0'
-          }, { status: 400 });
-        }
+  // Validate inputs
+  if (!batchId) {
+    return NextResponse.json({
+      success: false,
+      data: null,
+      error: 'batchId is required'
+    }, { status: 400 });
+  }
+  if (!quantity || quantity <= 0) {
+    return NextResponse.json({
+      success: false,
+      data: null,
+      error: 'quantity is required and must be greater than 0'
+    }, { status: 400 });
+  }
 
-        const workOrderService = await db.netsuite.createWorkOrderService(user);
-        let result;
+  try {
+    // Enqueue the background job
+    const result = await db.services.AsyncWorkOrderService.queueWorkOrderCreation(
+      batchId,
+      quantity,
+      user._id
+    );
 
-        if (batchId) {
-          const batch = await db.services.batchService.getBatchById(batchId);
-          if (!batch) {
-            return NextResponse.json({
-              success: false,
-              data: null,
-              error: 'Batch not found'
-            }, { status: 404 });
-          }
+    return NextResponse.json({
+      success: true,
+      data: result,
+      error: null,
+      message: 'Work order creation started in background'
+    });
 
-          result = await workOrderService.createWorkOrderFromBatch(batch, quantity, {
-            startDate,
-            endDate,
-            location,
-            subsidiary,
-            department
-          });
-
-          // Update batch with work order info
-          await db.services.batchService.updateBatch(batchId, {
-            workOrderId: result.workOrder.tranId || result.workOrder.id,
-            workOrderCreated: true,
-            workOrderCreatedAt: new Date(),
-            workOrderStatus: 'created',
-            netsuiteWorkOrderData: {
-              workOrderId: result.workOrder.id,
-              tranId: result.workOrder.tranId,
-              bomId: result.workOrder.bomId,
-              revisionId: result.workOrder.revisionId,
-              quantity: quantity,
-              status: result.workOrder.status,
-              createdAt: new Date(),
-              lastSyncAt: new Date()
-            }
-          });
-
-        } else if (assemblyItemId) {
-          result = await workOrderService.createWorkOrder({
-            assemblyItemId,
-            quantity,
-            startDate,
-            endDate,
-            location,
-            subsidiary,
-            department
-          });
-        } else {
-          return NextResponse.json({
-            success: false,
-            data: null,
-            error: 'Either batchId or assemblyItemId is required'
-          }, { status: 400 });
-        }
-
-        return NextResponse.json({
-          success: true,
-          data: result,
-          error: null,
-          message: 'Work order created successfully'
-        });
-      }
+  } catch (err) {
+    console.error('Failed to queue work order:', err);
+    return NextResponse.json({
+      success: false,
+      data: null,
+      error: `Could not enqueue work order: ${err.message}`
+    }, { status: 500 });
+  }
+}
 
       case 'mapping': {
         const { components } = body;

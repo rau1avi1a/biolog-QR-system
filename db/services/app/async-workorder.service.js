@@ -6,6 +6,41 @@ import db from '@/db/index.js';
  * Uses single db import for all database operations and service dependencies
  */
 export class AsyncWorkOrderService {
+  static locks = new Map(); // Static lock map for all instances
+
+    static async acquireLock(batchId, timeoutMs = 30000) {
+    const lockKey = `batch-${batchId}`;
+    
+    if (this.locks.has(lockKey)) {
+      console.log(`⏳ Waiting for lock on batch ${batchId}...`);
+      // Wait for existing lock to release
+      await new Promise(resolve => {
+        const checkLock = () => {
+          if (!this.locks.has(lockKey)) {
+            resolve();
+          } else {
+            setTimeout(checkLock, 100);
+          }
+        };
+        checkLock();
+      });
+    }
+
+        // Set the lock
+    this.locks.set(lockKey, Date.now());
+    console.log(`🔒 Acquired lock for batch ${batchId}`);
+    
+    // Auto-release after timeout to prevent deadlocks
+    setTimeout(() => {
+      this.releaseLock(batchId);
+    }, timeoutMs);
+  }
+  
+  static releaseLock(batchId) {
+    const lockKey = `batch-${batchId}`;
+    this.locks.delete(lockKey);
+    console.log(`🔓 Released lock for batch ${batchId}`);
+  }
   
   // Lazy model getters
   static get User() {
@@ -29,47 +64,91 @@ export class AsyncWorkOrderService {
    * Queue a work order creation job
    */
   static async queueWorkOrderCreation(batchId, quantity, userId = null) {
-    await this.connect();
-    
     try {
-      // CRITICAL: Use explicit database update with verification
+      await this.acquireLock(batchId);
+      await this.connect();
+      
+      // 🔥 CRITICAL: Check current state AFTER acquiring lock
+      const currentBatch = await this.Batch.findById(batchId).lean();
+      if (!currentBatch) {
+        throw new Error('Batch not found');
+      }
+      
+      // Prevent duplicate work order creation
+      if (currentBatch.workOrderCreated && currentBatch.workOrderStatus === 'created') {
+        console.log(`⚠️ Work order already exists for batch ${batchId}, skipping`);
+        return {
+          success: true,
+          batchId,
+          status: 'already_exists',
+          message: 'Work order already created'
+        };
+      }
+      
+      if (currentBatch.workOrderStatus === 'creating') {
+        console.log(`⚠️ Work order creation already in progress for batch ${batchId}, skipping`);
+        return {
+          success: true,
+          batchId,
+          status: 'already_creating',
+          message: 'Work order creation already in progress'
+        };
+      }
+      
+      // Proceed with creation only if not already created/creating
       const updateResult = await this.Batch.updateOne(
-        { _id: batchId },
+        { 
+          _id: batchId,
+          $or: [
+            { workOrderStatus: { $ne: 'creating' } },
+            { workOrderStatus: { $exists: false } }
+          ]
+        },
         {
           $set: {
             workOrderCreated: true,
             workOrderStatus: 'creating',
-            workOrderCreatedAt: new Date().toISOString(), // FIXED: Convert to ISO string
+            workOrderCreatedAt: new Date(),
             workOrderId: `PENDING-${Date.now()}`,
-            workOrderError: null, // Clear any previous errors
+            workOrderError: null,
             workOrderFailedAt: null
           }
         }
       );
-  
+
       if (updateResult.matchedCount === 0) {
-        throw new Error('Batch not found');
+        console.log(`⚠️ Could not update batch ${batchId} - likely already being processed`);
+        return {
+          success: true,
+          batchId,
+          status: 'race_condition_avoided',
+          message: 'Another process is already handling this work order'
+        };
       }
-  
+
       console.log('✓ Batch status set to creating, starting background job');
-  
-      // Start the background job with better error handling
+
+      // Start the background job
       setImmediate(() => {
         this.createWorkOrderInBackground(batchId, quantity, userId)
           .catch(error => {
             console.error('❌ Background work order creation failed:', error);
             this.handleWorkOrderFailure(batchId, error.message);
+          })
+          .finally(() => {
+            this.releaseLock(batchId);
           });
       });
-  
+
       return {
         success: true,
         batchId,
         status: 'creating',
         message: 'Work order creation started in background'
       };
-  
+
     } catch (error) {
+      this.releaseLock(batchId);
       console.error('Error queuing work order creation:', error);
       throw error;
     }
@@ -355,57 +434,99 @@ static async createWorkOrderInBackground(batchId, quantity, userId = null) {
   /**
    * Queue an assembly build creation job (NEW)
    */
-  static async queueAssemblyBuildCreation(batchId, submissionData, userId = null) {
-    await this.connect();
-    
+
+    static async queueAssemblyBuildCreation(batchId, submissionData, userId = null) {
     try {
-      console.log('🏗️ Queueing assembly build creation for batch:', batchId);
+      await this.acquireLock(batchId);
+      await this.connect();
       
-      // CRITICAL: Mark batch as assembly build creating
+      const currentBatch = await this.Batch.findById(batchId).lean();
+      if (!currentBatch) {
+        throw new Error('Batch not found for assembly build creation');
+      }
+      
+      // Prevent duplicate assembly build creation
+      if (currentBatch.assemblyBuildCreated) {
+        console.log(`⚠️ Assembly build already exists for batch ${batchId}, skipping`);
+        return {
+          success: true,
+          batchId,
+          status: 'already_exists',
+          message: 'Assembly build already created'
+        };
+      }
+      
+      if (currentBatch.assemblyBuildStatus === 'creating') {
+        console.log(`⚠️ Assembly build creation already in progress for batch ${batchId}, skipping`);
+        return {
+          success: true,
+          batchId,
+          status: 'already_creating',
+          message: 'Assembly build creation already in progress'
+        };
+      }
+      
+      // Proceed only if not already created/creating
       const updateResult = await this.Batch.updateOne(
-        { _id: batchId },
+        { 
+          _id: batchId,
+          assemblyBuildCreated: { $ne: true },
+          $or: [
+            { assemblyBuildStatus: { $ne: 'creating' } },
+            { assemblyBuildStatus: { $exists: false } }
+          ]
+        },
         {
           $set: {
-            assemblyBuildCreated: false, // Not created yet
-            assemblyBuildStatus: 'creating', // New field to track assembly build status
-            assemblyBuildCreatedAt: null, // Will be set when complete
-            assemblyBuildId: `PENDING-AB-${Date.now()}`, // Temporary ID
+            assemblyBuildCreated: false,
+            assemblyBuildStatus: 'creating',
+            assemblyBuildCreatedAt: null,
+            assemblyBuildId: `PENDING-AB-${Date.now()}`,
             assemblyBuildError: null,
             assemblyBuildFailedAt: null,
-            // Keep work order completion status
             workOrderCompleted: false,
             workOrderCompletedAt: null
           }
         }
       );
-  
+
       if (updateResult.matchedCount === 0) {
-        throw new Error('Batch not found for assembly build creation');
+        console.log(`⚠️ Could not update batch ${batchId} - assembly build likely already being processed`);
+        return {
+          success: true,
+          batchId,
+          status: 'race_condition_avoided',
+          message: 'Another process is already handling this assembly build'
+        };
       }
-  
+
       console.log('✓ Batch status set to assembly build creating, starting background job');
-  
-      // Start the background assembly build job
+
       setImmediate(() => {
         this.createAssemblyBuildInBackground(batchId, submissionData, userId)
           .catch(error => {
             console.error('❌ Background assembly build creation failed:', error);
             this.handleAssemblyBuildFailure(batchId, error.message);
+          })
+          .finally(() => {
+            this.releaseLock(batchId);
           });
       });
-  
+
       return {
         success: true,
         batchId,
         status: 'creating_assembly_build',
         message: 'Assembly build creation started in background'
       };
-  
+
     } catch (error) {
+      this.releaseLock(batchId);
       console.error('Error queuing assembly build creation:', error);
       throw error;
     }
   }
+
 
   /**
    * Create assembly build in background (NEW)
@@ -680,7 +801,7 @@ static async createWorkOrderInBackground(batchId, quantity, userId = null) {
       return { error: error.message };
     }
   }
-  
+
 
 
 /**
@@ -741,43 +862,44 @@ static async handleWorkOrderFailure(batchId, errorMessage) {
   /**
    * Enhanced NetSuite work order creation with timeout using db.services
    */
+  /**
+   */
   static async createNetSuiteWorkOrder(batch, quantity, user) {
-    try {
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('NetSuite work order creation timed out')), 60000)
+    // Helper to actually call NetSuite
+    const callNetSuite = async () => {
+      const workOrderService = await db.netsuite.createWorkOrderService(user);
+      const result = await workOrderService.createWorkOrderFromBatch(batch, quantity);
+      return {
+        id:       result.workOrder.tranId,
+        tranId:   result.workOrder.tranId,
+        netsuiteId: result.workOrder.id,
+        status:   result.workOrder.status,
+        orderStatus: result.workOrder.orderStatus,
+        bomId:    result.workOrder.bomId,
+        revisionId: result.workOrder.revisionId,
+        quantity,
+        source:   'netsuite'
+      };
+    };
+
+    // Wrap in a promise with timeout
+    const withTimeout = (promise, ms) => {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('NetSuite request timed out')), ms)
       );
+      return Promise.race([promise(), timeout]);
+    };
 
-      const workOrderPromise = (async () => {
-        // Use db.services for NetSuite work order service
-        const workOrderService = await db.netsuite.createWorkOrderService(user);
-        const result = await workOrderService.createWorkOrderFromBatch(batch, quantity);
-        
-        console.log('✅ NetSuite work order created:', {
-          tranId: result.workOrder.tranId,
-          internalId: result.workOrder.id,
-          status: result.workOrder.status
-        });
-        
-        return {
-          id: result.workOrder.tranId,
-          tranId: result.workOrder.tranId,
-          netsuiteId: result.workOrder.id,
-          status: result.workOrder.status,
-          orderStatus: result.workOrder.orderStatus,
-          bomId: result.workOrder.bomId,
-          revisionId: result.workOrder.revisionId,
-          quantity: quantity,
-          source: 'netsuite'
-        };
-      })();
-
-      return await Promise.race([workOrderPromise, timeoutPromise]);
-    } catch (error) {
-      console.error('❌ NetSuite work order creation failed:', error);
-      throw error;
+    // Try once, catch timeout, then retry one more time
+    try {
+      return await withTimeout(callNetSuite, 240_000);
+    } catch (err) {
+      console.warn('First NetSuite attempt failed:', err.message, '— retrying once...');
+      // second attempt
+      return await withTimeout(callNetSuite, 240_000);
     }
   }
+
 
   /**
    * Create local work order fallback
