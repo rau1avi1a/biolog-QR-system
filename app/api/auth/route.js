@@ -5,6 +5,9 @@ import { NextResponse } from 'next/server';
 import db from '@/db';
 import { SignJWT, jwtVerify } from 'jose';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function POST(request) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action') || 'login'; // login, logout, register

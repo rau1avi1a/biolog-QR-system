@@ -1,6 +1,9 @@
 // app/api/index.js - Unified Backend API Client
 import { useMemo } from 'react';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 /**
  * Unified Backend API Client
  * 

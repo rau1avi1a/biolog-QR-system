@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 async function getAuthUser(request) {
   try {
     const token = request.cookies.get('auth_token')?.value;
