@@ -8,7 +8,7 @@
     "dev": "next dev --turbopack",
     "build": "MONGODB_URI=mongodb://localhost/dummy next build",
     "build:local": "next build",
-    "start": "next start --hostname 0.0.0.0 --port $PORT",
+    "start": "next start -H 0.0.0.0 -p $PORT",
     "lint": "next lint"
   },
   "dependencies": {
