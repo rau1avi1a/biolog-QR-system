@@ -57,8 +57,8 @@ import {
   Clock,
   MapPin
 } from 'lucide-react';
-// FIXED: Import from client-api instead of api
-import { api } from '../lib/client-api';
+// FIXED: Import the new API structure
+import { itemsApi, hasApiError, extractApiData, handleApiError } from '../lib/api';
 
 const formatDate = (dateString) => {
   if (!dateString) return 'N/A';
@@ -364,13 +364,18 @@ export default function TxnTable({
     if (!selectedTransaction || !reverseReason.trim()) return;
     
     try {
-      await api.reverseTransaction(selectedTransaction.txnId, reverseReason.trim());
+      const result = await itemsApi.transactions.reverse(selectedTransaction.txnId, reverseReason.trim());
+      
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
+      }
+      
       setShowReverseDialog(false);
       setReverseReason('');
       onRefresh();
     } catch (error) {
       console.error('Error reversing transaction:', error);
-      alert('Failed to reverse transaction');
+      alert('Failed to reverse transaction: ' + error.message);
     }
   };
 
@@ -760,6 +765,7 @@ export default function TxnTable({
                       </p>
                     </div>
                     <div>
+                      <Label className="text-xs text-muted-foreground">Item After</Label>
                       <p className="text-lg font-medium">
                         {selectedTransaction.itemQtyAfter} {item.uom}
                       </p>
