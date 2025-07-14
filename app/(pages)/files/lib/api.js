@@ -1,12 +1,9 @@
-// app/(pages)/files/lib/api.js - FINAL FIX: Correct data extraction
+// app/(pages)/files/lib/api.js - FIXED: Proper URL handling for batch operations
 
 import { api, hasError, extractData, getError } from '@/app/apiClient'
 
 /**
- * Files Page API Client - FINAL FIX
- * 
- * The issue was: wrapper functions were returning just arrays instead of 
- * the full { data, error } format expected by the frontend components.
+ * Files Page API Client - FIXED: Proper batch URL construction
  */
 
 // Helper function to handle API calls with proper error handling
@@ -15,7 +12,7 @@ async function handleApiCall(operation, apiCall) {
     console.log(`🚀 API Call: ${operation}`);
     const result = await apiCall();
     
-    // FIXED: Just return the result as-is, don't extract data
+    // Return the result as-is, don't extract data
     return result;
     
   } catch (error) {
@@ -33,10 +30,6 @@ export const filesApi = {
     async list(parentId = null) {
       return handleApiCall('folders.list', async () => {
         const result = await api.list.folders(parentId);
-        
-        // FIXED: Return the full data object, not just the folders array
-        // The frontend expects { data: {...}, error: null }
-        // NOT { data: [...], error: null }
         return result;
       });
     },
@@ -65,8 +58,6 @@ export const filesApi = {
     async list(folderId = null) {
       return handleApiCall('files.list', async () => {
         const result = await api.list.files(folderId);
-        
-        // FIXED: Return the full data object, not just the files array
         return result;
       });
     },
@@ -86,8 +77,6 @@ export const filesApi = {
     async search(query) {
       return handleApiCall('files.search', async () => {
         const result = await api.list.searchFiles(query);
-        
-        // FIXED: Return the full data object, not just the files array
         return result;
       });
     },
@@ -117,13 +106,11 @@ export const filesApi = {
     }
   },
 
-  // === BATCH OPERATIONS ===
+  // === BATCH OPERATIONS - FIXED ===
   batches: {
     async list(options = {}) {
       return handleApiCall('batches.list', async () => {
         const result = await api.list.batches(options);
-        
-        // FIXED: Return the full data object, not just the batches array
         return result;
       });
     },
@@ -131,15 +118,21 @@ export const filesApi = {
     async listByStatus(status) {
       return handleApiCall('batches.listByStatus', async () => {
         const result = await api.list.batchesByStatus(status);
-        
-        // FIXED: Return the full data object, not just the batches array
         return result;
       });
     },
 
+    // FIXED: Use direct client call to ensure proper URL construction
     async get(id) {
       return handleApiCall('batches.get', async () => {
-        return await api.get.batch(id);
+        console.log('🔍 Getting batch with ID:', id);
+        
+        // FIXED: Use direct API client call instead of the wrapper
+        // This ensures the URL is constructed correctly as /api/batches?id=123
+        const result = await api.client('batches').get(id);
+        
+        console.log('📊 Batch get result:', result);
+        return result;
       });
     },
 
@@ -191,15 +184,12 @@ export const filesApi = {
     async search(query, type = null) {
       return handleApiCall('items.search', async () => {
         const result = await api.list.searchItems(query, type);
-        
-        // FIXED: Return the full data object, not just the items array
         return result;
       });
     },
 
     async searchSolutions(query) {
       return handleApiCall('items.searchSolutions', async () => {
-        // Try this first - search all items and filter for solutions
         const result = await api.list.searchItems(query, 'solution');
         return result;
       });
@@ -215,10 +205,10 @@ export const filesApi = {
       return handleApiCall('items.getLots', async () => {
         const result = await api.get.itemLots(id);
         
-        // FIXED: Extract lots from nested structure for backward compatibility
+        // Extract lots from nested structure for backward compatibility
         if (result.data && result.data.lots) {
           return {
-            data: result.data.lots,  // Return just the lots array
+            data: result.data.lots,
             error: result.error
           };
         }
@@ -228,269 +218,226 @@ export const filesApi = {
     }
   },
 
-    // === ADD NETSUITE OPERATIONS ===
-    netsuite: {
-      /**
-       * Get NetSuite BOM for a solution by its NetSuite Internal ID
-       */
-      async getBOM(netsuiteInternalId) {
-        return handleApiCall('netsuite.getBOM', async () => {
-          const result = await api.custom.getNetSuiteBOM(netsuiteInternalId);
-          if (hasApiError(result)) {
-            throw new Error(handleApiError(result, 'Failed to fetch NetSuite BOM'));
-          }
-          // UNWRAP the inner data so importBOMWorkflow sees { recipe, components, … }
-          const bomData = extractApiData(result);
-          return bomData;
-        });
-      },
-  
-      /**
-       * Map NetSuite components to local chemicals/solutions
-       */
-      async mapComponents(components) {
-        return handleApiCall('netsuite.mapComponents', async () => {
-          console.log('🗺️ Mapping NetSuite components:', components.length);
-          
-          const result = await api.custom.mapNetSuiteComponents(components);
-          
-          if (hasApiError(result)) {
-            throw new Error(handleApiError(result, 'Failed to map NetSuite components'));
-          }
-          
-          return result;
-        });
-      },
-  
-      /**
-       * Import NetSuite BOM into a file
-       */
-/**
- * Import NetSuite BOM into a file - FIXED to use NetSuite import action with unit mapping
- */
-async importBOMToFile(fileId, bomData, mappingResults) {
-  return handleApiCall('netsuite.importBOMToFile', async () => {
-    console.log('📥 Importing BOM to file:', fileId);
-    
-    // FIXED: Use the NetSuite import action instead of manual component construction
-    // This ensures unit mapping happens in the backend
-    const result = await api.client('netsuite').custom('import', {
-      bomData: {
-        bomId: bomData.bomId,
-        bomName: bomData.bomName,
-        revisionId: bomData.revisionId,
-        revisionName: bomData.revisionName,
-        assemblyItemId: bomData.assemblyItemId,
-        components: bomData.recipe || bomData.components || []
-      },
-      fileId: fileId
-    }, 'POST');
-    
-    if (hasApiError(result)) {
-      throw new Error(handleApiError(result, 'Failed to import BOM to file'));
-    }
-    
-    return result;
-  });
-},
-
-  
-      /**
-       * Complete BOM import workflow: fetch BOM, map components, import to file
-       */
-      async importBOMWorkflow(fileId, solutionNetsuiteId) {
-        return handleApiCall('netsuite.importBOMWorkflow', async () => {
-          console.log('🚀 Starting complete BOM import workflow');
-          
-          try {
-            // Step 1: Fetch BOM from NetSuite
-            console.log('📥 Step 1: Fetching BOM from NetSuite...');
-            const bomResult = await this.getBOM(solutionNetsuiteId);
-            const bomData = extractApiData(bomResult);
-            
-            if (!bomData?.recipe || !Array.isArray(bomData.recipe)) {
-              throw new Error('Invalid BOM data received from NetSuite');
-            }
-  
-            // Step 2: Map components to local database
-            console.log('🗺️ Step 2: Mapping components to local database...');
-            const mappingResult = await this.mapComponents(bomData.recipe);
-            const mappingData = extractApiData(mappingResult);
-            
-            if (!mappingData?.mappingResults) {
-              throw new Error('Failed to map NetSuite components');
-            }
-  
-            // Step 3: Import to file
-            console.log('📝 Step 3: Importing to file...');
-            const importResult = await this.importBOMToFile(fileId, bomData, mappingData.mappingResults);
-            
-            // Return comprehensive result
-            return {
-              data: {
-                file: extractApiData(importResult),
-                bomData,
-                mappingResults: mappingData.mappingResults,
-                summary: {
-                  totalComponents: mappingData.mappingResults.length,
-                  mappedComponents: mappingData.mappingResults.filter(r => r.bestMatch).length,
-                  unmappedComponents: mappingData.mappingResults.filter(r => !r.bestMatch).length,
-                  exactMatches: mappingData.mappingResults.filter(r => r.bestMatch?.confidence === 1.0).length,
-                  highConfidenceMatches: mappingData.mappingResults.filter(r => r.bestMatch?.confidence >= 0.8 && r.bestMatch?.confidence < 1.0).length
-                }
-              },
-              error: null
-            };
-            
-          } catch (error) {
-            console.error('💥 BOM import workflow failed:', error);
-            return {
-              data: null,
-              error: error.message
-            };
-          }
-        });
-      },
-  
-      /**
-       * Test NetSuite connection
-       */
-      async testConnection() {
-        return handleApiCall('netsuite.testConnection', async () => {
-          const result = await api.custom.testNetSuite();
-          
-          if (hasApiError(result)) {
-            throw new Error(handleApiError(result, 'NetSuite connection test failed'));
-          }
-          
-          return result;
-        });
-      },
-  
-      /**
-       * Search NetSuite assembly items
-       */
-      async searchAssemblyItems(query) {
-        return handleApiCall('netsuite.searchAssemblyItems', async () => {
-          const result = await api.custom.searchNetSuiteItems(query);
-          
-          if (hasApiError(result)) {
-            throw new Error(handleApiError(result, 'Failed to search NetSuite items'));
-          }
-          
-          return result;
-        });
-      }
+  // === NETSUITE OPERATIONS ===
+  netsuite: {
+    async getBOM(netsuiteInternalId) {
+      return handleApiCall('netsuite.getBOM', async () => {
+        const result = await api.custom.getNetSuiteBOM(netsuiteInternalId);
+        if (hasApiError(result)) {
+          throw new Error(handleApiError(result, 'Failed to fetch NetSuite BOM'));
+        }
+        const bomData = extractApiData(result);
+        return bomData;
+      });
     },
 
-// === WORK ORDER OPERATIONS ===
-workOrders: {
-  async getStatus(batchId) {
-    return handleApiCall('workOrders.getStatus', async () => {
-      // FIXED: Use the dedicated work order status endpoint
-      const result = await api.client('batches').get(batchId, { action: 'workorder-status' });
-      
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      
-      // This should return the specific work order status data
-      return result;
-    });
-  },
-
-    // === ASSEMBLY BUILD OPERATIONS ===
-    assemblyBuild: {
-      async createFromBatch(batchId, submissionData) {
-        return handleApiCall('assemblyBuild.createFromBatch', async () => {
-          return await api.custom.createAssemblyBuildFromBatch(batchId, submissionData);
-        });
-      },
-  
-      async getStatus(assemblyBuildId) {
-        return handleApiCall('assemblyBuild.getStatus', async () => {
-          return await api.custom.getAssemblyBuildStatus(assemblyBuildId);
-        });
-      },
-  
-      async getForWorkOrder(workOrderId) {
-        return handleApiCall('assemblyBuild.getForWorkOrder', async () => {
-          return await api.custom.getAssemblyBuildsForWorkOrder(workOrderId);
-        });
-      },
-  
-      async create(data) {
-        return handleApiCall('assemblyBuild.create', async () => {
-          return await api.custom.createAssemblyBuild(data);
-        });
-      }
-    },
-
-  // Alternative direct call if the above doesn't work
-  async getStatusDirect(batchId) {
-    return handleApiCall('workOrders.getStatusDirect', async () => {
-      try {
-        const response = await fetch(`/api/batches?id=${batchId}&action=workorder-status`, {
-          headers: { 'Cache-Control': 'no-cache' }
-        });
+    async mapComponents(components) {
+      return handleApiCall('netsuite.mapComponents', async () => {
+        console.log('🗺️ Mapping NetSuite components:', components.length);
         
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const result = await api.custom.mapNetSuiteComponents(components);
+        
+        if (hasApiError(result)) {
+          throw new Error(handleApiError(result, 'Failed to map NetSuite components'));
         }
         
-        const result = await response.json();
         return result;
-      } catch (error) {
-        throw new Error(`Direct API call failed: ${error.message}`);
-      }
-    });
+      });
+    },
+
+    async importBOMToFile(fileId, bomData, mappingResults) {
+      return handleApiCall('netsuite.importBOMToFile', async () => {
+        console.log('📥 Importing BOM to file:', fileId);
+        
+        const result = await api.client('netsuite').custom('import', {
+          bomData: {
+            bomId: bomData.bomId,
+            bomName: bomData.bomName,
+            revisionId: bomData.revisionId,
+            revisionName: bomData.revisionName,
+            assemblyItemId: bomData.assemblyItemId,
+            components: bomData.recipe || bomData.components || []
+          },
+          fileId: fileId
+        }, 'POST');
+        
+        if (hasApiError(result)) {
+          throw new Error(handleApiError(result, 'Failed to import BOM to file'));
+        }
+        
+        return result;
+      });
+    },
+
+    async importBOMWorkflow(fileId, solutionNetsuiteId) {
+      return handleApiCall('netsuite.importBOMWorkflow', async () => {
+        console.log('🚀 Starting complete BOM import workflow');
+        
+        try {
+          // Step 1: Fetch BOM from NetSuite
+          console.log('📥 Step 1: Fetching BOM from NetSuite...');
+          const bomResult = await this.getBOM(solutionNetsuiteId);
+          const bomData = extractApiData(bomResult);
+          
+          if (!bomData?.recipe || !Array.isArray(bomData.recipe)) {
+            throw new Error('Invalid BOM data received from NetSuite');
+          }
+
+          // Step 2: Map components to local database
+          console.log('🗺️ Step 2: Mapping components to local database...');
+          const mappingResult = await this.mapComponents(bomData.recipe);
+          const mappingData = extractApiData(mappingResult);
+          
+          if (!mappingData?.mappingResults) {
+            throw new Error('Failed to map NetSuite components');
+          }
+
+          // Step 3: Import to file
+          console.log('📝 Step 3: Importing to file...');
+          const importResult = await this.importBOMToFile(fileId, bomData, mappingData.mappingResults);
+          
+          // Return comprehensive result
+          return {
+            data: {
+              file: extractApiData(importResult),
+              bomData,
+              mappingResults: mappingData.mappingResults,
+              summary: {
+                totalComponents: mappingData.mappingResults.length,
+                mappedComponents: mappingData.mappingResults.filter(r => r.bestMatch).length,
+                unmappedComponents: mappingData.mappingResults.filter(r => !r.bestMatch).length,
+                exactMatches: mappingData.mappingResults.filter(r => r.bestMatch?.confidence === 1.0).length,
+                highConfidenceMatches: mappingData.mappingResults.filter(r => r.bestMatch?.confidence >= 0.8 && r.bestMatch?.confidence < 1.0).length
+              }
+            },
+            error: null
+          };
+          
+        } catch (error) {
+          console.error('💥 BOM import workflow failed:', error);
+          return {
+            data: null,
+            error: error.message
+          };
+        }
+      });
+    },
+
+    async testConnection() {
+      return handleApiCall('netsuite.testConnection', async () => {
+        const result = await api.custom.testNetSuite();
+        
+        if (hasApiError(result)) {
+          throw new Error(handleApiError(result, 'NetSuite connection test failed'));
+        }
+        
+        return result;
+      });
+    },
+
+    async searchAssemblyItems(query) {
+      return handleApiCall('netsuite.searchAssemblyItems', async () => {
+        const result = await api.custom.searchNetSuiteItems(query);
+        
+        if (hasApiError(result)) {
+          throw new Error(handleApiError(result, 'Failed to search NetSuite items'));
+        }
+        
+        return result;
+      });
+    }
   },
 
-  async create(batchId, quantity, workOrderData = {}) {
-    return handleApiCall('workOrders.create', async () => {
-      console.log('🚀 Creating work order via NetSuite API');
-      console.log('📊 Work order data:', { batchId, quantity, ...workOrderData });
-      
-      // FIXED: Use NetSuite endpoint for work order creation
-      const data = {
-        batchId,
-        quantity,
-        startDate: workOrderData.startDate,
-        endDate: workOrderData.endDate,
-        location: workOrderData.location,
-        subsidiary: workOrderData.subsidiary,
-        department: workOrderData.department
-      };
-      
-      return await api.client('netsuite').custom('workorder', data, 'POST');
-    });
-  }
-},
+  // === WORK ORDER OPERATIONS ===
+  workOrders: {
+    async getStatus(batchId) {
+      return handleApiCall('workOrders.getStatus', async () => {
+        // FIXED: Use direct client call for work order status
+        const result = await api.client('batches').get(batchId, { action: 'workorder-status' });
+        
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        
+        return result;
+      });
+    },
 
-  // Alternative method that might match your backend better
-  async createFromBatch(batchId, workOrderData) {
-    return handleApiCall('workOrders.createFromBatch', async () => {
-      console.log('🚀 Creating work order from batch:', batchId);
-      
-      // Try the netsuite endpoint if that's where work orders are handled
-      return await api.client('netsuite').custom('workorder', {
-        batchId,
-        ...workOrderData
-      }, 'POST');
-    });
+    async getStatusDirect(batchId) {
+      return handleApiCall('workOrders.getStatusDirect', async () => {
+        try {
+          const response = await fetch(`/api/batches?id=${batchId}&action=workorder-status`, {
+            headers: { 'Cache-Control': 'no-cache' }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          
+          const result = await response.json();
+          return result;
+        } catch (error) {
+          throw new Error(`Direct API call failed: ${error.message}`);
+        }
+      });
+    },
+
+    async create(batchId, quantity, workOrderData = {}) {
+      return handleApiCall('workOrders.create', async () => {
+        console.log('🚀 Creating work order via NetSuite API');
+        console.log('📊 Work order data:', { batchId, quantity, ...workOrderData });
+        
+        const data = {
+          batchId,
+          quantity,
+          startDate: workOrderData.startDate,
+          endDate: workOrderData.endDate,
+          location: workOrderData.location,
+          subsidiary: workOrderData.subsidiary,
+          department: workOrderData.department
+        };
+        
+        return await api.client('netsuite').custom('workorder', data, 'POST');
+      });
+    },
+
+    async createFromBatch(batchId, workOrderData) {
+      return handleApiCall('workOrders.createFromBatch', async () => {
+        console.log('🚀 Creating work order from batch:', batchId);
+        
+        return await api.client('netsuite').custom('workorder', {
+          batchId,
+          ...workOrderData
+        }, 'POST');
+      });
+    }
   },
 
-  // Alternative method that might match your backend better
-  async createFromBatch(batchId, workOrderData) {
-    return handleApiCall('workOrders.createFromBatch', async () => {
-      console.log('🚀 Creating work order from batch:', batchId);
-      
-      // Try the netsuite endpoint if that's where work orders are handled
-      return await api.client('netsuite').custom('workorder', {
-        batchId,
-        ...workOrderData
-      }, 'POST');
-    });
+  // === ASSEMBLY BUILD OPERATIONS ===
+  assemblyBuild: {
+    async createFromBatch(batchId, submissionData) {
+      return handleApiCall('assemblyBuild.createFromBatch', async () => {
+        return await api.custom.createAssemblyBuildFromBatch(batchId, submissionData);
+      });
+    },
+
+    async getStatus(assemblyBuildId) {
+      return handleApiCall('assemblyBuild.getStatus', async () => {
+        return await api.custom.getAssemblyBuildStatus(assemblyBuildId);
+      });
+    },
+
+    async getForWorkOrder(workOrderId) {
+      return handleApiCall('assemblyBuild.getForWorkOrder', async () => {
+        return await api.custom.getAssemblyBuildsForWorkOrder(workOrderId);
+      });
+    },
+
+    async create(data) {
+      return handleApiCall('assemblyBuild.create', async () => {
+        return await api.custom.createAssemblyBuild(data);
+      });
+    }
   },
 
   // === WORKFLOW HELPERS ===
@@ -537,7 +484,7 @@ workOrders: {
   }
 };
 
-// === CONVENIENCE FUNCTIONS (aligned with GUIDE.md) ===
+// === CONVENIENCE FUNCTIONS ===
 
 /**
  * Check if a result has an error and handle it consistently
@@ -585,8 +532,6 @@ export function normalizeFileData(file) {
     // Include all original properties
     ...file
   };
-
-  
 }
 
 // Export individual API modules for focused imports
