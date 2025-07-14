@@ -8,11 +8,15 @@ COPY package*.json ./
 # Create public directory before npm install
 RUN mkdir -p public
 
-RUN npm ci --omit=dev
+# Install ALL dependencies (including dev) for building
+RUN npm ci
 
 # Copy source and build
 COPY . .
 RUN npm run build
+
+# Remove dev dependencies after build
+RUN npm prune --omit=dev
 
 # Expose port
 EXPOSE 8080
