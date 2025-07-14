@@ -7,7 +7,7 @@
     "postinstall": "cp ./node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs ./public/",
     "dev": "next dev --turbopack",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p $PORT",    
     "lint": "next lint"
   },
   "dependencies": {
