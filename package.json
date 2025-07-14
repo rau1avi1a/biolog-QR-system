@@ -6,8 +6,9 @@
   "scripts": {
     "postinstall": "cp ./node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs ./public/",
     "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start -p $PORT",    
+    "build": "MONGODB_URI=mongodb://localhost/dummy next build",
+    "build:local": "next build",
+    "start": "next start -p ${PORT:-3000}",
     "lint": "next lint"
   },
   "dependencies": {
