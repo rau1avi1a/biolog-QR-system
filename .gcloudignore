@@ -1,0 +1,2 @@
+# Don't ignore Dockerfile - we want to use it
+!Dockerfile
