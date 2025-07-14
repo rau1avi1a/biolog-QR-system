@@ -39,20 +39,140 @@ export async function GET(request) {
     await db.connect();
 
     if (id) {
-      if (action === 'lots') {
-        // GET /api/items?id=123&action=lots&lotId=456 (optional)
-        const lots = await db.services.itemService.getLots(id, lotId);
-        
-        return NextResponse.json({ 
-          success: true, 
+
+      // Add this case to your GET function in /api/items/route.js
+// Right after the existing cases and before the final search logic
+
+if (action === 'findLot') {
+  // GET /api/items?action=findLot&lotId=123
+  const lotId = searchParams.get('lotId');
+  
+  if (!lotId) {
+    return NextResponse.json({ 
+      success: false, 
+      data: null,
+      error: 'lotId parameter is required'
+    }, { status: 400 });
+  }
+
+  try {
+    // Search for an item that contains this lot ID
+    const itemWithLot = await db.models.Item.findOne({ 
+      "Lots._id": new mongoose.Types.ObjectId(lotId) 
+    }).lean();
+    
+    if (itemWithLot) {
+      const lot = itemWithLot.Lots.find(l => l._id.toString() === lotId);
+      
+      if (lot) {
+        return NextResponse.json({
+          success: true,
           data: {
-            lots,
-            count: lots.length,
-            itemId: id
+            type: 'lot',
+            lot: {
+              _id: lot._id.toString(),
+              lotNumber: lot.lotNumber || '',
+              quantity: Number(lot.quantity) || 0,
+              qrCodeUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/${lot._id}`,
+              createdAt: lot.createdAt,
+              updatedAt: lot.updatedAt,
+              expiryDate: lot.expiryDate,
+              receivedDate: lot.receivedDate || lot.createdAt,
+              location: lot.location
+            },
+            item: {
+              _id: itemWithLot._id.toString(),
+              displayName: itemWithLot.displayName || '',
+              sku: itemWithLot.sku || '',
+              itemType: itemWithLot.itemType || '',
+              uom: itemWithLot.uom || 'ea',
+              description: itemWithLot.description || '',
+              location: itemWithLot.location || '',
+              cost: Number(itemWithLot.cost) || 0
+            }
           },
           error: null
         });
       }
+    }
+    
+    return NextResponse.json({
+      success: false,
+      data: null,
+      error: 'Lot not found'
+    }, { status: 404 });
+    
+  } catch (error) {
+    console.error('Error finding lot:', error);
+    return NextResponse.json({
+      success: false,
+      data: null,
+      error: 'Error searching for lot'
+    }, { status: 500 });
+  }
+}
+
+// Replace or update your existing 'lots' action in /api/items/route.js
+
+if (action === 'lots') {
+  // GET /api/items?id=123&action=lots&lotId=456 (optional)
+  try {
+    console.log('🔍 Getting lots for item:', id, 'lotId:', lotId);
+    
+    const item = await db.models.Item.findById(id).lean();
+    
+    if (!item) {
+      console.log('❌ Item not found:', id);
+      return NextResponse.json({ 
+        success: false, 
+        data: null,
+        error: 'Item not found'
+      }, { status: 404 });
+    }
+    
+    console.log('📦 Item found:', item.displayName, 'Lots count:', item.Lots?.length || 0);
+    
+    // Transform the lots to match expected format
+    let lots = (item.Lots || []).map(lot => ({
+      _id: lot._id.toString(),
+      id: lot._id.toString(), // Add fallback id field
+      lotNumber: lot.lotNumber || '',
+      quantity: Number(lot.quantity) || 0,
+      createdAt: lot.createdAt,
+      updatedAt: lot.updatedAt,
+      expiryDate: lot.expiryDate,
+      receivedDate: lot.receivedDate || lot.createdAt, // Fallback to createdAt
+      location: lot.location || item.location, // Fallback to item location
+      vendorLotNumber: lot.vendorLotNumber
+    }));
+    
+    // If specific lotId requested, filter to that lot
+    if (lotId) {
+      lots = lots.filter(lot => lot._id === lotId || lot.id === lotId);
+      console.log('🎯 Filtered to specific lot:', lotId, 'Found:', lots.length);
+    }
+    
+    console.log('✅ Returning lots:', lots.length, 'lots');
+    
+    return NextResponse.json({ 
+      success: true, 
+      data: {
+        lots,
+        count: lots.length,
+        itemId: id,
+        itemName: item.displayName
+      },
+      error: null
+    });
+  } catch (error) {
+    console.error('❌ Error in lots action:', error);
+    return NextResponse.json({ 
+      success: false, 
+      data: null,
+      error: 'Error fetching lots: ' + error.message
+    }, { status: 500 });
+  }
+}
       
       if (action === 'transactions') {
         // GET /api/items?id=123&action=transactions

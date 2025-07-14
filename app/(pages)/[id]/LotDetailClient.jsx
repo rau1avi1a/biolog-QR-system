@@ -42,8 +42,8 @@ import {
 } from 'lucide-react';
 import QRCodeGenerator from '@/app/(pages)/home/QRCodeGenerator';
 import TxnTable from './components/TxnTable';
-// FIXED: Import from client-api instead of api
-import { api } from './lib/client-api';
+// FIXED: Import the new API structure
+import { itemsApi, hasApiError, extractApiData, handleApiError } from './lib/api';
 
 // Custom hook to get user data from your auth system
 const useAuth = () => {
@@ -113,10 +113,14 @@ export default function LotDetailClient({ lot, item, transactions }) {
     try {
       setLotTransactionData(prev => ({ ...prev, loading: true }));
       
-      const response = await api.getLotTransactions(item._id, lot.lotNumber);
+      const response = await itemsApi.getLotTransactions(item._id, lot.lotNumber);
+      
+      if (hasApiError(response)) {
+        throw new Error(handleApiError(response));
+      }
       
       setLotTransactionData({
-        transactions: response.transactions || [],
+        transactions: extractApiData(response)?.transactions || [],
         loading: false,
         error: null
       });
@@ -188,15 +192,15 @@ export default function LotDetailClient({ lot, item, transactions }) {
     setIsDeleting(true);
     
     try {
-      // Use the API function instead of direct fetch
-      const data = await api.deleteLot(item._id, lot._id);
-  
-      if (data.success) {
-        alert(`Lot "${lot.lotNumber}" has been deleted successfully.`);
-        router.push(`/${item._id}`); // Redirect to item page
-      } else {
-        alert(data.error || 'Failed to delete lot');
+      // Use the new API structure
+      const result = await itemsApi.deleteLot(item._id, lot._id);
+      
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
+
+      alert(`Lot "${lot.lotNumber}" has been deleted successfully.`);
+      router.push(`/${item._id}`); // Redirect to item page
     } catch (error) {
       console.error('Delete error:', error);
       alert('Failed to delete lot: ' + error.message);

@@ -1,251 +1,380 @@
-// app/[id]/lib/api.js
-import db from '@/db';
-import mongoose from 'mongoose';
+// app/(pages)/[id]/lib/api.js - Items/Lots API Client
+
+import { api, hasError, extractData, getError } from '@/app/apiClient'
 
 /**
- * Get either an Item or Lot by ID
- * @param {string} id - MongoDB ObjectId as string
- * @returns {Promise<{type: 'item'|'lot'|null, data: object|null}>}
+ * Items/Lots Page API Client
+ * 
+ * Following the same pattern as the files API for consistency
  */
-export async function getItemOrLot(id) {
-  await db.connect();
-  
-  // Validate MongoDB ObjectId format
-  if (!id.match(/^[0-9a-fA-F]{24}$/)) {
-    return { type: null, data: null };
-  }
-  
-  // Try to find it as an Item first
-  const item = await db.models.Item.findById(id).lean();
-  
-  if (item) {
-    return {
-      type: 'item',
-      data: formatItemData(item)
+
+// Helper function to handle API calls with proper error handling
+async function handleApiCall(operation, apiCall) {
+  try {
+    console.log(`🚀 API Call: ${operation}`);
+    const result = await apiCall();
+    
+    // Return the result as-is, don't extract data here
+    return result;
+    
+  } catch (error) {
+    console.error(`💥 API Exception: ${operation}`, error);
+    return { 
+      data: null, 
+      error: error.message || 'An error occurred' 
     };
   }
+}
 
-  // If not found as an Item, search for it as a Lot within Items
-  try {
-    // Use mongoose.Types.ObjectId for the query
-    const itemWithLot = await db.models.Item.findOne({ 
-      "Lots._id": new mongoose.Types.ObjectId(id) 
-    }).lean();
-    
-    if (itemWithLot) {
-      const lot = itemWithLot.Lots.find(l => l._id.toString() === id);
+export const itemsApi = {
+  // === ITEM OPERATIONS ===
+  items: {
+    async get(id) {
+      return handleApiCall('items.get', async () => {
+        return await api.get.item(id);
+      });
+    },
+
+    async getWithLots(id) {
+      return handleApiCall('items.getWithLots', async () => {
+        return await api.get.itemWithLots(id);
+      });
+    },
+
+    async search(query, type = null) {
+      return handleApiCall('items.search', async () => {
+        return await api.list.searchItems(query, type);
+      });
+    },
+
+    async searchSolutions(query) {
+      return handleApiCall('items.searchSolutions', async () => {
+        return await api.list.searchSolutions(query);
+      });
+    },
+
+    async update(id, data) {
+      return handleApiCall('items.update', async () => {
+        return await api.update.item(id, data);
+      });
+    },
+
+    async updateDetails(id, details) {
+      return handleApiCall('items.updateDetails', async () => {
+        return await api.update.itemDetails(id, details);
+      });
+    }
+  },
+
+  // === TRANSACTION OPERATIONS ===
+  transactions: {
+    async getForItem(itemId, options = {}) {
+      return handleApiCall('transactions.getForItem', async () => {
+        return await api.get.itemTransactions(itemId, options);
+      });
+    },
+
+    async getForLot(itemId, lotId, options = {}) {
+      return handleApiCall('transactions.getForLot', async () => {
+        return await api.get.lotTransactions(itemId, lotId, options);
+      });
+    },
+
+    async getDetails(txnId) {
+      return handleApiCall('transactions.getDetails', async () => {
+        return await api.get.transaction(txnId);
+      });
+    },
+
+    async reverse(txnId, reason) {
+      return handleApiCall('transactions.reverse', async () => {
+        return await api.remove.transaction(txnId, reason);
+      });
+    },
+
+    async create(itemId, transactionData) {
+      return handleApiCall('transactions.create', async () => {
+        return await api.create.transaction(itemId, transactionData);
+      });
+    },
+
+    async createInventoryAdjustment(itemId, adjustments) {
+      return handleApiCall('transactions.createInventoryAdjustment', async () => {
+        return await api.create.inventoryAdjustment(itemId, adjustments);
+      });
+    }
+  },
+
+  // === LOT OPERATIONS ===
+  lots: {
+    async getForItem(itemId, lotId = null) {
+      return handleApiCall('lots.getForItem', async () => {
+        return await api.get.itemLots(itemId, lotId);
+      });
+    },
+
+    async update(itemId, lotId, lotData) {
+      return handleApiCall('lots.update', async () => {
+        return await api.update.itemLot(itemId, lotId, lotData);
+      });
+    },
+
+    async delete(itemId, lotId) {
+      return handleApiCall('lots.delete', async () => {
+        return await api.remove.itemLot(itemId, lotId);
+      });
+    },
+
+    async getTransactions(itemId, lotId, options = {}) {
+      return handleApiCall('lots.getTransactions', async () => {
+        return await api.custom.getLotTransactions(itemId, lotId, options);
+      });
+    }
+  },
+
+  // === STATS OPERATIONS ===
+  stats: {
+    async getForItem(itemId, startDate = null, endDate = null) {
+      return handleApiCall('stats.getForItem', async () => {
+        return await api.get.itemStats(itemId, startDate, endDate);
+      });
+    },
+
+    async getTransactionStats(itemId, startDate = null, endDate = null) {
+      return handleApiCall('stats.getTransactionStats', async () => {
+        return await api.custom.getItemTransactionStats(itemId, startDate, endDate);
+      });
+    }
+  },
+
+  // === DELETE OPERATIONS ===
+  async deleteItem(itemId, force = false) {
+    return handleApiCall('items.delete', async () => {
+      if (force) {
+        return await api.remove.itemWithForce(itemId);
+      } else {
+        return await api.remove.item(itemId);
+      }
+    });
+  },
+
+  async deleteLot(itemId, lotId) {
+    return handleApiCall('lots.delete', async () => {
+      return await api.remove.itemLot(itemId, lotId);
+    });
+  },
+
+  // === CONVENIENCE METHODS ===
+  
+  // Get enhanced transaction data for items
+  async getItemTransactions(itemId, options = {}) {
+    return handleApiCall('items.getItemTransactions', async () => {
+      const result = await api.custom.getItemTransactions(itemId, options);
       
-      if (lot) {
+      if (hasError(result)) {
+        throw new Error(getError(result));
+      }
+      
+      return result;
+    });
+  },
+
+  // Get transaction statistics for items
+  async getItemTransactionStats(itemId, startDate = null, endDate = null) {
+    return handleApiCall('items.getItemTransactionStats', async () => {
+      const result = await api.custom.getItemTransactionStats(itemId, startDate, endDate);
+      
+      if (hasError(result)) {
+        throw new Error(getError(result));
+      }
+      
+      return result;
+    });
+  },
+
+  // Get lot-specific transaction history
+  async getLotTransactions(itemId, lotNumber, options = {}) {
+    return handleApiCall('lots.getLotTransactions', async () => {
+      const params = new URLSearchParams({
+        id: itemId,
+        action: 'transactions',
+        lotNumber: lotNumber
+      });
+      
+      if (options.startDate) params.append('startDate', options.startDate);
+      if (options.endDate) params.append('endDate', options.endDate);
+      if (options.limit) params.append('limit', options.limit.toString());
+
+      const response = await fetch(`/api/items?${params}`, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch lot transactions');
+      }
+      
+      return response.json();
+    });
+  },
+
+  // Get item or lot by ID (for the dynamic route)
+  async getItemOrLot(id) {
+    return handleApiCall('items.getItemOrLot', async () => {
+      try {
+        // Try to get it as an item first
+        const itemResult = await api.get.item(id);
+        
+        if (!hasError(itemResult)) {
+          const itemData = extractData(itemResult);
+          
+          // Also get the lots for this item
+          const lotsResult = await api.get.itemLots(id);
+          const lots = hasError(lotsResult) ? [] : extractData(lotsResult)?.lots || [];
+          
+          return {
+            data: {
+              type: 'item',
+              data: {
+                ...itemData,
+                lots: lots
+              }
+            },
+            error: null
+          };
+        }
+        
+        // If not found as item, try to find it as a lot
+        // This would require a different API call to search for lots by ID
+        // For now, we'll return not found
         return {
-          type: 'lot',
-          data: formatLotData(lot, itemWithLot)
+          data: { type: null, data: null },
+          error: null
+        };
+        
+      } catch (error) {
+        return {
+          data: { type: null, data: null },
+          error: error.message
         };
       }
-    }
-  } catch (error) {
-    // Silently handle error
-  }
+    });
+  },
 
-  return { type: null, data: null };
+  // Get transaction history for either items or lots
+  async getTransactionHistory(itemId, lotNumber = null) {
+    if (lotNumber) {
+      return this.getLotTransactions(itemId, lotNumber);
+    } else {
+      return this.getItemTransactions(itemId);
+    }
+  }
+};
+
+// === CONVENIENCE FUNCTIONS (aligned with files API pattern) ===
+
+/**
+ * Check if a result has an error and handle it consistently
+ */
+export function hasApiError(result) {
+  return hasError(result);
 }
 
 /**
- * Format item data for consistent structure
- * @param {object} item - Raw item from database
- * @returns {object} - Formatted item data
+ * Extract data from API result, handling both success and error cases
  */
-function formatItemData(item) {
+export function extractApiData(result, fallback = null) {
+  return extractData(result, fallback);
+}
+
+/**
+ * Handle API errors consistently across components
+ */
+export function handleApiError(result, defaultMessage = 'An error occurred') {
+  if (hasError(result)) {
+    console.error('API Error:', getError(result));
+    return getError(result) || defaultMessage;
+  }
+  return null;
+}
+
+/**
+ * Normalize item data for consistent handling in components
+ */
+export function normalizeItemData(item) {
+  if (!item) return null;
+  
   return {
-    _id: item._id.toString(),
-    displayName: item.displayName || '',
+    id: item._id,
+    displayName: item.displayName || 'Unnamed Item',
     sku: item.sku || '',
-    itemType: item.itemType || '',
+    itemType: item.itemType || 'product',
     qtyOnHand: Number(item.qtyOnHand) || 0,
     uom: item.uom || 'ea',
-    description: item.description || '',
     cost: Number(item.cost) || 0,
-    lotTracked: Boolean(item.lotTracked),
-    
-    // Chemical-specific fields
-    casNumber: item.casNumber || '',
     location: item.location || '',
-    
-    // Solution/Product-specific fields (BOM)
+    description: item.description || '',
+    casNumber: item.casNumber || '',
+    lotTracked: Boolean(item.lotTracked),
     bom: item.bom || [],
-    
-    // Embedded lots from schema
-    lots: (item.Lots || []).map(lot => ({
-      _id: lot._id?.toString() || '',
-      lotNumber: lot.lotNumber || '',
-      quantity: Number(lot.quantity) || 0,
-    })),
-    
-    createdAt: item.createdAt ? item.createdAt.toISOString() : null,
-    updatedAt: item.updatedAt ? item.updatedAt.toISOString() : null,
+    lots: item.lots || [],
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    // Include all original properties
+    ...item
   };
 }
 
 /**
- * Format lot data with parent item info
- * @param {object} lot - Raw lot from database
- * @param {object} parentItem - Parent item containing the lot
- * @returns {object} - Formatted lot data with item info
+ * Normalize lot data for consistent handling in components
  */
-function formatLotData(lot, parentItem) {
-  return {
-    lot: {
-      _id: lot._id.toString(),
-      lotNumber: lot.lotNumber || '',
-      quantity: Number(lot.quantity) || 0,
-      qrCodeUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/${lot._id}`,
-    },
-    item: {
-      _id: parentItem._id.toString(),
-      displayName: parentItem.displayName || '',
-      sku: parentItem.sku || '',
-      itemType: parentItem.itemType || '',
-      uom: parentItem.uom || 'ea',
-      description: parentItem.description || '',
-      location: parentItem.location || '',
-    }
-  };
-}
-
-/**
- * Get transaction history for a specific item
- * @param {string} itemId - Item ObjectId as string
- * @returns {Promise<Array>} - Array of formatted transactions
- */
-export async function getItemTransactionHistory(itemId) {
-  try {    
-    await db.connect();
-    
-    if (!db.transactions?.listByItem) {
-      return [];
-    }
-    
-    const transactions = await db.transactions.listByItem(itemId);
-    
-    if (!transactions || !Array.isArray(transactions)) {
-      return [];
-    }
-    
-    return transactions.map(txn => ({
-      _id: txn._id.toString(),
-      txnType: txn.txnType || '',
-      memo: txn.memo || '',
-      createdBy: txn.createdBy?.name || txn.createdBy?.email || 'System',
-      project: txn.project || '',
-      department: txn.department || '',
-      postedAt: txn.postedAt ? txn.postedAt.toISOString() : null,
-      effectiveDate: txn.effectiveDate ? txn.effectiveDate.toISOString() : null,
-      status: txn.status || 'posted',
-      // Extract relevant lines for this item
-      lines: (txn.lines || [])
-        .filter(line => line.item.toString() === itemId)
-        .map(line => ({
-          item: line.item.toString(),
-          lotNumber: line.lot || '',
-          qty: Number(line.qty) || 0,
-          unitCost: Number(line.unitCost) || 0,
-          totalValue: Number(line.totalValue) || 0,
-          itemQtyBefore: Number(line.itemQtyBefore) || 0,
-          itemQtyAfter: Number(line.itemQtyAfter) || 0,
-          lotQtyBefore: Number(line.lotQtyBefore) || 0,
-          lotQtyAfter: Number(line.lotQtyAfter) || 0,
-          notes: line.notes || ''
-        }))
-    }));
-  } catch (error) {
-    console.error('Error fetching item transaction history:', error);
-    return [];
-  }
-}
-
-/**
- * Get transaction history for a specific lot
- * @param {string} itemId - Parent item ObjectId as string
- * @param {string} lotNumber - Lot number string
- * @returns {Promise<Array>} - Array of formatted transactions affecting this lot
- */
-export async function getLotTransactionHistory(itemId, lotNumber) {
-  try {    
-    await db.connect();
-    
-    if (!db.transactions?.listByItem) {
-      return [];
-    }
-    
-    const transactions = await db.transactions.listByItem(itemId);
-    
-    if (!transactions || !Array.isArray(transactions)) {
-      return [];
-    }
-    
-    // Filter transactions that affect this specific lot
-    const lotTransactions = transactions
-      .map(txn => ({
-        _id: txn._id.toString(),
-        txnType: txn.txnType || '',
-        memo: txn.memo || '',
-        createdBy: txn.createdBy?.name || txn.createdBy?.email || 'System',
-        project: txn.project || '',
-        department: txn.department || '',
-        postedAt: txn.postedAt ? txn.postedAt.toISOString() : null,
-        effectiveDate: txn.effectiveDate ? txn.effectiveDate.toISOString() : null,
-        status: txn.status || 'posted',
-        // Extract only lines that affect this specific lot
-        relevantLines: (txn.lines || [])
-          .filter(line => 
-            line.item.toString() === itemId && line.lot === lotNumber
-          )
-          .map(line => ({
-            item: line.item.toString(),
-            lot: line.lot,
-            qty: Number(line.qty) || 0,
-            unitCost: Number(line.unitCost) || 0,
-            totalValue: Number(line.totalValue) || 0,
-            itemQtyBefore: Number(line.itemQtyBefore) || 0,
-            itemQtyAfter: Number(line.itemQtyAfter) || 0,
-            lotQtyBefore: Number(line.lotQtyBefore) || 0,
-            lotQtyAfter: Number(line.lotQtyAfter) || 0,
-            notes: line.notes || ''
-          }))
-      }))
-      .filter(txn => txn.relevantLines.length > 0);
-    
-    return lotTransactions;
-  } catch (error) {
-    console.error('Error fetching lot transaction history:', error);
-    return [];
-  }
-}
-
-/**
- * Generate metadata for items or lots
- * @param {string} id - ObjectId as string
- * @returns {Promise<object>} - Next.js metadata object
- */
-export async function generateDetailMetadata(id) {
-  const { type, data } = await getItemOrLot(id);
+export function normalizeLotData(lot, parentItem = null) {
+  if (!lot) return null;
   
-  if (!data) {
-    return {
-      title: 'Not Found',
-      description: 'The requested item or lot could not be found.',
-    };
-  }
-
-  if (type === 'item') {
-    const itemTypeLabel = data.itemType.charAt(0).toUpperCase() + data.itemType.slice(1);
-    return {
-      title: `${data.displayName} - ${itemTypeLabel} Details`,
-      description: `Detailed information for ${data.displayName} (${data.sku})`,
-    };
-  } else {
-    return {
-      title: `Lot ${data.lot.lotNumber} - ${data.item.displayName}`,
-      description: `Detailed information for lot ${data.lot.lotNumber}`,
-    };
-  }
+  return {
+    id: lot._id,
+    lotNumber: lot.lotNumber || '',
+    quantity: Number(lot.quantity) || 0,
+    qrCodeUrl: lot.qrCodeUrl || `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/${lot._id}`,
+    parentItem: parentItem ? normalizeItemData(parentItem) : null,
+    createdAt: lot.createdAt,
+    updatedAt: lot.updatedAt,
+    // Include all original properties
+    ...lot
+  };
 }
+
+/**
+ * Format transaction data for display in components
+ */
+export function normalizeTransactionData(transaction) {
+  if (!transaction) return null;
+  
+  return {
+    id: transaction._id,
+    txnType: transaction.txnType || '',
+    status: transaction.status || 'posted',
+    memo: transaction.memo || '',
+    reason: transaction.reason || '',
+    postedAt: transaction.postedAt,
+    effectiveDate: transaction.effectiveDate,
+    createdBy: transaction.createdBy || {},
+    lines: (transaction.lines || []).map(line => ({
+      item: line.item,
+      lot: line.lot || '',
+      qty: Number(line.qty) || 0,
+      unitCost: Number(line.unitCost) || 0,
+      totalValue: Number(line.totalValue) || 0,
+      itemQtyBefore: Number(line.itemQtyBefore) || 0,
+      itemQtyAfter: Number(line.itemQtyAfter) || 0,
+      lotQtyBefore: Number(line.lotQtyBefore) || 0,
+      lotQtyAfter: Number(line.lotQtyAfter) || 0,
+      notes: line.notes || '',
+      ...line
+    })),
+    // Include all original properties
+    ...transaction
+  };
+}
+
+// Export individual API modules for focused imports
+export const { items, transactions, lots, stats } = itemsApi;

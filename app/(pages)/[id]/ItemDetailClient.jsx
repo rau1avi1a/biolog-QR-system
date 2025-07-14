@@ -56,8 +56,8 @@ import {
 } from 'lucide-react';
 import QRCodeGenerator from '@/app/(pages)/home/QRCodeGenerator';
 import TxnTable from './components/TxnTable';
-// FIXED: Import from client-api instead of api
-import { api } from './lib/client-api';
+// FIXED: Import the new API structure
+import { itemsApi, hasApiError, extractApiData, handleApiError } from './lib/api';
 
 // Custom hook to get user data from your auth system
 const useAuth = () => {
@@ -152,6 +152,14 @@ export default function ItemDetailClient({ item, transactions, lots }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [forceDelete, setForceDelete] = useState(false);
   
+  // Add debugging
+  console.log('🔍 ItemDetailClient received:', {
+    item: item?.displayName,
+    itemId: item?._id,
+    lots: lots?.length || 0,
+    lotsData: lots
+  });
+  
   // Enhanced transaction state
   const [transactionData, setTransactionData] = useState({
     transactions: transactions || [],
@@ -164,7 +172,17 @@ export default function ItemDetailClient({ item, transactions, lots }) {
   const typeConfig = getItemTypeConfig(item.itemType);
   const stockInfo = getStockStatus(item);
   const totalValue = (item.cost || 0) * item.qtyOnHand;
-  const activeLots = lots.filter(lot => lot.quantity > 0);
+  
+  // Ensure lots is always an array and filter active lots
+  const safeLotsArray = Array.isArray(lots) ? lots : [];
+  const activeLots = safeLotsArray.filter(lot => (lot.quantity || 0) > 0);
+  
+  console.log('📊 Processed lots:', {
+    originalLots: lots,
+    safeLotsArray: safeLotsArray.length,
+    activeLots: activeLots.length,
+    sample: safeLotsArray[0]
+  });
   
   // Check if user is admin
   const isAdmin = user?.role === 'admin';
@@ -175,13 +193,21 @@ export default function ItemDetailClient({ item, transactions, lots }) {
       setTransactionData(prev => ({ ...prev, loading: true }));
       
       const [txnResponse, statsResponse] = await Promise.all([
-        api.getItemTransactions(item._id, { limit: 100 }),
-        api.getItemTransactionStats(item._id)
+        itemsApi.getItemTransactions(item._id, { limit: 100 }),
+        itemsApi.getItemTransactionStats(item._id)
       ]);
       
+      if (hasApiError(txnResponse)) {
+        throw new Error(handleApiError(txnResponse));
+      }
+      
+      if (hasApiError(statsResponse)) {
+        console.warn('Failed to load stats:', handleApiError(statsResponse));
+      }
+      
       setTransactionData({
-        transactions: txnResponse.transactions || [],
-        stats: statsResponse.stats || [],
+        transactions: extractApiData(txnResponse)?.transactions || [],
+        stats: extractApiData(statsResponse)?.stats || [],
         loading: false,
         error: null
       });
@@ -211,18 +237,20 @@ export default function ItemDetailClient({ item, transactions, lots }) {
     setIsDeleting(true);
     
     try {
-      // Use the API function instead of direct fetch
-      const data = await api.deleteItem(item._id, forceDelete);
-  
-      if (data.success) {
-        const message = forceDelete && item.qtyOnHand > 0 
-          ? `Item "${item.displayName}" and all its stock (${item.qtyOnHand} ${item.uom}) has been deleted successfully.`
-          : `Item "${item.displayName}" has been deleted successfully.`;
-        alert(message);
-        router.push('/home');
-      } else {
-        alert(data.error || 'Failed to delete item');
+      // Use the new API structure
+      const result = await itemsApi.deleteItem(item._id, forceDelete);
+      
+      if (hasApiError(result)) {
+        throw new Error(handleApiError(result));
       }
+
+      const data = extractApiData(result);
+      
+      const message = forceDelete && item.qtyOnHand > 0 
+        ? `Item "${item.displayName}" and all its stock (${item.qtyOnHand} ${item.uom}) has been deleted successfully.`
+        : `Item "${item.displayName}" has been deleted successfully.`;
+      alert(message);
+      router.push('/home');
     } catch (error) {
       console.error('Delete error:', error);
       alert('Failed to delete item: ' + error.message);
@@ -273,13 +301,13 @@ export default function ItemDetailClient({ item, transactions, lots }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div>
+                              <div>
                 <label className="text-sm font-medium text-muted-foreground">Components (BOM)</label>
                 {item.bom && item.bom.length > 0 ? (
                   <div className="space-y-1 mt-1">
                     {item.bom.map((component, index) => (
-                      <p key={index} className="text-sm">
-                        {component.qty} {component.uom} - ID: {component.itemId}
+                      <p key={`bom-solution-${component.itemId || component.item || index}`} className="text-sm">
+                        {component.qty} {component.uom || component.unit} - ID: {component.itemId || component.item}
                       </p>
                     ))}
                   </div>
@@ -311,8 +339,8 @@ export default function ItemDetailClient({ item, transactions, lots }) {
                 {item.bom && item.bom.length > 0 ? (
                   <div className="space-y-1 mt-1">
                     {item.bom.map((component, index) => (
-                      <p key={index} className="text-sm">
-                        {component.qty} {component.uom} - ID: {component.itemId}
+                      <p key={`bom-product-${component.itemId || component.item || index}`} className="text-sm">
+                        {component.qty} {component.uom || component.unit} - ID: {component.itemId || component.item}
                       </p>
                     ))}
                   </div>
@@ -551,6 +579,70 @@ export default function ItemDetailClient({ item, transactions, lots }) {
               {/* Type-specific Information */}
               {renderTypeSpecificInfo()}
 
+              {/* DEBUG COMPONENT - Remove after fixing */}
+              <Card className="md:col-span-2 lg:col-span-3 border-red-200">
+                <CardHeader>
+                  <CardTitle className="text-red-600">🐛 Debug Information</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4 text-sm font-mono">
+                    <div>
+                      <strong>Item Data:</strong>
+                      <pre className="bg-gray-100 p-2 rounded mt-1 overflow-auto">
+                        {JSON.stringify({
+                          id: item._id,
+                          name: item.displayName,
+                          lotTracked: item.lotTracked,
+                          qtyOnHand: item.qtyOnHand
+                        }, null, 2)}
+                      </pre>
+                    </div>
+                    
+                    <div>
+                      <strong>Lots Prop (raw):</strong>
+                      <pre className="bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-40">
+                        {JSON.stringify(lots, null, 2)}
+                      </pre>
+                    </div>
+                    
+                    <div>
+                      <strong>Safe Lots Array:</strong>
+                      <pre className="bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-40">
+                        {JSON.stringify(safeLotsArray, null, 2)}
+                      </pre>
+                    </div>
+                    
+                    <div>
+                      <strong>Active Lots:</strong>
+                      <pre className="bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-40">
+                        {JSON.stringify(activeLots, null, 2)}
+                      </pre>
+                    </div>
+                    
+                    <div>
+                      <strong>API Call Test:</strong>
+                      <Button 
+                        onClick={async () => {
+                          try {
+                            const response = await fetch(`/api/items?id=${item._id}&action=lots`);
+                            const result = await response.json();
+                            console.log('🧪 Manual API test result:', result);
+                            alert('Check console for API result');
+                          } catch (error) {
+                            console.error('🧪 Manual API test error:', error);
+                            alert('API test failed - check console');
+                          }
+                        }}
+                        variant="outline"
+                        size="sm"
+                      >
+                        Test API Call
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Notes */}
               {item.notes && (
                 <Card className="md:col-span-2 lg:col-span-3">
@@ -597,24 +689,26 @@ export default function ItemDetailClient({ item, transactions, lots }) {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      lots.map((lot) => (
-                        <TableRow key={lot._id}>
+                      lots.map((lot, index) => (
+                        <TableRow key={lot._id || lot.id || `lot-${index}`}>
                           <TableCell className="font-medium">
-                            <Link href={`/${lot._id}`} className="text-primary hover:underline">
+                            <Link href={`/${lot._id || lot.id}`} className="text-primary hover:underline">
                               {lot.lotNumber}
                             </Link>
                           </TableCell>
                           <TableCell>{lot.quantity} {item.uom}</TableCell>
-                          <TableCell>N/A</TableCell>
-                          <TableCell>N/A</TableCell>
-                          <TableCell>{item.location || 'N/A'}</TableCell>
+                          <TableCell>{lot.expirationDate ? formatDate(lot.expirationDate) : 'N/A'}</TableCell>
+                          <TableCell>{lot.receivedDate ? formatDate(lot.receivedDate) : lot.createdAt ? formatDate(lot.createdAt) : 'N/A'}</TableCell>
+                          <TableCell>{lot.location || item.location || 'N/A'}</TableCell>
                           <TableCell>
-                            <Badge variant="secondary">Active</Badge>
+                            <Badge variant={lot.quantity > 0 ? "secondary" : "outline"}>
+                              {lot.quantity > 0 ? "Active" : "Empty"}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
                               <Button variant="ghost" size="sm" asChild>
-                                <Link href={`/${lot._id}`}>
+                                <Link href={`/${lot._id || lot.id}`}>
                                   <Eye className="h-3 w-3" />
                                 </Link>
                               </Button>
