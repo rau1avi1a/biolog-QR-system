@@ -1,21 +1,39 @@
-// app/files/[id]/page.jsx
+// app/files/[id]/page.jsx - MINIMAL FIX: Direct API call without touching existing API structure
 import { notFound } from 'next/navigation';
-import { filesApi, extractApiData, hasApiError, handleApiError } from '../lib/api';
 import FilesDetailClient from './FilesDetailClient';
 
 async function getBatchWithFile(id) {
   try {
     console.log('📄 Fetching batch with file for ID:', id);
     
-    // ✅ FIXED: Use your new apiClient structure
-    const result = await filesApi.batches.get(id);
+    // ✅ MINIMAL FIX: Use direct fetch to bypass API client issues
+    // This doesn't affect any other components or API calls
+    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/batches?id=${encodeURIComponent(id)}`, {
+      headers: { 
+        'Cache-Control': 'no-cache',
+        'Content-Type': 'application/json'
+      }
+    });
     
-    if (hasApiError(result)) {
-      console.error('❌ Error fetching batch:', handleApiError(result));
+    if (!response.ok) {
+      console.error(`❌ HTTP Error: ${response.status} ${response.statusText}`);
       return null;
     }
     
-    const batch = extractApiData(result);
+    const result = await response.json();
+    console.log('📊 Raw API response:', result);
+    
+    // Handle both success/error format and direct data format
+    let batch;
+    if (result.success === true) {
+      batch = result.data;
+    } else if (result.success === false) {
+      console.error('❌ API Error:', result.error);
+      return null;
+    } else {
+      // Direct data format (legacy)
+      batch = result;
+    }
     
     if (!batch) {
       console.log('❌ No batch found for ID:', id);
