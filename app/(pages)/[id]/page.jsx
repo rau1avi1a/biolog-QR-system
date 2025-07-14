@@ -4,25 +4,34 @@ import ItemDetailClient from './ItemDetailClient';
 import LotDetailClient from './LotDetailClient';
 
 // Server-side functions that work with your existing API routes
+// Replace your getItemOrLot function in page.jsx with this debug version:
+
 async function getItemOrLot(id) {
   try {
+    console.log('🔍 getItemOrLot called with ID:', id);
+    
     // Validate MongoDB ObjectId format
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      console.log('❌ Invalid ObjectId format:', id);
       return { type: null, data: null };
     }
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 
-    // Try to get it as an item first using your existing API route
+    // Try to get it as an item first
+    console.log('📦 Trying as item first...');
     const itemResponse = await fetch(`${baseUrl}/api/items?id=${id}`, {
-      cache: 'no-store' // Ensure we get fresh data
+      cache: 'no-store'
     });
+
+    console.log('📦 Item response status:', itemResponse.status);
 
     if (itemResponse.ok) {
       const itemResult = await itemResponse.json();
+      console.log('📦 Item API response:', JSON.stringify(itemResult, null, 2));
       
       if (itemResult.success && itemResult.data) {
-        console.log('📦 Server: Item found:', itemResult.data.displayName);
+        console.log('✅ Found as item:', itemResult.data.displayName);
         
         // Get the lots for this item
         const lotsResponse = await fetch(`${baseUrl}/api/items?id=${id}&action=lots`, {
@@ -32,14 +41,14 @@ async function getItemOrLot(id) {
         let lots = [];
         if (lotsResponse.ok) {
           const lotsResult = await lotsResponse.json();
-          console.log('📋 Server: Lots response:', lotsResult);
+          console.log('📋 Lots API response:', JSON.stringify(lotsResult, null, 2));
           
           if (lotsResult.success && lotsResult.data) {
             lots = lotsResult.data.lots || [];
-            console.log('📋 Server: Extracted lots:', lots.length, 'lots');
+            console.log('📋 Extracted lots:', lots.length, 'lots');
           }
         } else {
-          console.log('⚠️ Server: Lots request failed:', lotsResponse.status);
+          console.log('⚠️ Lots request failed:', lotsResponse.status);
         }
 
         return {
@@ -50,27 +59,51 @@ async function getItemOrLot(id) {
           }
         };
       }
+    } else {
+      console.log('📦 Item not found, trying as lot...');
     }
 
     // If not found as item, check if it's a lot
+    console.log('🔍 Trying as lot with findLot action...');
     const lotSearchResponse = await fetch(`${baseUrl}/api/items?action=findLot&lotId=${id}`, {
       cache: 'no-store'
     });
 
+    console.log('🔍 Lot search response status:', lotSearchResponse.status);
+
     if (lotSearchResponse.ok) {
       const lotResult = await lotSearchResponse.json();
+      console.log('🔍 Lot API response:', JSON.stringify(lotResult, null, 2));
       
       if (lotResult.success && lotResult.data) {
+        console.log('✅ Found as lot:', lotResult.data.lot?.lotNumber);
+        console.log('🔍 Lot data structure check:');
+        console.log('  - lot exists:', !!lotResult.data.lot);
+        console.log('  - item exists:', !!lotResult.data.item);
+        console.log('  - item._id:', lotResult.data.item?._id);
+        console.log('  - lot.lotNumber:', lotResult.data.lot?.lotNumber);
+        
         return {
           type: 'lot',
           data: lotResult.data // Should contain both lot and item data
         };
       }
+    } else {
+      console.log('❌ Lot search failed with status:', lotSearchResponse.status);
+      // Try to get error details
+      try {
+        const errorText = await lotSearchResponse.text();
+        console.log('❌ Lot search error response:', errorText);
+      } catch (e) {
+        console.log('❌ Could not read error response');
+      }
     }
+    
+    console.log('❌ Not found as either item or lot');
     return { type: null, data: null };
     
   } catch (error) {
-    console.error('Error in getItemOrLot:', error);
+    console.error('💥 Error in getItemOrLot:', error);
     return { type: null, data: null };
   }
 }

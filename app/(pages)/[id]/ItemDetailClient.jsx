@@ -466,16 +466,12 @@ export default function ItemDetailClient({ item, transactions, lots }) {
               <TabsTrigger value="actions">Actions</TabsTrigger>
             </TabsList>
 
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setShowQRGenerator(true)}>
-                <QrCode className="h-4 w-4 mr-2" />
-                Generate QR
-              </Button>
-              <Button variant="outline" size="sm">
-                <Edit className="h-4 w-4 mr-2" />
-                Edit {typeConfig.label}
-              </Button>
-            </div>
+<div className="flex gap-2">
+  <Button variant="outline" size="sm">
+    <Edit className="h-4 w-4 mr-2" />
+    Edit {typeConfig.label}
+  </Button>
+</div>
           </div>
 
           {/* Overview Tab */}
@@ -712,12 +708,9 @@ export default function ItemDetailClient({ item, transactions, lots }) {
                                   <Eye className="h-3 w-3" />
                                 </Link>
                               </Button>
-                              <Button variant="ghost" size="sm" onClick={() => setShowQRGenerator(true)}>
-                                <QrCode className="h-3 w-3" />
-                              </Button>
-                              <Button variant="ghost" size="sm">
-                                <Edit className="h-3 w-3" />
-                              </Button>
+  <Button variant="ghost" size="sm">
+    <Edit className="h-3 w-3" />
+  </Button>
                             </div>
                           </TableCell>
                         </TableRow>
