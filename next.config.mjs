@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Skip build-time checks that trigger DB connection
+  // Force all pages to be dynamic (no static generation)
+  output: 'standalone',
+  
+  // Skip build-time checks
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -8,7 +11,7 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   
-  // Your existing webpack config
+  // Webpack configuration
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.target = 'node18';
@@ -16,7 +19,7 @@ const nextConfig = {
       config.target = ['web', 'es2020'];
     }
     
-    // Prevent bundling of server-only modules during build
+    // Prevent bundling of server-only modules
     if (isServer) {
       config.externals = [...(config.externals || []), 'mongodb', 'mongoose'];
     }
@@ -28,8 +31,8 @@ const nextConfig = {
     esmExternals: true,
   },
   
-  // Disable static optimization during build
-  staticPageGenerationTimeout: 0,
+  // IMPORTANT: Give pages time to build (not 0!)
+  staticPageGenerationTimeout: 120, // 2 minutes instead of 0
 };
 
 export default nextConfig;
