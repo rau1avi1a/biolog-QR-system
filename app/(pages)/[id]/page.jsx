@@ -1,11 +1,9 @@
-// app/[id]/page.js
+// app/(pages)/[id]/page.jsx - FIXED VERSION
 import { notFound } from 'next/navigation';
 import ItemDetailClient from './ItemDetailClient';
 import LotDetailClient from './LotDetailClient';
 
-// Server-side functions that work with your existing API routes
-// Replace your getItemOrLot function in page.jsx with this debug version:
-
+// Server-side function to get item or lot data
 async function getItemOrLot(id) {
   try {
     console.log('🔍 getItemOrLot called with ID:', id);
@@ -17,6 +15,7 @@ async function getItemOrLot(id) {
     }
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    console.log('🌐 Using base URL:', baseUrl);
 
     // Try to get it as an item first
     console.log('📦 Trying as item first...');
@@ -28,7 +27,7 @@ async function getItemOrLot(id) {
 
     if (itemResponse.ok) {
       const itemResult = await itemResponse.json();
-      console.log('📦 Item API response:', JSON.stringify(itemResult, null, 2));
+      console.log('📦 Item API response success:', !!itemResult.success);
       
       if (itemResult.success && itemResult.data) {
         console.log('✅ Found as item:', itemResult.data.displayName);
@@ -41,7 +40,7 @@ async function getItemOrLot(id) {
         let lots = [];
         if (lotsResponse.ok) {
           const lotsResult = await lotsResponse.json();
-          console.log('📋 Lots API response:', JSON.stringify(lotsResult, null, 2));
+          console.log('📋 Lots API response success:', !!lotsResult.success);
           
           if (lotsResult.success && lotsResult.data) {
             lots = lotsResult.data.lots || [];
@@ -73,15 +72,10 @@ async function getItemOrLot(id) {
 
     if (lotSearchResponse.ok) {
       const lotResult = await lotSearchResponse.json();
-      console.log('🔍 Lot API response:', JSON.stringify(lotResult, null, 2));
+      console.log('🔍 Lot API response success:', !!lotResult.success);
       
       if (lotResult.success && lotResult.data) {
         console.log('✅ Found as lot:', lotResult.data.lot?.lotNumber);
-        console.log('🔍 Lot data structure check:');
-        console.log('  - lot exists:', !!lotResult.data.lot);
-        console.log('  - item exists:', !!lotResult.data.item);
-        console.log('  - item._id:', lotResult.data.item?._id);
-        console.log('  - lot.lotNumber:', lotResult.data.lot?.lotNumber);
         
         return {
           type: 'lot',
@@ -90,13 +84,6 @@ async function getItemOrLot(id) {
       }
     } else {
       console.log('❌ Lot search failed with status:', lotSearchResponse.status);
-      // Try to get error details
-      try {
-        const errorText = await lotSearchResponse.text();
-        console.log('❌ Lot search error response:', errorText);
-      } catch (e) {
-        console.log('❌ Could not read error response');
-      }
     }
     
     console.log('❌ Not found as either item or lot');
@@ -108,38 +95,66 @@ async function getItemOrLot(id) {
   }
 }
 
+// FIXED: Server-side function to get item transaction history
 async function getItemTransactionHistory(itemId) {
   try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/items?id=${itemId}&action=transactions&limit=100`, {
+    console.log('📊 Getting transaction history for item:', itemId);
+    
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const response = await fetch(`${baseUrl}/api/items?id=${itemId}&action=transactions&limit=100`, {
       cache: 'no-store'
     });
 
+    console.log('📊 Transaction history response status:', response.status);
+
     if (response.ok) {
       const result = await response.json();
-      return result.success ? (result.data?.transactions || []) : [];
+      console.log('📊 Transaction history success:', !!result.success);
+      
+      if (result.success) {
+        const transactions = result.data?.transactions || [];
+        console.log('📊 Found', transactions.length, 'transactions');
+        return transactions;
+      }
+    } else {
+      console.log('⚠️ Transaction history request failed:', response.status);
     }
 
     return [];
   } catch (error) {
-    console.error('Error in getItemTransactionHistory:', error);
+    console.error('💥 Error in getItemTransactionHistory:', error);
     return [];
   }
 }
 
+// FIXED: Server-side function to get lot transaction history
 async function getLotTransactionHistory(itemId, lotNumber) {
   try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/items?id=${itemId}&action=transactions&lotNumber=${encodeURIComponent(lotNumber)}`, {
+    console.log('📊 Getting lot transaction history for:', { itemId, lotNumber });
+    
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const response = await fetch(`${baseUrl}/api/items?id=${itemId}&action=transactions&lotNumber=${encodeURIComponent(lotNumber)}`, {
       cache: 'no-store'
     });
 
+    console.log('📊 Lot transaction history response status:', response.status);
+
     if (response.ok) {
       const result = await response.json();
-      return result.success ? (result.data?.transactions || []) : [];
+      console.log('📊 Lot transaction history success:', !!result.success);
+      
+      if (result.success) {
+        const transactions = result.data?.transactions || [];
+        console.log('📊 Found', transactions.length, 'lot transactions');
+        return transactions;
+      }
+    } else {
+      console.log('⚠️ Lot transaction history request failed:', response.status);
     }
 
     return [];
   } catch (error) {
-    console.error('Error in getLotTransactionHistory:', error);
+    console.error('💥 Error in getLotTransactionHistory:', error);
     return [];
   }
 }
@@ -186,22 +201,35 @@ export async function generateMetadata({ params }) {
 // Main page component
 export default async function DetailPage({ params }) {
   try {
+    console.log('🚀 DetailPage starting...');
     const resolvedParams = await params;
+    console.log('📋 Resolved params:', resolvedParams);
     
     // Get the item or lot data
     const { type, data } = await getItemOrLot(resolvedParams.id);
     
     if (!data) {
+      console.log('❌ No data found, calling notFound()');
       notFound();
     }
 
+    console.log('✅ Data found, type:', type);
+
     // Handle Item view
     if (type === 'item') {
+      console.log('📦 Rendering item view');
+      
       // Get transaction history for the item
       const transactions = await getItemTransactionHistory(resolvedParams.id);
       
       // Extract lots from the item data
       const lots = data.lots || [];
+      
+      console.log('📦 Item render data:', {
+        itemName: data.displayName,
+        transactionCount: transactions.length,
+        lotCount: lots.length
+      });
       
       return (
         <ItemDetailClient 
@@ -214,11 +242,19 @@ export default async function DetailPage({ params }) {
     
     // Handle Lot view
     if (type === 'lot') {
+      console.log('📋 Rendering lot view');
+      
       // Get transaction history for the specific lot
       const transactions = await getLotTransactionHistory(
         data.item._id, 
         data.lot.lotNumber
       );
+      
+      console.log('📋 Lot render data:', {
+        lotNumber: data.lot.lotNumber,
+        itemName: data.item.displayName,
+        transactionCount: transactions.length
+      });
       
       return (
         <LotDetailClient 
@@ -230,10 +266,22 @@ export default async function DetailPage({ params }) {
     }
 
     // Fallback - should not reach here
+    console.log('❌ Unknown type, calling notFound()');
     notFound();
     
   } catch (error) {
-    console.error('Error loading detail page:', error);
+    console.error('💥 Error loading detail page:', error);
+    
+    // Better error handling for production
+    if (process.env.NODE_ENV === 'production') {
+      // Log the full error for debugging
+      console.error('Full error details:', {
+        message: error.message,
+        stack: error.stack,
+        params: params
+      });
+    }
+    
     notFound();
   }
 }
