@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { QRCodeSVG } from 'qrcode.react'; // Add this import
+import { QRCodeSVG } from 'qrcode.react';
 import {
   Dialog,
   DialogContent,
@@ -9,45 +9,31 @@ import {
   DialogTitle,
 } from '@/components/ui/shadcn/components/dialog';
 import { Button } from '@/components/ui/shadcn/components/button';
-import { Input } from '@/components/ui/shadcn/components/input';
-import { Label } from '@/components/ui/shadcn/components/label';
 import { Badge } from '@/components/ui/shadcn/components/badge';
-import { Alert, AlertDescription } from '@/components/ui/shadcn/components/alert';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/shadcn/components/select';
 import {
   QrCode,
   Download,
   Printer,
-  Copy,
-  Check,
-  RefreshCw,
-  Zap
+  RefreshCw
 } from 'lucide-react';
 
 const QRCodeGenerator = ({ data, onClose }) => {
   const [qrData, setQrData] = useState('');
-  const [qrSize, setQrSize] = useState('256');
-  const [errorCorrection, setErrorCorrection] = useState('M');
-  const [copied, setCopied] = useState(false);
+  const [qrSize] = useState('200'); // Fixed size for display
+  const [errorCorrection] = useState('M'); // Fixed error correction
   const qrRef = useRef(null);
 
   // Generate the QR data URL based on the item or lot
   useEffect(() => {
     if (data) {
+      // Use environment variable for production URL, fallback to current origin
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || window.location.origin;
       let qrUrl;
       
       if (data.type === 'lot') {
-        // For lots, use the permanent URL that was pre-generated  
-        qrUrl = data.url || `${window.location.origin}/${data.id}`;
+        qrUrl = data.url || `${baseUrl}/${data.id}`;
       } else {
-        // For items, create a URL that points to the item detail page
-        qrUrl = `${window.location.origin}/${data.id}`;
+        qrUrl = `${baseUrl}/${data.id}`;
       }
       
       setQrData(qrUrl);
@@ -58,33 +44,26 @@ const QRCodeGenerator = ({ data, onClose }) => {
     if (!qrRef.current) return;
 
     try {
-      // Get the SVG element
       const svgElement = qrRef.current.querySelector('svg');
       if (!svgElement) return;
 
-      // Create a canvas to convert SVG to PNG
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      const size = parseInt(qrSize);
+      const size = 512; // Higher resolution for download
       
       canvas.width = size;
       canvas.height = size;
 
-      // Create an image from the SVG
       const img = new Image();
       const svgData = new XMLSerializer().serializeToString(svgElement);
       const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
 
       img.onload = () => {
-        // Fill with white background
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw the QR code
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         
-        // Convert to blob and download
         canvas.toBlob((blob) => {
           const link = document.createElement('a');
           const filename = data?.type === 'lot' 
@@ -94,7 +73,6 @@ const QRCodeGenerator = ({ data, onClose }) => {
           link.href = URL.createObjectURL(blob);
           link.click();
           
-          // Clean up
           URL.revokeObjectURL(link.href);
           URL.revokeObjectURL(url);
         }, 'image/png');
@@ -119,6 +97,9 @@ const QRCodeGenerator = ({ data, onClose }) => {
         return;
       }
 
+      // Enhanced print template with lot information
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || window.location.origin;
+      
       printWindow.document.write(`
         <html>
           <head>
@@ -154,8 +135,15 @@ const QRCodeGenerator = ({ data, onClose }) => {
                 width: 200px !important;
                 height: 200px !important;
               }
-              h2 { margin: 0 0 10px 0; }
-              p { margin: 5px 0; }
+              h2 { margin: 0 0 10px 0; font-size: 18px; }
+              p { margin: 5px 0; font-size: 14px; }
+              .lot-info { 
+                background: #f5f5f5; 
+                padding: 8px; 
+                margin: 10px 0; 
+                border-radius: 4px;
+                font-weight: bold;
+              }
             </style>
           </head>
           <body onload="setTimeout(function() { window.print(); window.close(); }, 500)">
@@ -163,14 +151,15 @@ const QRCodeGenerator = ({ data, onClose }) => {
               <div class="qr-info">
                 <h2>${data?.name || data?.itemName || 'Item'}</h2>
                 <p><strong>SKU:</strong> ${data?.sku || 'N/A'}</p>
-                ${data?.lotNumber ? `<p><strong>Lot:</strong> ${data.lotNumber}</p>` : ''}
+                ${data?.lotNumber ? `<div class="lot-info">LOT: ${data.lotNumber}</div>` : ''}
                 <p><strong>Type:</strong> ${data?.type || 'N/A'}</p>
                 <p><strong>Generated:</strong> ${new Date().toLocaleDateString()}</p>
+                <p><strong>URL:</strong> ${baseUrl}/${data?.id || 'unknown'}</p>
               </div>
               <div class="qr-code">
                 ${svgElement.outerHTML}
               </div>
-              <p><small>Scan to view item details</small></p>
+              <p><small>Scan to view ${data?.type === 'lot' ? 'lot' : 'item'} details</small></p>
             </div>
           </body>
         </html>
@@ -182,58 +171,44 @@ const QRCodeGenerator = ({ data, onClose }) => {
     }
   };
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(qrData);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
-  };
-
-  const errorCorrectionLevels = {
-    'L': 'Low (~7%)',
-    'M': 'Medium (~15%)', 
-    'Q': 'Quartile (~25%)',
-    'H': 'High (~30%)'
-  };
-
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <QrCode className="h-5 w-5" />
-            Generate QR Code
+            {data?.type === 'lot' ? 'Lot QR Code Label' : 'QR Code Label'}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6">
-          {/* Item/Lot Information */}
+        <div className="space-y-4">
+          {/* Item/Lot Information - Enhanced for Lots */}
           {data && (
-            <div className="space-y-2">
-              <h3 className="font-medium">
+            <div className="text-center space-y-2">
+              <h3 className="font-medium text-lg">
                 {data.type === 'lot' ? `Lot ${data.lotNumber}` : (data.name || data.itemName)}
               </h3>
-              <div className="flex gap-2 flex-wrap">
-                {data.sku && <Badge variant="outline">SKU: {data.sku}</Badge>}
+              
+              {/* Show item name for lots */}
+              {data.itemName && data.type === 'lot' && (
+                <p className="text-sm font-medium text-muted-foreground">{data.itemName}</p>
+              )}
+              
+              <div className="flex gap-2 justify-center flex-wrap">
+                {data.sku && <Badge variant="outline" className="text-xs">SKU: {data.sku}</Badge>}
                 {data.lotNumber && data.type === 'lot' && (
-                  <Badge variant="outline">Lot: {data.lotNumber}</Badge>
+                  <Badge variant="default" className="text-xs bg-blue-600">Lot: {data.lotNumber}</Badge>
                 )}
-                <Badge variant="secondary" className="capitalize">
+                <Badge variant="secondary" className="text-xs capitalize">
                   {data.type}
                 </Badge>
               </div>
-              {data.itemName && data.type === 'lot' && (
-                <p className="text-sm text-muted-foreground">Item: {data.itemName}</p>
-              )}
             </div>
           )}
 
-          {/* QR Code Preview */}
+          {/* QR Code Preview - Centered and Compact */}
           <div className="flex justify-center">
-            <div className="border border-muted rounded-lg p-4 bg-white" ref={qrRef}>
+            <div className="border border-muted rounded-lg p-3 bg-white" ref={qrRef}>
               {qrData ? (
                 <QRCodeSVG
                   value={qrData}
@@ -251,63 +226,12 @@ const QRCodeGenerator = ({ data, onClose }) => {
             </div>
           </div>
 
-          {/* QR Configuration */}
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="qr-data">QR Code Data</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="qr-data"
-                  value={qrData}
-                  onChange={(e) => setQrData(e.target.value)}
-                  placeholder="Enter data to encode"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopy}
-                  className="shrink-0"
-                >
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="qr-size">Size (px)</Label>
-                <Select value={qrSize} onValueChange={setQrSize}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="128">128px</SelectItem>
-                    <SelectItem value="256">256px</SelectItem>
-                    <SelectItem value="512">512px</SelectItem>
-                    <SelectItem value="1024">1024px</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="error-correction">Error Correction</Label>
-                <Select value={errorCorrection} onValueChange={setErrorCorrection}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(errorCorrectionLevels).map(([level, description]) => (
-                      <SelectItem key={level} value={level}>
-                        {level} - {description}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+          {/* Show the URL that will be encoded */}
+          <div className="text-xs text-center text-muted-foreground bg-gray-50 dark:bg-gray-800 p-2 rounded">
+            <p className="font-mono break-all">{qrData}</p>
           </div>
 
-          {/* Actions */}
+          {/* Actions Only */}
           <div className="flex gap-2">
             <Button onClick={handleDownload} className="flex-1" disabled={!qrData}>
               <Download className="h-4 w-4 mr-2" />
@@ -319,28 +243,10 @@ const QRCodeGenerator = ({ data, onClose }) => {
             </Button>
           </div>
 
-          {/* QR Code Info */}
-          <Alert>
-            <Zap className="h-4 w-4" />
-            <AlertDescription>
-              This QR code links directly to the item's detail page. 
-              Scanning it will open the full item information in any browser.
-            </AlertDescription>
-          </Alert>
-
-          {/* Instructions */}
-          <div className="text-xs text-muted-foreground space-y-1">
-            <p>• Higher error correction allows for better scanning when damaged</p>
-            <p>• Larger sizes work better for printing and distant scanning</p>
-            <p>• Print on white paper with good contrast for best results</p>
-          </div>
-
-          {/* Debug info (only in development) */}
-          {process.env.NODE_ENV === 'development' && (
-            <div className="text-xs text-muted-foreground border-t pt-2">
-              <p><strong>Debug:</strong> QR Data: {qrData}</p>
-            </div>
-          )}
+          {/* Simple instruction */}
+          <p className="text-xs text-center text-muted-foreground">
+            Scan to view {data?.type === 'lot' ? 'lot' : 'item'} details
+          </p>
         </div>
       </DialogContent>
     </Dialog>

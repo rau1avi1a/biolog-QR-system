@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { jwtVerify } from 'jose';
+import mongoose from 'mongoose';
 
 // Helper to get authenticated user
 async function getAuthUser(request) {
@@ -38,81 +39,88 @@ export async function GET(request) {
     // Ensure connection
     await db.connect();
 
-    if (id) {
-
-      // Add this case to your GET function in /api/items/route.js
-// Right after the existing cases and before the final search logic
-
-if (action === 'findLot') {
-  // GET /api/items?action=findLot&lotId=123
-  const lotId = searchParams.get('lotId');
-  
-  if (!lotId) {
-    return NextResponse.json({ 
-      success: false, 
-      data: null,
-      error: 'lotId parameter is required'
-    }, { status: 400 });
-  }
-
-  try {
-    // Search for an item that contains this lot ID
-    const itemWithLot = await db.models.Item.findOne({ 
-      "Lots._id": new mongoose.Types.ObjectId(lotId) 
-    }).lean();
-    
-    if (itemWithLot) {
-      const lot = itemWithLot.Lots.find(l => l._id.toString() === lotId);
+      if (action === 'findLot') {
+      console.log('🔍 [API] findLot action triggered with lotId:', lotId);
       
-      if (lot) {
+      if (!lotId) {
+        return NextResponse.json({ 
+          success: false, 
+          data: null,
+          error: 'lotId parameter is required'
+        }, { status: 400 });
+      }
+
+      try {
+        console.log('🔍 [API] Searching for lot ID:', lotId);
+        
+        // Search for an item that contains this lot ID
+        // Note: Using "Lots" (capital L) to match your database structure
+        const itemWithLot = await db.models.Item.findOne({ 
+          "Lots._id": new mongoose.Types.ObjectId(lotId) 
+        }).lean();
+        
+        console.log('📦 [API] Found item with lot:', itemWithLot ? itemWithLot.displayName : 'none');
+        
+        if (itemWithLot && itemWithLot.Lots) {
+          const lot = itemWithLot.Lots.find(l => l._id.toString() === lotId);
+          
+          console.log('🎯 [API] Found specific lot:', lot ? lot.lotNumber : 'none');
+          
+          if (lot) {
+            const responseData = {
+              success: true,
+              data: {
+                type: 'lot',
+                lot: {
+                  _id: lot._id.toString(),
+                  lotNumber: lot.lotNumber || '',
+                  quantity: Number(lot.quantity) || 0,
+                  qrCodeUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/${lot._id}`,
+                  createdAt: lot.createdAt,
+                  updatedAt: lot.updatedAt,
+                  expiryDate: lot.expiryDate,
+                  receivedDate: lot.receivedDate || lot.createdAt,
+                  location: lot.location
+                },
+                item: {
+                  _id: itemWithLot._id.toString(),
+                  displayName: itemWithLot.displayName || '',
+                  sku: itemWithLot.sku || '',
+                  itemType: itemWithLot.itemType || '',
+                  uom: itemWithLot.uom || 'ea',
+                  description: itemWithLot.description || '',
+                  location: itemWithLot.location || '',
+                  cost: Number(itemWithLot.cost) || 0,
+                  lotTracked: itemWithLot.lotTracked || false
+                }
+              },
+              error: null
+            };
+            
+            console.log('✅ [API] Returning lot data:', JSON.stringify(responseData, null, 2));
+            
+            return NextResponse.json(responseData);
+          }
+        }
+        
+        console.log('❌ [API] Lot not found');
         return NextResponse.json({
-          success: true,
-          data: {
-            type: 'lot',
-            lot: {
-              _id: lot._id.toString(),
-              lotNumber: lot.lotNumber || '',
-              quantity: Number(lot.quantity) || 0,
-              qrCodeUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/${lot._id}`,
-              createdAt: lot.createdAt,
-              updatedAt: lot.updatedAt,
-              expiryDate: lot.expiryDate,
-              receivedDate: lot.receivedDate || lot.createdAt,
-              location: lot.location
-            },
-            item: {
-              _id: itemWithLot._id.toString(),
-              displayName: itemWithLot.displayName || '',
-              sku: itemWithLot.sku || '',
-              itemType: itemWithLot.itemType || '',
-              uom: itemWithLot.uom || 'ea',
-              description: itemWithLot.description || '',
-              location: itemWithLot.location || '',
-              cost: Number(itemWithLot.cost) || 0
-            }
-          },
-          error: null
-        });
+          success: false,
+          data: null,
+          error: 'Lot not found'
+        }, { status: 404 });
+        
+      } catch (error) {
+        console.error('❌ [API] Error finding lot:', error);
+        return NextResponse.json({
+          success: false,
+          data: null,
+          error: 'Error searching for lot: ' + error.message
+        }, { status: 500 });
       }
     }
-    
-    return NextResponse.json({
-      success: false,
-      data: null,
-      error: 'Lot not found'
-    }, { status: 404 });
-    
-  } catch (error) {
-    console.error('Error finding lot:', error);
-    return NextResponse.json({
-      success: false,
-      data: null,
-      error: 'Error searching for lot'
-    }, { status: 500 });
-  }
-}
 
-// Replace or update your existing 'lots' action in /api/items/route.js
+    if (id) {
 
 if (action === 'lots') {
   // GET /api/items?id=123&action=lots&lotId=456 (optional)
