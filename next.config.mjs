@@ -10,6 +10,7 @@ const nextConfig = {
   // Remove the webpack target override - let Next.js handle this
   experimental: {
     esmExternals: true,
+    appDir: true,
   },
   
   staticPageGenerationTimeout: 120,
