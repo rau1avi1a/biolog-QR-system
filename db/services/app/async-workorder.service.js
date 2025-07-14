@@ -862,43 +862,44 @@ static async handleWorkOrderFailure(batchId, errorMessage) {
   /**
    * Enhanced NetSuite work order creation with timeout using db.services
    */
+  /**
+   */
   static async createNetSuiteWorkOrder(batch, quantity, user) {
-    try {
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('NetSuite work order creation timed out')), 60000)
+    // Helper to actually call NetSuite
+    const callNetSuite = async () => {
+      const workOrderService = await db.netsuite.createWorkOrderService(user);
+      const result = await workOrderService.createWorkOrderFromBatch(batch, quantity);
+      return {
+        id:       result.workOrder.tranId,
+        tranId:   result.workOrder.tranId,
+        netsuiteId: result.workOrder.id,
+        status:   result.workOrder.status,
+        orderStatus: result.workOrder.orderStatus,
+        bomId:    result.workOrder.bomId,
+        revisionId: result.workOrder.revisionId,
+        quantity,
+        source:   'netsuite'
+      };
+    };
+
+    // Wrap in a promise with timeout
+    const withTimeout = (promise, ms) => {
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('NetSuite request timed out')), ms)
       );
+      return Promise.race([promise(), timeout]);
+    };
 
-      const workOrderPromise = (async () => {
-        // Use db.services for NetSuite work order service
-        const workOrderService = await db.netsuite.createWorkOrderService(user);
-        const result = await workOrderService.createWorkOrderFromBatch(batch, quantity);
-        
-        console.log('✅ NetSuite work order created:', {
-          tranId: result.workOrder.tranId,
-          internalId: result.workOrder.id,
-          status: result.workOrder.status
-        });
-        
-        return {
-          id: result.workOrder.tranId,
-          tranId: result.workOrder.tranId,
-          netsuiteId: result.workOrder.id,
-          status: result.workOrder.status,
-          orderStatus: result.workOrder.orderStatus,
-          bomId: result.workOrder.bomId,
-          revisionId: result.workOrder.revisionId,
-          quantity: quantity,
-          source: 'netsuite'
-        };
-      })();
-
-      return await Promise.race([workOrderPromise, timeoutPromise]);
-    } catch (error) {
-      console.error('❌ NetSuite work order creation failed:', error);
-      throw error;
+    // Try once, catch timeout, then retry one more time
+    try {
+      return await withTimeout(callNetSuite, 240_000);
+    } catch (err) {
+      console.warn('First NetSuite attempt failed:', err.message, '— retrying once...');
+      // second attempt
+      return await withTimeout(callNetSuite, 240_000);
     }
   }
+
 
   /**
    * Create local work order fallback
