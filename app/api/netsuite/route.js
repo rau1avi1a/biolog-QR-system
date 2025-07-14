@@ -3,7 +3,6 @@
 // =============================================================================
 import { NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
-import db from '@/db';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,7 +22,8 @@ async function getUserFromRequest(request) {
       new TextEncoder().encode(process.env.JWT_SECRET)
     );
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const user = await db.models.User.findById(payload.userId);
     
     if (!user) {
@@ -47,7 +47,8 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     switch (action) {
       case 'health': {
@@ -513,7 +514,8 @@ export async function POST(request) {
     const action = searchParams.get('action');
     const body = await request.json();
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     switch (action) {
       case 'setup': {
@@ -895,7 +897,8 @@ export async function PATCH(request) {
     const action = searchParams.get('action');
     const body = await request.json();
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     if (action === 'workorder') {
       const { workOrderId, action: woAction, quantityCompleted } = body;

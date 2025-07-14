@@ -1,6 +1,5 @@
 // app/api/files/route.js
 import { NextResponse } from 'next/server';
-import db from '@/db';
 import { jwtVerify } from 'jose';
 
 export const runtime = 'nodejs';
@@ -14,7 +13,8 @@ async function getAuthUser(request) {
       token,
       new TextEncoder().encode(process.env.JWT_SECRET)
     );
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const u = await db.models.User.findById(payload.userId).select('-password');
     return u ? { _id: u._id, name: u.name, email: u.email, role: u.role } : null;
   } catch {
@@ -30,7 +30,8 @@ export async function GET(request) {
     const search   = url.searchParams.get('search');
     const folderId = url.searchParams.get('folderId') || null;
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     // ----- single-file routes -----
     if (id) {
@@ -170,7 +171,8 @@ export async function POST(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     
     if (action === 'batch-upload') {
       // Handle batch upload with folder structure
@@ -318,7 +320,8 @@ export async function PATCH(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     // Check if file exists
     const existingFile = await db.services.fileService.getFileById(id);
@@ -385,7 +388,8 @@ export async function DELETE(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     // Check if file exists and user has permission
     const existingFile = await db.services.fileService.getFileById(id);
@@ -455,7 +459,8 @@ export async function PUT(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     // Check if file exists
     const existingFile = await db.services.fileService.getFileById(id);

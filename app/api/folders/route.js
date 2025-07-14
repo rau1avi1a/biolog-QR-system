@@ -1,6 +1,5 @@
 // app/api/folders/route.js - FIXED: Consistent wrapped list responses with metadata
 import { NextResponse } from "next/server";
-import db from '@/db';
 import { jwtVerify } from 'jose';
 
 export const runtime = 'nodejs';
@@ -14,7 +13,8 @@ async function getAuthUser(request) {
     
     const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
     
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const user = await db.models.User.findById(payload.userId).select('-password');
     
     return user ? { 
@@ -37,7 +37,8 @@ export async function GET(request) {
     const action = searchParams.get('action');
 
     // Ensure connection
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     if (id) {
       if (action === 'tree') {
@@ -275,7 +276,8 @@ export async function POST(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     
     if (action === 'delete') {
       // POST /api/folders?action=delete&id=123
@@ -517,7 +519,8 @@ export async function PATCH(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     const { name } = await request.json();
     

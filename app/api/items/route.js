@@ -2,7 +2,6 @@
 // app/api/items/route.js - Complete item operations (FIXED: Standardized Response Format)
 // =============================================================================
 import { NextResponse } from 'next/server';
-import db from '@/db';
 import { jwtVerify } from 'jose';
 import mongoose from 'mongoose';
 
@@ -17,7 +16,8 @@ async function getAuthUser(request) {
     
     const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
     
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const user = await db.models.User.findById(payload.userId).select('-password');
     
     return user ? { 
@@ -40,7 +40,8 @@ export async function GET(request) {
     const lotId = searchParams.get('lotId');
 
     // Ensure connection
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
       if (action === 'findLot') {
       console.log('🔍 [API] findLot action triggered with lotId:', lotId);
@@ -352,7 +353,8 @@ export async function POST(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     
     if (id && action === 'transactions') {
       // POST /api/items?id=123&action=transactions&lotId=456
@@ -535,7 +537,8 @@ export async function PATCH(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     // Check if item exists
     const existingItem = await db.services.itemService.getById(id);
@@ -589,7 +592,8 @@ export async function DELETE(request) {
       }, { status: 403 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     if (id && lotId && action === 'lot') {
       // DELETE /api/items?id=123&lotId=456&action=lot
