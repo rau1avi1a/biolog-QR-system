@@ -149,155 +149,188 @@ const canEdit = useMemo(() => {
   const openBOMImport = useCallback(() => canImportBOM && setShowBOMImport(true), [canImportBOM]);
   const closeBOMImport = useCallback(() => setShowBOMImport(false), []);
 
-  const handleBOMImport = useCallback(async () => {
-    if (!file?._id || !selectedSolution?.netsuiteInternalId) return;
-    setIsImportingBOM(true);
-    setError(null);
-  
-    try {
-      // Use your existing working API call
-      const result = await filesApi.netsuite.importBOMWorkflow(
-        file._id,
-        selectedSolution.netsuiteInternalId
-      );
-      if (hasApiError(result)) throw new Error(handleApiError(result));
-  
-      // pull updated file + mappingResults
-      const { file: updatedFile, mappingResults } = extractApiData(result);
-  
-      // FIXED: Don't map units again - they're already mapped by BOM service
-      const enriched = mappingResults.map((mr, idx) => {
-        const nsComp = mr.netsuiteComponent;
-        const local = mr.bestMatch?.chemical || {};
-        
-        // Units are already mapped from '35' → 'mL' by the BOM service
-        // So nsComp.units is already 'mL', not '35'
-        console.log('🔧 Unit debug - already mapped:', {
-          componentName: nsComp.ingredient,
-          unitsFromBOMService: nsComp.units, // This should be 'mL'
-          typeof: typeof nsComp.units
-        });
-        
-        return {
-          id: nsComp.bomComponentId ?? `ns-${idx}`,
-          item: local,
-          itemId: local._id || nsComp.itemId,
-          qty: String(nsComp.quantity ?? nsComp.bomQuantity ?? ''),
-          unit: nsComp.units, // ← Use directly, already mapped to 'mL'
-          amount: parseFloat(nsComp.quantity ?? nsComp.bomQuantity ?? 0),
-          netsuiteData: {
-            ...nsComp,
-            originalUnits: nsComp.units,
-            mappedUnit: nsComp.units
-          }
-        };
-      });
-  
-      // Prepare components for database update using your existing structure
-      const validComponents = enriched
-        .filter(c => {
-          const hasValidId = c?.itemId || c?.item?._id;
-          const hasValidQty = c?.qty || c?.amount;
-          return hasValidId && hasValidQty;
-        })
-        .map(c => ({
-          item: c.itemId || c.item?._id,  // Keep your existing field name structure
-          qty: c.qty || String(c.amount || 0),
-          unit: c.unit, // ← This should now be 'mL' from BOM service
-          amount: c.amount || parseFloat(c.qty) || 0,
-          netsuiteData: {
-            ...c.netsuiteData,
-            originalNetSuiteUnitId: c.netsuiteData?.originalUnits || c.netsuiteData?.units,
-            mappedUnitSymbol: c.unit
-          }
-        }));
-  
-      console.log('🔧 BOM Import - Final components with units:', validComponents.map(c => ({
-        itemId: c.item,
-        unit: c.unit, // This should show 'mL' not 'ea'
-        originalNetSuiteId: c.netsuiteData?.originalNetSuiteUnitId,
-        amount: c.amount
-      })));
-  
-      // Update the file using your existing API structure
-      const fileUpdateResult = await filesApi.files.updateMeta(file._id, {
-        recipeQty: 1,
-        recipeUnit: 'mL',
-        components: validComponents
-      });
-  
-      if (hasApiError(fileUpdateResult)) {
-        throw new Error(handleApiError(fileUpdateResult));
-      }
-  
-      const finalUpdatedFile = extractApiData(fileUpdateResult);
-  
-      // Update UI state
-      setComponents(enriched);
-      setRecipeQty('1');
-      setRecipeUnit('mL');
-      setHasChanges(false);
-      setShowBOMImport(false);
-      onSaved?.(finalUpdatedFile);
-  
-      console.log('✅ BOM Import completed successfully with mapped units');
-  
-    } catch (err) {
-      console.error('❌ BOM Import failed:', err);
-      setError(err.message || 'Error importing BOM');
-    } finally {
-      setIsImportingBOM(false);
-    }
-  }, [file, selectedSolution, onSaved]);
-  
-  // save file
-  const save = useCallback(async () => {
-    if (!isValid || !canEdit || !file?._id) return;
-    setIsSaving(true);
-    setError(null);
+// FIXED BOM Import Handler in FileProperties/hooks/core.js
+// Replace the handleBOMImport function around line 130
 
-    try {
-      const updateData = {
-        fileName:    fileName.trim(),
-        description: description.trim(),
-        recipeQty:   parseFloat(recipeQty) || 0,
-        recipeUnit:  recipeUnit.trim() || 'L',
-        components:  components.map(c => ({
-          item:         c.itemId,
-          qty:          c.qty,
-          unit:         c.unit,
-          amount:       c.amount,
-          netsuiteData: c.netsuiteData
-        })),
-        solutionRef
+const handleBOMImport = useCallback(async () => {
+  if (!file?._id || !selectedSolution?.netsuiteInternalId) return;
+  setIsImportingBOM(true);
+  setError(null);
+
+  try {
+    // Use your existing working API call
+    const result = await filesApi.netsuite.importBOMWorkflow(
+      file._id,
+      selectedSolution.netsuiteInternalId
+    );
+    if (hasApiError(result)) throw new Error(handleApiError(result));
+
+    // pull updated file + mappingResults
+    const { file: updatedFile, mappingResults } = extractApiData(result);
+
+    // FIXED: Don't map units again - they're already mapped by BOM service
+    const enriched = mappingResults.map((mr, idx) => {
+      const nsComp = mr.netsuiteComponent;
+      const local = mr.bestMatch?.chemical || {};
+      
+      // Units are already mapped from '35' → 'mL' by the BOM service
+      console.log('🔧 Unit debug - already mapped:', {
+        componentName: nsComp.ingredient,
+        unitsFromBOMService: nsComp.units,
+        typeof: typeof nsComp.units
+      });
+      
+      return {
+        id: nsComp.bomComponentId ?? `ns-${idx}`,
+        item: local,
+        itemId: local._id || nsComp.itemId,
+        qty: String(nsComp.quantity ?? nsComp.bomQuantity ?? ''),
+        unit: nsComp.units, // ← Use directly, already mapped to 'mL'
+        amount: parseFloat(nsComp.quantity ?? nsComp.bomQuantity ?? 0),
+        netsuiteData: {
+          ...nsComp,
+          originalUnits: nsComp.units,
+          mappedUnit: nsComp.units
+        }
       };
+    });
 
-      const result = await filesApi.files.updateMeta(file._id, updateData);
-      if (hasApiError(result)) throw new Error(handleApiError(result));
+    // Prepare components for database update using your existing structure
+    const validComponents = enriched
+      .filter(c => {
+        const hasValidId = c?.itemId || c?.item?._id;
+        const hasValidQty = c?.qty || c?.amount;
+        return hasValidId && hasValidQty;
+      })
+      .map(c => ({
+        item: c.itemId || c.item?._id,
+        qty: c.qty || String(c.amount || 0),
+        unit: c.unit,
+        amount: c.amount || parseFloat(c.qty) || 0,
+        netsuiteData: {
+          ...c.netsuiteData,
+          originalNetSuiteUnitId: c.netsuiteData?.originalUnits || c.netsuiteData?.units,
+          mappedUnitSymbol: c.unit
+        }
+      }));
 
-      setHasChanges(false);
-      const updatedFile = extractApiData(result);
+    console.log('🔧 BOM Import - Final components with units:', validComponents.map(c => ({
+      itemId: c.item,
+      unit: c.unit,
+      originalNetSuiteId: c.netsuiteData?.originalNetSuiteUnitId,
+      amount: c.amount
+    })));
 
-      // if the backend populated the full solution object, grab it
-      const popSol = updatedFile.solution || updatedFile.solutionRef;
-      if (popSol) {
-        setSelectedSolution(popSol);
-        setSolutionRef(popSol._id);
-      }
+    // 🔥 CRITICAL FIX: Update the file with preservation flags
+    const fileUpdateResult = await filesApi.files.updateMeta(file._id, {
+      recipeQty: 1,
+      recipeUnit: 'mL',
+      components: validComponents,
+      // 🆕 ADD THESE FLAGS TO PREVENT PDF RELOAD ISSUES
+      _skipDocumentReset: true,
+      _preservePage: 1,
+      _preserveOverlays: true
+    });
 
-      onSaved?.(updatedFile);
-    } catch (err) {
-      console.error(err);
-      setError(err.message || 'Error saving');
-      throw err;
-    } finally {
-      setIsSaving(false);
+    if (hasApiError(fileUpdateResult)) {
+      throw new Error(handleApiError(fileUpdateResult));
     }
-  }, [
-    isValid, canEdit, fileName, description,
-    recipeQty, recipeUnit, components, solutionRef,
-    file, onSaved
-  ]);
+
+    const finalUpdatedFile = extractApiData(fileUpdateResult);
+
+    // Update UI state
+    setComponents(enriched);
+    setRecipeQty('1');
+    setRecipeUnit('mL');
+    setHasChanges(false);
+    setShowBOMImport(false);
+    
+    // 🔥 CRITICAL FIX: Call onSaved with preservation flags
+    if (onSaved) {
+      const fileWithPreservation = {
+        ...finalUpdatedFile,
+        _skipDocumentReset: true,
+        _preservePage: 1,
+        _preserveOverlays: true,
+        _bomImportCompleted: true // Flag to indicate BOM import was successful
+      };
+      onSaved(fileWithPreservation);
+    }
+
+    console.log('✅ BOM Import completed successfully with mapped units and PDF preservation');
+
+  } catch (err) {
+    console.error('❌ BOM Import failed:', err);
+    setError(err.message || 'Error importing BOM');
+  } finally {
+    setIsImportingBOM(false);
+  }
+}, [file, selectedSolution, onSaved]);
+
+  // save file
+const save = useCallback(async () => {
+  if (!isValid || !canEdit || !file?._id) return;
+  setIsSaving(true);
+  setError(null);
+
+  try {
+    const updateData = {
+      fileName:    fileName.trim(),
+      description: description.trim(),
+      recipeQty:   parseFloat(recipeQty) || 0,
+      recipeUnit:  recipeUnit.trim() || 'L',
+      components:  components.map(c => ({
+        item:         c.itemId,
+        qty:          c.qty,
+        unit:         c.unit,
+        amount:       c.amount,
+        netsuiteData: c.netsuiteData
+      })),
+      solutionRef,
+      // 🔥 CRITICAL FIX: Add preservation flags for regular saves too
+      _skipDocumentReset: true,
+      _preservePage: 1,
+      _preserveOverlays: true
+    };
+
+    const result = await filesApi.files.updateMeta(file._id, updateData);
+    if (hasApiError(result)) throw new Error(handleApiError(result));
+
+    setHasChanges(false);
+    const updatedFile = extractApiData(result);
+
+    // if the backend populated the full solution object, grab it
+    const popSol = updatedFile.solution || updatedFile.solutionRef;
+    if (popSol) {
+      setSelectedSolution(popSol);
+      setSolutionRef(popSol._id);
+    }
+
+    // 🔥 CRITICAL FIX: Call onSaved with preservation flags
+    if (onSaved) {
+      const fileWithPreservation = {
+        ...updatedFile,
+        _skipDocumentReset: true,
+        _preservePage: 1,
+        _preserveOverlays: true,
+        _regularSaveCompleted: true // Flag to indicate regular save was successful
+      };
+      onSaved(fileWithPreservation);
+    }
+
+  } catch (err) {
+    console.error(err);
+    setError(err.message || 'Error saving');
+    throw err;
+  } finally {
+    setIsSaving(false);
+  }
+}, [
+  isValid, canEdit, fileName, description,
+  recipeQty, recipeUnit, components, solutionRef,
+  file, onSaved
+]);
+
 
   // delete file
   const deleteFile = useCallback(async () => {
