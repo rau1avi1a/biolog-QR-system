@@ -1,6 +1,5 @@
 // app/api/batches/route.js - FIXED: Consistent wrapped list responses with metadata
 import { NextResponse } from 'next/server';
-import db from '@/db';
 import { jwtVerify } from 'jose';
 
 export const runtime = 'nodejs';
@@ -14,7 +13,8 @@ async function getAuthUser(request) {
     
     const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
     
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const user = await db.models.User.findById(payload.userId).select('-password');
     
     return user ? { 
@@ -36,7 +36,8 @@ export async function GET(request) {
     const action = searchParams.get('action');
 
     // Ensure connection
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     if (id) {
     if (id && action === 'assemblybuild-status') {
@@ -275,7 +276,8 @@ export async function POST(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     if (id && action === 'workorder-retry') {
       // POST /api/batches?id=123&action=workorder-retry
@@ -396,7 +398,8 @@ export async function PATCH(request) {
       }, { status: 401 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
 
     // Check if batch exists
     const existingBatch = await db.services.batchService.getBatchById(id);
@@ -463,7 +466,8 @@ export async function DELETE(request) {
 
     // Only allow admins or the creator to delete batches
     if (user.role !== 'admin') {
-      await db.connect();
+        const { default: db } = await import('@/db');
+  await db.connect();
       const existingBatch = await db.services.batchService.getBatchById(id);
       if (!existingBatch) {
         return NextResponse.json({ 

@@ -2,7 +2,6 @@
 // app/api/auth/route.js (FIXED: Standardized Response Format)
 // =============================================================================
 import { NextResponse } from 'next/server';
-import db from '@/db';
 import { SignJWT, jwtVerify } from 'jose';
 
 export const runtime = 'nodejs';
@@ -15,7 +14,8 @@ export async function POST(request) {
   if (action === 'login') {
     const { email, password } = await request.json();
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const user = await db.models.User.findOne({ email });
     if (!user || !(await user.matchPassword(password))) {
       return NextResponse.json({ 
@@ -79,7 +79,8 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const existingUser = await db.models.User.findOne({ email });
     if (existingUser) {
       return NextResponse.json({ 
@@ -167,7 +168,8 @@ export async function GET(request) {
 
       const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
       
-      await db.connect();
+        const { default: db } = await import('@/db');
+  await db.connect();
       const user = await db.models.User.findById(payload.userId).select('-password');
       
       if (!user) {
@@ -215,7 +217,8 @@ export async function GET(request) {
 
       const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
       
-      await db.connect();
+        const { default: db } = await import('@/db');
+  await db.connect();
       const requestingUser = await db.models.User.findById(payload.userId);
       
       if (!requestingUser || requestingUser.role !== 'admin') {

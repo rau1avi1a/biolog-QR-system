@@ -2,7 +2,6 @@
 // app/api/upload/route.js - CSV Upload Handler for Solution Inventory (FIXED: Standardized Response Format)
 // =============================================================================
 import { NextResponse } from 'next/server';
-import db from '@/db';
 import { jwtVerify } from 'jose';
 
 export const runtime = 'nodejs';
@@ -16,7 +15,8 @@ async function getAuthUser(request) {
     
     const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
     
-    await db.connect();
+      const { default: db } = await import('@/db');
+  await db.connect();
     const user = await db.models.User.findById(payload.userId).select('-password');
     
     return user ? { 
@@ -141,6 +141,7 @@ async function handleSolutionInventoryUpload(request, user, itemType) {
 }
 
 async function processSolutionInventoryData(csvData, user, itemType) {
+    const { default: db } = await import('@/db');
   await db.connect();
   
   const results = {
