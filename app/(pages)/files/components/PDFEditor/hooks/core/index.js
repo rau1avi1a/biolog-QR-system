@@ -120,15 +120,36 @@ export function useMain(props) {
 
   // === DOCUMENT RESET EFFECT ===
 useEffect(() => {
-  // Skip reset if this is a save operation
-  if (doc?._skipDocumentReset) {
-    console.log('📄 Skipping document reset - save operation');
+  // 🔥 CRITICAL FIX: Better detection of when to skip reset
+  const shouldSkipReset = doc?._skipDocumentReset || 
+                         doc?._bomImportCompleted || 
+                         doc?._regularSaveCompleted ||  // 🆕 ADD THIS
+                         doc?._preservePage ||
+                         doc?._preserveOverlays;
+
+  if (shouldSkipReset) {
+    console.log('📄 Skipping document reset - preservation flags detected:', {
+      _skipDocumentReset: doc._skipDocumentReset,
+      _bomImportCompleted: doc._bomImportCompleted,
+      _regularSaveCompleted: doc._regularSaveCompleted,  // 🆕 ADD THIS
+      _preservePage: doc._preservePage,
+      _preserveOverlays: doc._preserveOverlays
+    });
     
+    // Clean up the flags after preserving state
     if (setCurrentDoc) {
       setTimeout(() => {
-        const { _skipDocumentReset, _preserveOverlays, _preserveHistories, _preservePage, ...cleanDoc } = doc;
+        const { 
+          _skipDocumentReset, 
+          _preserveOverlays, 
+          _preserveHistories, 
+          _preservePage,
+          _bomImportCompleted,
+          _regularSaveCompleted,  // 🆕 ADD THIS
+          ...cleanDoc 
+        } = doc;
         setCurrentDoc(cleanDoc);
-      }, 1000);
+      }, 1500); // Longer delay for BOM import
     }
     return;
   }
@@ -137,17 +158,16 @@ useEffect(() => {
   
   console.log('📄 Document changed, resetting PDF editor');
   
-  // Handle post-save state preservation
+  // Handle post-save state preservation (existing logic)
   const isPostSave = overlayCore.postSaveRef.current || 
-                     (overlayCore.stateBackupRef.current && (Date.now() - overlayCore.stateBackupRef.current.timestamp < 3000)) ||
-                     doc?._preserveOverlays;
+                     (overlayCore.stateBackupRef.current && (Date.now() - overlayCore.stateBackupRef.current.timestamp < 3000));
 
   if (isPostSave) {
     console.log('🔄 Post-save document update - preserving working overlays');
     
-    const preservedOverlays = doc?._preserveOverlays || overlayCore.stateBackupRef.current?.overlays || overlayCore.overlaysRef.current;
-    const preservedHistories = doc?._preserveHistories || overlayCore.stateBackupRef.current?.histories || overlayCore.historiesRef.current;
-    const targetPage = doc?._preservePage || overlayCore.stateBackupRef.current?.currentPage || currentPageNo;
+    const preservedOverlays = overlayCore.stateBackupRef.current?.overlays || overlayCore.overlaysRef.current;
+    const preservedHistories = overlayCore.stateBackupRef.current?.histories || overlayCore.historiesRef.current;
+    const targetPage = overlayCore.stateBackupRef.current?.currentPage || currentPageNo;
     
     overlayCore.overlaysRef.current = preservedOverlays;
     overlayCore.historiesRef.current = preservedHistories;
@@ -181,7 +201,7 @@ useEffect(() => {
     return;
   }
   
-  // Normal document change
+  // Normal document change (existing logic continues...)
   const validPdfData = pdfCore.determinePdfSource(doc);
   pdfCore.debugPdfData('Document Reset', validPdfData);
   pdfCore.setBlobUri(validPdfData);
@@ -212,6 +232,10 @@ useEffect(() => {
   doc?.signedPdf,
   doc?.pageOverlays,
   doc?._skipDocumentReset,
+  doc?._bomImportCompleted,    // 🆕 ADD THIS
+  doc?._regularSaveCompleted,     // 🆕 ADD THIS
+  doc?._preservePage,          // 🆕 ADD THIS
+  doc?._preserveOverlays,      // 🆕 ADD THIS
   setCurrentDoc
 ]);
 

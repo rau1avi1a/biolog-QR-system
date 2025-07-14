@@ -636,12 +636,61 @@ console.log('🔧 Setting propertiesDoc with:', {
     if (!open) setPropertiesDoc(null);
   }, []);
 
-  const handlePropertiesSaved = useCallback((updatedDoc) => {
-    if (currentDoc && currentDoc._id === updatedDoc._id) {
+const handlePropertiesSaved = useCallback((updatedDoc) => {
+  console.log('🔧 Properties saved, updating current doc:', {
+    hasCurrentDoc: !!currentDoc,
+    currentDocId: currentDoc?._id,
+    updatedDocId: updatedDoc?._id,
+    hasBomImportFlag: !!updatedDoc?._bomImportCompleted,
+    hasPreservationFlags: !!(updatedDoc?._skipDocumentReset || updatedDoc?._preservePage)
+  });
+
+  // 🔥 CRITICAL FIX: If this is the currently open document, update it carefully
+  if (currentDoc && currentDoc._id === updatedDoc._id) {
+    
+    // Check if this is a BOM import or other operation that should preserve PDF state
+    const shouldPreservePdfState = updatedDoc._bomImportCompleted || 
+                                  updatedDoc._regularSaveCompleted ||  // 🆕 ADD THIS
+                                  updatedDoc._skipDocumentReset || 
+                                  updatedDoc._preservePage;
+    
+    if (shouldPreservePdfState) {
+      console.log('🔧 Preserving PDF state during document update');
+      
+      // Merge the updates while preserving PDF-related properties
+      const preservedDoc = {
+        ...currentDoc,        // Keep existing PDF and state
+        ...updatedDoc,        // Apply the updates
+        pdf: currentDoc.pdf,  // 🔥 CRITICAL: Keep the original PDF data
+        _skipDocumentReset: true,
+        _preservePage: updatedDoc._preservePage || 1,
+        _preserveOverlays: true
+      };
+      
+      // Clean up the flags after a short delay
+      setTimeout(() => {
+        if (setCurrentDoc) {
+          const cleanDoc = { ...preservedDoc };
+          delete cleanDoc._skipDocumentReset;
+          delete cleanDoc._preservePage;
+          delete cleanDoc._preserveOverlays;
+          delete cleanDoc._bomImportCompleted;
+          delete cleanDoc._regularSaveCompleted;  // 🆕 ADD THIS
+          setCurrentDoc(cleanDoc);
+        }
+      }, 1000);
+      
+      setCurrentDoc(preservedDoc);
+    } else {
+      // Normal update without preservation
       setCurrentDoc(updatedDoc);
     }
-    triggerRefresh();
-  }, [currentDoc, triggerRefresh]);
+  }
+  
+  // Always refresh the file list to show updated metadata
+  triggerRefresh();
+}, [currentDoc, triggerRefresh]);
+
 
   const handleFileDeleted = useCallback((deletedDoc) => {
     setPropertiesDoc(null);
