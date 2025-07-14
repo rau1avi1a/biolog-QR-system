@@ -1,6 +1,11 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// Disable static generation for dynamic routes
+export async function generateStaticParams() {
+  return []; // no static paths at build time
+}
+
 import { notFound } from 'next/navigation';
 import FilesDetailClient from './FilesDetailClient';
 
