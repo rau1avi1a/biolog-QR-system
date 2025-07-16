@@ -595,6 +595,21 @@ export function customOperations(apiManager, handleApiCall) {
           }
         }
       },
+
+           async searchItems(query) {
+        // If no query, just return empty list
+        if (!query?.trim()) {
+          return { data: { items: [] }, error: null }
+        }
+
+        // call the list endpoint with a `search` parameter
+        return handleApiCall(
+          'custom',
+          'items-search',
+          { query: query.trim() },
+          () => apiManager.client('items').list({ search: query.trim() })
+        )
+      },
   
       // === INVENTORY OPERATIONS ===
       async getItemLots(itemId, lotId = null) {
