@@ -57,114 +57,143 @@ export class NetSuiteImportService {
   /**
    * Execute SuiteQL query with pagination
    */
-  async executeSuiteQL(query, offset = 0, limit = 1000) {
-    await this.ensureAuth();
-    
-    const queryWithPagination = `${query} LIMIT ${limit} OFFSET ${offset}`;
-    console.log('🔍 Executing SuiteQL:', queryWithPagination);
+async executeSuiteQL(query, offset = 0, limit = 1000) {
+  await this.ensureAuth();
+  
+  console.log('🔍 Executing SuiteQL with offset/limit:', { offset, limit });
 
-    // Store original base URL and switch to query endpoint
-    const originalBaseUrl = this.auth.baseUrl;
+  // Store original base URL and switch to query endpoint
+  const originalBaseUrl = this.auth.baseUrl;
+  
+  try {
+    // Switch to SuiteQL endpoint
+    this.auth.baseUrl = 'https://4511488-sb1.suitetalk.api.netsuite.com/services/rest';
     
-    try {
-      // Switch to SuiteQL endpoint
-      this.auth.baseUrl = 'https://4511488-sb1.suitetalk.api.netsuite.com/services/rest';
-      
-      const response = await this.auth.makeRequest('/query/v1/suiteql', 'POST', { 
-        q: queryWithPagination 
-      }, {
-        'Prefer': 'transient'
-      });
-      
-      console.log('📋 SuiteQL response:', {
-        hasItems: !!response.items,
-        itemCount: response.items?.length || 0,
-        hasMore: response.hasMore
-      });
-      
-      return {
-        items: response.items || [],
-        hasMore: response.hasMore || false,
-        count: response.count || 0,
+    // NetSuite SuiteQL pagination is handled via URL parameters, not SQL LIMIT/OFFSET
+    const endpoint = `/query/v1/suiteql?limit=${limit}&offset=${offset}`;
+    
+    const response = await this.auth.makeRequest(endpoint, 'POST', { 
+      q: query  // Send the original query without LIMIT/OFFSET
+    }, {
+      'Prefer': 'transient'
+    });
+    
+    console.log('📋 SuiteQL response:', {
+      hasItems: !!response.items,
+      itemCount: response.items?.length || 0,
+      hasMore: response.hasMore,
+      count: response.count
+    });
+    
+    return {
+      items: response.items || [],
+      hasMore: response.hasMore || false,
+      count: response.count || 0,
+      offset: offset,
+      limit: limit
+    };
+    
+  } catch (error) {
+    console.error('❌ SuiteQL execution failed:', error);
+    throw new Error(`SuiteQL query failed: ${error.message}`);
+  } finally {
+    // Always restore original base URL
+    this.auth.baseUrl = originalBaseUrl;
+  }
+}
+
+// =============================================================================
+// UPDATED: Fix the getInventoryQuery method to not include LIMIT/OFFSET
+// =============================================================================
+
+/**
+ * Get the standard inventory query (without LIMIT/OFFSET)
+ */
+getInventoryQuery() {
+  return `SELECT
+    i.itemid                   AS sku,
+    i.displayname              AS "display name",
+    i.id                       AS "item internal id",
+    i.itemtype                 AS type,
+    inv.inventorynumber        AS "lot number",
+    inv.quantityonhand         AS "lot quantity",
+    inv.id                     AS "lot internal id"
+  FROM
+    item i
+  LEFT OUTER JOIN
+    inventorynumber inv
+    ON inv.item = i.id
+  WHERE
+    i.itemid LIKE '24-%'
+  ORDER BY
+    i.itemid,
+    inv.inventorynumber`;
+}
+
+// =============================================================================
+// UPDATED: Fix the fetchAllInventoryData method for proper pagination
+// =============================================================================
+
+/**
+ * Fetch all inventory data in batches with proper NetSuite pagination
+ */
+async fetchAllInventoryData(onProgress = null) {
+  const query = this.getInventoryQuery();
+  const batchSize = 1000;
+  let offset = 0;
+  let hasMore = true;
+  let batchCount = 0;
+  const allItems = [];
+
+  while (hasMore) {
+    batchCount++;
+    
+    if (onProgress) {
+      onProgress({
+        step: 'fetching',
+        batch: batchCount,
         offset: offset,
-        limit: limit
-      };
-      
-    } catch (error) {
-      console.error('❌ SuiteQL execution failed:', error);
-      throw new Error(`SuiteQL query failed: ${error.message}`);
-    } finally {
-      // Always restore original base URL
-      this.auth.baseUrl = originalBaseUrl;
+        message: `Fetching batch ${batchCount} from NetSuite (${offset} - ${offset + batchSize})...`
+      });
     }
-  }
 
-  /**
-   * Get the standard inventory query
-   */
-  getInventoryQuery() {
-    return `SELECT
-      i.itemid                   AS sku,
-      i.displayname              AS "display name",
-      i.id                       AS "item internal id",
-      i.itemtype                 AS type,
-      inv.inventorynumber        AS "lot number",
-      inv.quantityonhand         AS "lot quantity",
-      inv.id                     AS "lot internal id"
-    FROM
-      item i
-    LEFT OUTER JOIN
-      inventorynumber inv
-      ON inv.item = i.id
-    WHERE
-      i.itemid LIKE '24-%'
-    ORDER BY
-      i.itemid,
-      inv.inventorynumber`;
-  }
-
-  /**
-   * Fetch all inventory data in batches
-   */
-  async fetchAllInventoryData(onProgress = null) {
-    const query = this.getInventoryQuery();
-    const batchSize = 1000;
-    let offset = 0;
-    let hasMore = true;
-    let batchCount = 0;
-    const allItems = [];
-
-    while (hasMore) {
-      batchCount++;
-      
-      if (onProgress) {
-        onProgress({
-          step: 'fetching',
-          batch: batchCount,
-          message: `Fetching batch ${batchCount} from NetSuite...`
-        });
-      }
-
+    try {
       const batchResult = await this.executeSuiteQL(query, offset, batchSize);
       
       if (batchResult.items && batchResult.items.length > 0) {
         allItems.push(...batchResult.items);
         hasMore = batchResult.hasMore;
         offset += batchSize;
+        
+        console.log(`📦 Batch ${batchCount}: Got ${batchResult.items.length} items, hasMore: ${hasMore}`);
       } else {
         hasMore = false;
+        console.log(`📦 Batch ${batchCount}: No items returned, stopping`);
       }
 
       // Safety check to prevent infinite loops
       if (batchCount > 10) {
-        console.warn('⚠️ Max batch limit reached');
+        console.warn('⚠️ Max batch limit reached (10 batches)');
         break;
       }
+      
+    } catch (error) {
+      console.error(`❌ Batch ${batchCount} failed:`, error);
+      
+      // If it's the first batch, throw the error
+      if (batchCount === 1) {
+        throw error;
+      }
+      
+      // Otherwise, stop pagination but return what we have
+      console.warn(`⚠️ Stopping pagination due to error in batch ${batchCount}`);
+      hasMore = false;
     }
-
-    console.log(`✅ Fetched ${allItems.length} items from NetSuite in ${batchCount} batches`);
-    return allItems;
   }
+
+  console.log(`✅ Fetched ${allItems.length} items from NetSuite in ${batchCount} batches`);
+  return allItems;
+}
 
   /**
    * Group NetSuite items by SKU (since lots create multiple rows)

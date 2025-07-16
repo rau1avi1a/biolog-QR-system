@@ -62,6 +62,10 @@ export default function NetSuiteImportComponent({ onImportComplete }) {
   const abortControllerRef = useRef(null);
   const progressIntervalRef = useRef(null);
 
+const [importedItems, setImportedItems] = useState([]); // Items that were successfully imported
+const [showImportedPreview, setShowImportedPreview] = useState(false); // Show imported items with QR buttons
+
+
   // Test NetSuite connection on mount
   useEffect(() => {
     testConnection();
@@ -78,6 +82,49 @@ export default function NetSuiteImportComponent({ onImportComplete }) {
       }
     };
   }, []);
+  
+// open a new tab to just the lot’s ID
+const handlePrintQRCode = (_itemId, lotId) => {
+  if (!lotId) return;  
+  window.open(`/${lotId}`, "_blank");
+};
+
+
+  //helper:
+  const getImportedItemsWithIds = async (originalItems, importResults) => {
+  const itemsWithIds = [];
+  
+  for (const originalItem of originalItems) {
+    try {
+      // Find the item in the database by SKU to get its ObjectId
+      const dbItem = await homeApi.items.search(originalItem.sku);
+      
+      if (dbItem && dbItem.length > 0) {
+        const foundItem = dbItem[0];
+        
+        // Create structure for each lot with the item's ObjectId
+        const lotsWithIds = originalItem.lots.map(lot => ({
+          ...lot,
+          itemId: foundItem._id,
+          itemSku: foundItem.sku,
+          itemDisplayName: foundItem.displayName,
+          lotId: foundItem.Lots?.find(l => l.lotNumber === lot.lotNumber)?._id || null
+        }));
+        
+        itemsWithIds.push({
+          ...originalItem,
+          itemId: foundItem._id,
+          mongoItem: foundItem,
+          lotsWithIds: lotsWithIds
+        });
+      }
+    } catch (error) {
+      console.error('Error getting imported item ID:', error);
+    }
+  }
+  
+  return itemsWithIds;
+};
 
   // =============================================================================
   // CONNECTION FUNCTIONS
@@ -216,41 +263,52 @@ export default function NetSuiteImportComponent({ onImportComplete }) {
     }
   };
 
-  const handleImportSelected = async () => {
-    try {
-      setIsImporting(true);
-      setError(null);
-      setCurrentOperation('Importing selected items...');
+const handleImportSelected = async () => {
+  try {
+    setIsImporting(true);
+    setError(null);
+    setCurrentOperation('Importing selected items...');
+    
+    const itemsToImport = selectedItems.map(index => previewItems[index]);
+    
+    // Start progress simulation
+    startProgressSimulation(20000); // 20 seconds
+    setCurrentOperation('Processing selected items...');
+    
+    const result = await homeApi.netsuite.importSelected(itemsToImport);
+    
+    // Complete progress
+    completeProgress('Selected items imported successfully!');
+    
+    setImportResults(result);
+    
+    // NEW: Store the imported items for QR code generation
+    if (result.success && result.results) {
+      // Get the imported items with their new MongoDB ObjectIds
+      const importedItemsWithIds = await getImportedItemsWithIds(itemsToImport, result.results);
+      setImportedItems(importedItemsWithIds);
       
-      const itemsToImport = selectedItems.map(index => previewItems[index]);
-      
-      // Start progress simulation
-      startProgressSimulation(20000); // 20 seconds
-      setCurrentOperation('Processing selected items...');
-      
-      const result = await homeApi.netsuite.importSelected(itemsToImport);
-      
-      // Complete progress
-      completeProgress('Selected items imported successfully!');
-      
-      setImportResults(result);
+      // Close the preview dialog and show the imported items dialog
       setShowPreview(false);
+      setShowImportedPreview(true);
       setPreviewItems([]);
       setSelectedItems([]);
-      
-      if (onImportComplete) {
-        onImportComplete(result);
-      }
-      
-    } catch (err) {
-      console.error('Import selected items error:', err);
-      setError(err.message);
-      setCurrentOperation('Import failed');
-      stopProgressSimulation();
-    } finally {
-      setIsImporting(false);
     }
-  };
+    
+    if (onImportComplete) {
+      onImportComplete(result);
+    }
+    
+  } catch (err) {
+    console.error('Import selected items error:', err);
+    setError(err.message);
+    setCurrentOperation('Import failed');
+    stopProgressSimulation();
+  } finally {
+    setIsImporting(false);
+  }
+};
+
 
   const cancelImport = () => {
     if (abortControllerRef.current) {
@@ -580,32 +638,36 @@ export default function NetSuiteImportComponent({ onImportComplete }) {
                         )}
 
                         {/* Actions */}
-                        <div className="flex gap-2 pt-4 border-t">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="flex items-center gap-2"
-                            onClick={() => {
-                              // This would open the item page after import
-                              console.log('Will open item page after import');
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                            Preview Page
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="flex items-center gap-2"
-                            onClick={() => {
-                              // This would trigger QR code printing
-                              console.log('Will print QR code after import');
-                            }}
-                          >
-                            <Printer className="h-4 w-4" />
-                            Print QR Code
-                          </Button>
-                        </div>
+{/* <div className="flex gap-2 pt-4 border-t">
+  <Button
+    size="sm"
+    variant="outline"
+    className="flex items-center gap-2"
+    onClick={() => {
+      const lotId = currentItem.lots?.[0]?.lotInternalId;
+      if (lotId) window.open(`/${lotId}`, '_blank');
+    }}
+    disabled
+  >
+    <Eye className="h-4 w-4" />
+    View Item (After Import)
+  </Button>
+
+  <Button
+    size="sm"
+    variant="outline"
+    className="flex items-center gap-2"
+    onClick={() => {
+      const lotId = currentItem.lots?.[0]?.lotInternalId;
+      if (lotId) window.open(`/${lotId}`, '_blank');
+    }}
+    disabled
+  >
+    <Printer className="h-4 w-4" />
+    Print QR Code (After Import)
+  </Button>
+</div> */}
+
                       </CardContent>
                     </Card>
                   </ScrollArea>
@@ -637,6 +699,169 @@ export default function NetSuiteImportComponent({ onImportComplete }) {
       </Dialog>
     );
   };
+
+const renderImportedItemsDialog = () => {
+  return (
+    <Dialog open={showImportedPreview} onOpenChange={setShowImportedPreview}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckCircle className="h-5 w-5 text-green-500" />
+            Items Imported Successfully ({importedItems.length})
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex flex-col h-full">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-800">
+              <strong>Import completed!</strong> You can now print QR codes for individual lots.
+              Each lot will have its own unique QR code linked to its MongoDB ObjectId.
+            </p>
+          </div>
+
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-[500px] p-4">
+              <div className="space-y-4">
+                {importedItems.map((item, itemIndex) => (
+                  <Card key={itemIndex} className="border-green-200">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-lg bg-green-100">
+                            {getItemIcon(item.itemType)}
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-lg text-green-800">
+                              {item.displayName}
+                            </h3>
+                            <p className="text-sm text-green-600 font-mono">
+                              {item.sku}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* ─── Actions (Imported‑Items Dialog) ──────────────────────────── */}
+                        {item.lotsWithIds && item.lotsWithIds.length > 0 && (
+                          <div className="flex flex-wrap gap-2 pt-4 border-t">
+                            {item.lotsWithIds.map((lot, i) => (
+                              <React.Fragment key={i}>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex items-center gap-2"
+                                  onClick={() => window.open(`/${lot.lotId}`, "_blank")}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View Lot {lot.lotNumber}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex items-center gap-2"
+                                  onClick={() => window.open(`/${lot.lotId}`, "_blank")}
+                                >
+                                  <Printer className="h-4 w-4" />
+                                  Print QR {lot.lotNumber}
+                                </Button>
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">MongoDB ID:</span>
+                          <p className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
+                            {item.itemId}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">NetSuite ID:</span>
+                          <p className="font-mono text-xs">{item.netsuiteInternalId}</p>
+                        </div>
+                      </div>
+
+                      {/* Lots & QR Codes List */}
+                      {item.lotsWithIds && item.lotsWithIds.length > 0 && (
+                        <div>
+                          <h4 className="font-medium mb-3 flex items-center gap-2">
+                            <Package className="h-4 w-4" />
+                            Lots & QR Codes
+                          </h4>
+                          <div className="space-y-2">
+                            {item.lotsWithIds.map((lot, lotIndex) => (
+                              <div
+                                key={lotIndex}
+                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <span className="font-mono text-sm font-medium">
+                                    {lot.lotNumber}
+                                  </span>
+                                  <p className="text-xs text-muted-foreground">
+                                    Quantity: {lot.quantity} units
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {lot.lotId && (
+                                    <Badge variant="outline" className="text-xs">
+                                      Lot ID: {lot.lotId.substring(0, 8)}...
+                                    </Badge>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="default"
+                                    onClick={() => window.open(`/${lot.lotId}`, "_blank")}
+                                    className="flex items-center gap-2"
+                                  >
+                                    <Printer className="h-4 w-4" />
+                                    Print QR Code
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setShowImportedPreview(false)}
+          >
+            Close
+          </Button>
+          <Button
+            onClick={() => {
+              // Batch-print all lots
+              importedItems.forEach(item => {
+                item.lotsWithIds?.forEach(lot => {
+                  setTimeout(() => {
+                    window.open(`/${lot.lotId}`, "_blank");
+                  }, 100);
+                });
+              });
+            }}
+            className="flex items-center gap-2"
+          >
+            <Printer className="h-4 w-4" />
+            Print All QR Codes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
   // =============================================================================
   // MAIN RENDER
@@ -677,7 +902,9 @@ export default function NetSuiteImportComponent({ onImportComplete }) {
       </Card>
 
       {/* Preview Dialog */}
-      {renderPreviewDialog()}
+{renderPreviewDialog()}
+{renderImportedItemsDialog()}
+      
     </>
   );
 }

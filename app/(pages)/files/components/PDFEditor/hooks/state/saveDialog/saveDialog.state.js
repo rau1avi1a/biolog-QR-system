@@ -391,6 +391,8 @@ const handleSaveConfirm = useCallback(async (confirmationData) => {
       
       const newBatchData = {
         ...result.data,
+        snapshot: doc.snapshot, 
+        components: doc.components,
         isBatch: true,
         originalFileId: result.data.fileId || doc._id,
         status: 'In Progress',
