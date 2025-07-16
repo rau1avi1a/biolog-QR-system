@@ -106,7 +106,7 @@ const QRCodeGenerator = ({ data, onClose }) => {
             <title>QR Code - ${data?.name || 'Item'}</title>
             <style>
               @page {
-                size: letter;
+                size: square;
                 margin: 0.5in;
               }
               body { 
@@ -148,18 +148,9 @@ const QRCodeGenerator = ({ data, onClose }) => {
           </head>
           <body onload="setTimeout(function() { window.print(); window.close(); }, 500)">
             <div class="qr-container">
-              <div class="qr-info">
-                <h2>${data?.name || data?.itemName || 'Item'}</h2>
-                <p><strong>SKU:</strong> ${data?.sku || 'N/A'}</p>
-                ${data?.lotNumber ? `<div class="lot-info">LOT: ${data.lotNumber}</div>` : ''}
-                <p><strong>Type:</strong> ${data?.type || 'N/A'}</p>
-                <p><strong>Generated:</strong> ${new Date().toLocaleDateString()}</p>
-                <p><strong>URL:</strong> ${baseUrl}/${data?.id || 'unknown'}</p>
-              </div>
               <div class="qr-code">
                 ${svgElement.outerHTML}
               </div>
-              <p><small>Scan to view ${data?.type === 'lot' ? 'lot' : 'item'} details</small></p>
             </div>
           </body>
         </html>

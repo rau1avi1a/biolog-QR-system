@@ -1,4 +1,4 @@
-// app/(pages)/home/components/ItemListDisplay/render/ItemListDisplay.jsx
+// app/(pages)/home/components/ItemListDisplay/render/component.jsx
 
 'use client';
 
@@ -11,17 +11,20 @@ import {
 } from '@/components/ui/shadcn/components/tabs';
 import { ScrollArea } from '@/components/ui/shadcn/components/scroll-area';
 import { Card, CardContent, CardHeader } from '@/components/ui/shadcn/components/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/shadcn/components/dialog';
 import { 
   Plus, 
   Package, 
   TestTube, 
   Beaker, 
   AlertTriangle,
-  TrendingUp
+  TrendingUp,
+  Zap
 } from 'lucide-react';
 
 import SearchBar from '@/components/ui/shadcn/components/SearchBar';
 import QRScannerModal from '../../QRScanner';
+import NetSuiteImportComponent from '../../NetsuiteImport/index';
 
 // Import hooks
 import { useItemListDisplayState } from '../hooks/state';
@@ -150,8 +153,11 @@ const ItemGrid = ({ items, emptyMessage, isLoading }) => {
   );
 };
 
-const ItemListDisplay = ({ allItems, onQRScan, onItemFound }) => {
+const ItemListDisplay = ({ allItems, onQRScan, onItemFound, onImportComplete }) => {
   const state = useItemListDisplayState();
+  
+  // NetSuite dialog state
+  const [showNetSuiteDialog, setShowNetSuiteDialog] = useState(false);
   
   // Debug logging
   console.log('Current tab:', state.activeTab);
@@ -202,6 +208,24 @@ const ItemListDisplay = ({ allItems, onQRScan, onItemFound }) => {
   const handleSearchChange = (query) => {
     console.log('Search input changed:', query);
     setSearchQuery(query);
+  };
+  
+  // Handle NetSuite import completion
+  const handleNetSuiteImportComplete = (results) => {
+    console.log('NetSuite import completed:', results);
+    
+    // Show success message
+    if (results.processedItems) {
+      console.log(`Import completed! Processed ${results.processedItems} items, created ${results.createdItems}, updated ${results.updatedItems}.`);
+      
+      // Optionally close the dialog after successful import
+      // setShowNetSuiteDialog(false);
+      
+      // Call the parent's import complete handler if provided
+      if (onImportComplete) {
+        onImportComplete(results);
+      }
+    }
   };
   
   // Process items for display using core logic
@@ -314,22 +338,13 @@ const ItemListDisplay = ({ allItems, onQRScan, onItemFound }) => {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-3">
-                    <Button variant="outline" disabled className="flex-1 sm:flex-none">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Chemical (NetSuite)
-                    </Button>
-                    <Button variant="outline" disabled className="flex-1 sm:flex-none">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Solution (NetSuite)
-                    </Button>
-                    <Button variant="outline" disabled className="flex-1 sm:flex-none">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Product (NetSuite)
-                    </Button>
-                    
-                    <Button variant="outline" disabled className="flex-1 sm:flex-none">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Upload CSV (NetSuite)
+                    <Button 
+                      variant="outline" 
+                      className="flex-1 sm:flex-none"
+                      onClick={() => setShowNetSuiteDialog(true)}
+                    >
+                      <Zap className="h-4 w-4 mr-2" />
+                      Import Chemical
                     </Button>
                   </div>
                 </CardContent>
@@ -374,13 +389,13 @@ const ItemListDisplay = ({ allItems, onQRScan, onItemFound }) => {
                   
                   {type !== 'all' && (
                     <div className="flex gap-2">
-                      <Button size="sm" disabled variant="outline">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add {type} (NetSuite)
-                      </Button>
-                      <Button size="sm" disabled variant="outline">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Upload (NetSuite)
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => setShowNetSuiteDialog(true)}
+                      >
+                        <Zap className="h-4 w-4 mr-2" />
+                        NetSuite Integration
                       </Button>
                     </div>
                   )}
@@ -411,6 +426,24 @@ const ItemListDisplay = ({ allItems, onQRScan, onItemFound }) => {
         onItemFound={onItemFound}
         allItems={allItems}
       />
+
+      {/* NetSuite Integration Dialog */}
+      <Dialog open={showNetSuiteDialog} onOpenChange={setShowNetSuiteDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-blue-500" />
+              NetSuite Integration
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="overflow-y-auto max-h-[calc(90vh-120px)]">
+            <NetSuiteImportComponent 
+              onImportComplete={handleNetSuiteImportComplete}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

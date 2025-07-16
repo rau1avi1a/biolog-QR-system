@@ -232,29 +232,70 @@ async makeRequest(endpoint, method = 'GET', body = null, customHeaders = {}) {
   /**
    * Test the connection to NetSuite with detailed logging
    */
-  async testConnection() {
-    console.log('🧪 Testing NetSuite connection...');
+async testConnection() {
+  console.log('🧪 Testing NetSuite connection...');
+  
+  try {
+    // Try multiple endpoints to find one that works
+    const testEndpoints = [
+      '/item?limit=1',           // Try item endpoint first
+      '/inventoryItem?limit=1',  // Try inventory item
+      '/employee?limit=1',       // Try employee as fallback
+      '/subsidiary?limit=1'      // Try subsidiary as last resort
+    ];
     
-    try {
-      // Try a simple endpoint that usually works
-      const result = await this.makeRequest('/currency?limit=1');
-      console.log('✅ NetSuite connection test successful!');
-      return { 
-        success: true, 
-        message: 'Connection successful',
-        testEndpoint: '/currency?limit=1',
-        resultType: typeof result
-      };
-    } catch (error) {
-      console.error('❌ NetSuite connection test failed:', error.message);
-      return { 
-        success: false, 
-        message: error.message,
-        testEndpoint: '/currency?limit=1'
-      };
+    let lastError = null;
+    
+    for (const endpoint of testEndpoints) {
+      try {
+        console.log(`🔍 Testing endpoint: ${endpoint}`);
+        const result = await this.makeRequest(endpoint);
+        console.log('✅ NetSuite connection test successful!');
+        return { 
+          success: true, 
+          message: 'Connection successful',
+          testEndpoint: endpoint,
+          resultType: typeof result
+        };
+      } catch (error) {
+        console.log(`❌ Endpoint ${endpoint} failed:`, error.message);
+        lastError = error;
+        
+        // If it's a permissions error, that's actually a successful connection
+        if (error.message.includes('permission') || 
+            error.message.includes('access') || 
+            error.message.includes('INSUFFICIENT_PERMISSION')) {
+          console.log('✅ NetSuite connection successful (permissions limited)');
+          return { 
+            success: true, 
+            message: 'Connection successful (limited permissions)',
+            testEndpoint: endpoint,
+            resultType: 'permission_limited'
+          };
+        }
+        
+        // Continue to next endpoint
+        continue;
+      }
     }
+    
+    // If all endpoints failed, return the last error
+    console.error('❌ All NetSuite connection tests failed');
+    return { 
+      success: false, 
+      message: lastError?.message || 'All connection tests failed',
+      testEndpoint: 'multiple_tested'
+    };
+    
+  } catch (error) {
+    console.error('❌ NetSuite connection test failed:', error.message);
+    return { 
+      success: false, 
+      message: error.message,
+      testEndpoint: 'connection_error'
+    };
   }
-
+}
   /**
    * Get local item by NetSuite ID
    */

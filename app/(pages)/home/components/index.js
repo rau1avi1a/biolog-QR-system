@@ -9,13 +9,16 @@
 
 import ItemListDisplay from './ItemListDisplay';
 import QRScannerModal from './QRScanner';
+import NetSuiteImportComponent from './NetsuiteImport';
 
 export {
+  NetSuiteImportComponent,
   ItemListDisplay,
   QRScannerModal
 };
 
 export default {
+  NetSuiteImportComponent,
   ItemListDisplay,
   QRScannerModal
 };
