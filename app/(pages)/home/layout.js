@@ -1,7 +1,7 @@
 // app/home/layout.js
 import { basicAuth } from "@/db/lib/auth";
 import db from '@/db/index.js'; // ✅ Single import
-import NavBar from "@/app/NavBar";
+import NavBar from "@/app/(pages)/NavBar";
 
 export default async function HomeLayout({ children }) {
   const user = await basicAuth(); //default: "/"

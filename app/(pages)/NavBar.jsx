@@ -20,7 +20,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/shadcn/components/sheet';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
-import { SignInDialog } from '@/app/SignInDialog';
+import { SignInDialog } from '@/app/(pages)/SignInDialog';
 import QRScannerModal from '@/app/(pages)/home/QRScannerModal';
 import { useRouter, usePathname } from 'next/navigation';
 import {
@@ -527,10 +527,10 @@ export default function NavBar({ user, notifications = [], allItems = [] }) {
           </div>
         </div>
 
-        <SignInDialog
+        {/* <SignInDialog
           open={isSignInOpen}
           onClose={() => setIsSignInOpen(false)}
-        />
+        /> */}
       </nav>
 
       {/* QR Scanner Modal */}
