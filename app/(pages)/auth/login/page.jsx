@@ -56,7 +56,7 @@ export default function LoginPage() {
       
       <Card className="p-8 w-full max-w-md space-y-6 bg-white/90 backdrop-blur-sm">
         <div className="text-center">
-          <h1 className="text-2xl font-bold">Welcome to Biolog Inventory</h1>
+          <h1 className="text-2xl font-bold">Biolog MFG</h1>
           <p className="text-gray-600">Please sign in to continue</p>
         </div>
 
