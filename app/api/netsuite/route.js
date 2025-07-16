@@ -135,6 +135,53 @@ export async function GET(request) {
         });
       }
 
+      
+      case 'fullImport': {
+        const { createImportService } = await import('@/db/services/netsuite/importItem.service.js');
+        const importService = await createImportService(user);
+        const result = await importService.performFullImport();
+        
+        return NextResponse.json({
+          success: result.success,
+          data: result.success ? result.results : null,
+          error: result.success ? null : result.error,
+          message: result.success ? 'Full import completed successfully' : 'Full import failed'
+        });
+      }
+
+      case 'scanNewItems': {
+        const { createImportService } = await import('@/db/services/netsuite/importItem.service.js');
+        const importService = await createImportService(user);
+        const result = await importService.scanNewItems();
+        
+        return NextResponse.json({
+          success: result.success,
+          data: result.success ? {
+            newItems: result.newItems,
+            totalScanned: result.totalScanned
+          } : null,
+          error: result.success ? null : result.error,
+          message: result.success ? `Found ${result.newItems?.length || 0} new items` : 'Scan failed'
+        });
+      }
+
+      case 'inventoryData': {
+        const { createImportService } = await import('@/db/services/netsuite/importItem.service.js');
+        const importService = await createImportService(user);
+        
+        const offset = parseInt(searchParams.get('offset') || '0');
+        const limit = parseInt(searchParams.get('limit') || '1000');
+        
+        const query = importService.getInventoryQuery();
+        const result = await importService.executeSuiteQL(query, offset, limit);
+        
+        return NextResponse.json({
+          success: true,
+          data: result,
+          error: null
+        });
+      }
+
       case 'getBOM': {
         const assemblyItemId = searchParams.get('assemblyItemId');
         if (!assemblyItemId) {
@@ -581,6 +628,51 @@ export async function POST(request) {
             error: null
           });
         }
+      }
+
+        case 'importSelected': {
+        const { selectedItems } = body;
+        
+        if (!selectedItems || !Array.isArray(selectedItems)) {
+          return NextResponse.json({
+            success: false,
+            data: null,
+            error: 'selectedItems array is required'
+          }, { status: 400 });
+        }
+        
+        const { createImportService } = await import('@/db/services/netsuite/importItem.service.js');
+        const importService = await createImportService(user);
+        const result = await importService.importSelectedItems(selectedItems);
+        
+        return NextResponse.json({
+          success: result.success,
+          data: result.success ? result.results : null,
+          error: result.success ? null : result.error,
+          message: result.success ? 'Selected items imported successfully' : 'Import failed'
+        });
+      }
+
+      case 'suiteql': {
+        const { query, offset = 0, limit = 1000 } = body;
+        
+        if (!query) {
+          return NextResponse.json({
+            success: false,
+            data: null,
+            error: 'SuiteQL query is required'
+          }, { status: 400 });
+        }
+        
+        const { createImportService } = await import('@/db/services/netsuite/importItem.service.js');
+        const importService = await createImportService(user);
+        const result = await importService.executeSuiteQL(query, offset, limit);
+        
+        return NextResponse.json({
+          success: true,
+          data: result,
+          error: null
+        });
       }
 
 case 'workorder': {

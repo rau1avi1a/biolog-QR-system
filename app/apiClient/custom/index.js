@@ -321,6 +321,280 @@ export function customOperations(apiManager, handleApiCall) {
                 return { data: null, error: error.message };
               }
             },
+
+
+            // =============================================================================
+// ADD THESE TO app/apiClient/custom/index.js
+// Insert around line 200, after the existing NetSuite operations
+// =============================================================================
+
+      // === NETSUITE IMPORT OPERATIONS ===
+      async netsuiteFullImport() {
+        return handleApiCall('custom', 'netsuite-full-import', {}, () =>
+          apiManager.client('netsuite').custom('fullImport', {}, 'GET')
+        )
+      },
+
+      async netsuiteScanNewItems() {
+        return handleApiCall('custom', 'netsuite-scan-new', {}, () =>
+          apiManager.client('netsuite').custom('scanNewItems', {}, 'GET')
+        )
+      },
+
+      async netsuiteImportSelected(selectedItems) {
+        if (!Array.isArray(selectedItems)) {
+          return { data: null, error: 'selectedItems must be an array' }
+        }
+        
+        return handleApiCall('custom', 'netsuite-import-selected', { selectedItems }, () =>
+          apiManager.client('netsuite').custom('importSelected', { selectedItems }, 'POST')
+        )
+      },
+
+      async netsuiteGetInventoryData(offset = 0, limit = 1000) {
+        try {
+          const response = await fetch(`/api/netsuite?action=inventoryData&offset=${offset}&limit=${limit}`)
+          if (!response.ok) throw new Error('Failed to get NetSuite inventory data')
+          const result = await response.json()
+          return { data: result, error: null }
+        } catch (error) {
+          return { data: null, error: error.message }
+        }
+      },
+
+      async netsuiteExecuteSuiteQL(query, offset = 0, limit = 1000) {
+        if (!query) {
+          return { data: null, error: 'SuiteQL query is required' }
+        }
+        
+        return handleApiCall('custom', 'netsuite-suiteql', { query, offset, limit }, () =>
+          apiManager.client('netsuite').custom('suiteql', { query, offset, limit }, 'POST')
+        )
+      },
+
+      // === NETSUITE IMPORT WITH PROGRESS ===
+      async netsuiteFullImportWithProgress(onProgress = null) {
+        try {
+          if (!onProgress) {
+            return this.netsuiteFullImport()
+          }
+
+          // For progress tracking, we need to implement a different approach
+          // since the API doesn't support streaming progress yet
+          const startTime = Date.now()
+          
+          onProgress({
+            step: 'starting',
+            progress: 0,
+            message: 'Initializing NetSuite import...'
+          })
+
+          // Simulate progress while waiting for the actual import
+          const progressInterval = setInterval(() => {
+            const elapsed = Date.now() - startTime
+            const progress = Math.min(90, (elapsed / 30000) * 100) // Max 90% over 30 seconds
+            
+            onProgress({
+              step: 'importing',
+              progress,
+              message: 'Importing inventory data from NetSuite...'
+            })
+          }, 1000)
+
+          const result = await this.netsuiteFullImport()
+          
+          clearInterval(progressInterval)
+          
+          onProgress({
+            step: 'complete',
+            progress: 100,
+            message: result.error ? 'Import failed' : 'Import completed successfully'
+          })
+
+          return result
+        } catch (error) {
+          return { data: null, error: error.message }
+        }
+      },
+
+      async netsuiteScanNewItemsWithProgress(onProgress = null) {
+        try {
+          if (!onProgress) {
+            return this.netsuiteScanNewItems()
+          }
+
+          const startTime = Date.now()
+          
+          onProgress({
+            step: 'starting',
+            progress: 0,
+            message: 'Scanning for new items...'
+          })
+
+          const progressInterval = setInterval(() => {
+            const elapsed = Date.now() - startTime
+            const progress = Math.min(90, (elapsed / 20000) * 100) // Max 90% over 20 seconds
+            
+            onProgress({
+              step: 'scanning',
+              progress,
+              message: 'Comparing NetSuite data with local inventory...'
+            })
+          }, 1000)
+
+          const result = await this.netsuiteScanNewItems()
+          
+          clearInterval(progressInterval)
+          
+          onProgress({
+            step: 'complete',
+            progress: 100,
+            message: result.error ? 'Scan failed' : `Found ${result.data?.newItems?.length || 0} new items`
+          })
+
+          return result
+        } catch (error) {
+          return { data: null, error: error.message }
+        }
+      },
+
+      async netsuiteImportSelectedWithProgress(selectedItems, onProgress = null) {
+        try {
+          if (!onProgress) {
+            return this.netsuiteImportSelected(selectedItems)
+          }
+
+          const startTime = Date.now()
+          
+          onProgress({
+            step: 'starting',
+            progress: 0,
+            message: `Importing ${selectedItems.length} selected items...`
+          })
+
+          const progressInterval = setInterval(() => {
+            const elapsed = Date.now() - startTime
+            const progress = Math.min(90, (elapsed / 15000) * 100) // Max 90% over 15 seconds
+            
+            onProgress({
+              step: 'importing',
+              progress,
+              message: 'Processing selected items...'
+            })
+          }, 1000)
+
+          const result = await this.netsuiteImportSelected(selectedItems)
+          
+          clearInterval(progressInterval)
+          
+          onProgress({
+            step: 'complete',
+            progress: 100,
+            message: result.error ? 'Import failed' : 'Selected items imported successfully'
+          })
+
+          return result
+        } catch (error) {
+          return { data: null, error: error.message }
+        }
+      },
+
+      // === NETSUITE BATCH OPERATIONS ===
+      async netsuiteGetInventoryDataBatch(batchSize = 1000, onBatch = null) {
+        const allItems = []
+        let offset = 0
+        let hasMore = true
+        let batchCount = 0
+
+        while (hasMore) {
+          batchCount++
+          
+          if (onBatch) {
+            onBatch({
+              batch: batchCount,
+              offset,
+              message: `Fetching batch ${batchCount}...`
+            })
+          }
+
+          const result = await this.netsuiteGetInventoryData(offset, batchSize)
+          
+          if (result.error) {
+            throw new Error(result.error)
+          }
+
+          const batchData = result.data
+          if (batchData.items && batchData.items.length > 0) {
+            allItems.push(...batchData.items)
+            hasMore = batchData.hasMore
+            offset += batchSize
+          } else {
+            hasMore = false
+          }
+
+          // Safety check to prevent infinite loops
+          if (batchCount > 10) {
+            console.warn('⚠️ Max batch limit reached')
+            break
+          }
+        }
+
+        return {
+          data: {
+            items: allItems,
+            totalBatches: batchCount,
+            totalItems: allItems.length
+          },
+          error: null
+        }
+      },
+
+      // === NETSUITE INVENTORY HELPERS ===
+      async netsuiteGetInventoryStats() {
+        try {
+          const result = await this.netsuiteGetInventoryData(0, 1)
+          if (result.error) {
+            return { data: null, error: result.error }
+          }
+
+          // Get total count from first query
+          const totalCount = result.data.count || 0
+          
+          return {
+            data: {
+              totalItems: totalCount,
+              estimatedBatches: Math.ceil(totalCount / 1000),
+              lastUpdated: new Date().toISOString()
+            },
+            error: null
+          }
+        } catch (error) {
+          return { data: null, error: error.message }
+        }
+      },
+
+      async netsuiteValidateConnection() {
+        try {
+          const result = await this.testNetSuite()
+          return {
+            data: {
+              connected: result.data?.success || false,
+              message: result.data?.message || result.error,
+              timestamp: new Date().toISOString()
+            },
+            error: result.error
+          }
+        } catch (error) {
+          return {
+            data: {
+              connected: false,
+              message: error.message,
+              timestamp: new Date().toISOString()
+            },
+            error: error.message
+          }
+        }
+      },
   
       // === INVENTORY OPERATIONS ===
       async getItemLots(itemId, lotId = null) {
