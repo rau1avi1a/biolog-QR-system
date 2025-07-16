@@ -90,41 +90,56 @@ const handlePrintQRCode = (_itemId, lotId) => {
 };
 
 
-  //helper:
-  const getImportedItemsWithIds = async (originalItems, importResults) => {
+/**
+ * Given an array of original NetSuite imports (with .sku and .lots),
+ * re-fetch each item fully (including its Lots[]) and attach real Mongo lot IDs.
+ */
+const getImportedItemsWithIds = async (originalItems) => {
   const itemsWithIds = [];
-  
-  for (const originalItem of originalItems) {
+
+  for (const orig of originalItems) {
     try {
-      // Find the item in the database by SKU to get its ObjectId
-      const dbItem = await homeApi.items.search(originalItem.sku);
-      
-      if (dbItem && dbItem.length > 0) {
-        const foundItem = dbItem[0];
-        
-        // Create structure for each lot with the item's ObjectId
-        const lotsWithIds = originalItem.lots.map(lot => ({
-          ...lot,
-          itemId: foundItem._id,
-          itemSku: foundItem.sku,
-          itemDisplayName: foundItem.displayName,
-          lotId: foundItem.Lots?.find(l => l.lotNumber === lot.lotNumber)?._id || null
-        }));
-        
-        itemsWithIds.push({
-          ...originalItem,
-          itemId: foundItem._id,
-          mongoItem: foundItem,
-          lotsWithIds: lotsWithIds
-        });
+      // 1) Do a shallow search by SKU to get the item's ObjectId
+      const searchResults = await homeApi.items.search(orig.sku);
+      if (!searchResults.length) {
+        console.warn(`No Mongo item found for SKU ${orig.sku}`);
+        continue;
       }
-    } catch (error) {
-      console.error('Error getting imported item ID:', error);
+      const shallow = searchResults[0];
+
+      // 2) Fetch the full item (including its Lots[]) by ID
+      const mongoItem = await homeApi.items.getById(shallow._id);
+
+      // 3) For each NetSuite lot, find its matching subdoc in mongoItem.Lots
+      const lotsWithIds = orig.lots.map(lot => {
+        const matched = mongoItem.Lots?.find(m => m.lotNumber === lot.lotNumber);
+        return {
+          lotNumber: lot.lotNumber,
+          quantity: lot.quantity,
+          lotId: matched?._id || null
+        };
+      });
+
+      // 4) Build out the data your dialog needs
+      itemsWithIds.push({
+        ...orig,                      // displayName, sku, etc from NetSuite
+        itemId: mongoItem._id,        // the Mongo _id of the item
+        displayName: mongoItem.displayName,
+        sku: mongoItem.sku,
+        itemType: mongoItem.itemType,
+        lotsWithIds                   // now with real lotId values
+      });
+
+    } catch (err) {
+      console.error('Error in getImportedItemsWithIds:', err);
     }
   }
-  
+
   return itemsWithIds;
 };
+
+
+
 
   // =============================================================================
   // CONNECTION FUNCTIONS
@@ -276,24 +291,25 @@ const handleImportSelected = async () => {
     setCurrentOperation('Processing selected items...');
     
     const result = await homeApi.netsuite.importSelected(itemsToImport);
+    console.log('importSelected ➞', result);
+
     
     // Complete progress
     completeProgress('Selected items imported successfully!');
     
     setImportResults(result);
     
-    // NEW: Store the imported items for QR code generation
-    if (result.success && result.results) {
-      // Get the imported items with their new MongoDB ObjectIds
-      const importedItemsWithIds = await getImportedItemsWithIds(itemsToImport, result.results);
-      setImportedItems(importedItemsWithIds);
-      
-      // Close the preview dialog and show the imported items dialog
-      setShowPreview(false);
-      setShowImportedPreview(true);
-      setPreviewItems([]);
-      setSelectedItems([]);
-    }
+ // NEW: Store the imported items for QR code generation
+ // (use the itemsToImport you already know, 
+ // since your API result doesn’t return the array)
+ if (result.lotsProcessed > 0) {
+   const importedItemsWithIds = await getImportedItemsWithIds(itemsToImport);
+   setImportedItems(importedItemsWithIds);
+   setShowPreview(false);
+   setShowImportedPreview(true);
+   setPreviewItems([]);
+   setSelectedItems([]);
+ }
     
     if (onImportComplete) {
       onImportComplete(result);
@@ -700,168 +716,102 @@ const handleImportSelected = async () => {
     );
   };
 
-const renderImportedItemsDialog = () => {
-  return (
-    <Dialog open={showImportedPreview} onOpenChange={setShowImportedPreview}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CheckCircle className="h-5 w-5 text-green-500" />
-            Items Imported Successfully ({importedItems.length})
-          </DialogTitle>
-        </DialogHeader>
+const renderImportedItemsDialog = () => (
+  <Dialog open={showImportedPreview} onOpenChange={() => setShowImportedPreview(false)}>
+    <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+      
+      {/* Header */}
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <CheckCircle className="h-5 w-5 text-green-500" />
+          Items Imported Successfully ({importedItems.length})
+        </DialogTitle>
+      </DialogHeader>
 
-        <div className="flex flex-col h-full">
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-sm text-green-800">
-              <strong>Import completed!</strong> You can now print QR codes for individual lots.
-              Each lot will have its own unique QR code linked to its MongoDB ObjectId.
-            </p>
+      {/* Summary */}
+      <div className="p-4 bg-green-50 border border-green-200 rounded-lg mx-4 mb-4">
+        <p className="text-sm text-green-800">
+          <strong>Import completed!</strong> Click “Print QR” on any lot below to view its code.
+        </p>
+      </div>
+
+      {/* Scrollable list */}
+      <ScrollArea className="flex-1 px-4 pb-4">
+        <div className="space-y-4">
+          {importedItems.map(item => (
+            <Card key={item.itemId} className="border-green-200">
+              <CardHeader className="flex justify-between items-start pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-green-100">
+                    {getItemIcon(item.itemType)}
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg text-green-800">
+                      {item.displayName}
+                    </h3>
+                    <p className="text-sm text-green-600 font-mono">{item.sku}</p>
+                  </div>
+                </div>
+              </CardHeader>
+
+<CardContent className="space-y-4">
+  {/* Lots & QR Codes Header */}
+  <h4 className="font-medium mb-2 flex items-center gap-2">
+    <Package className="h-4 w-4" />
+    Lots & QR Codes
+  </h4>
+
+  {/* If we found any lots, list them; otherwise show “none found” */}
+  {item.lotsWithIds.length > 0 ? (
+    <ul className="space-y-2">
+      {item.lotsWithIds.map(lot => (
+        <li
+          key={lot.lotId}
+          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+        >
+          {/* Left: lot info */}
+          <div className="flex flex-col">
+            <span className="font-medium">Lot: {lot.lotNumber}</span>
+            <span className="text-xs text-muted-foreground">
+              Qty: {lot.quantity}
+            </span>
           </div>
 
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-[500px] p-4">
-              <div className="space-y-4">
-                {importedItems.map((item, itemIndex) => (
-                  <Card key={itemIndex} className="border-green-200">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-lg bg-green-100">
-                            {getItemIcon(item.itemType)}
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-lg text-green-800">
-                              {item.displayName}
-                            </h3>
-                            <p className="text-sm text-green-600 font-mono">
-                              {item.sku}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* ─── Actions (Imported‑Items Dialog) ──────────────────────────── */}
-                        {item.lotsWithIds && item.lotsWithIds.length > 0 && (
-                          <div className="flex flex-wrap gap-2 pt-4 border-t">
-                            {item.lotsWithIds.map((lot, i) => (
-                              <React.Fragment key={i}>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="flex items-center gap-2"
-                                  onClick={() => window.open(`/${lot.lotId}`, "_blank")}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  View Lot {lot.lotNumber}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="flex items-center gap-2"
-                                  onClick={() => window.open(`/${lot.lotId}`, "_blank")}
-                                >
-                                  <Printer className="h-4 w-4" />
-                                  Print QR {lot.lotNumber}
-                                </Button>
-                              </React.Fragment>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </CardHeader>
-
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">MongoDB ID:</span>
-                          <p className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">
-                            {item.itemId}
-                          </p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">NetSuite ID:</span>
-                          <p className="font-mono text-xs">{item.netsuiteInternalId}</p>
-                        </div>
-                      </div>
-
-                      {/* Lots & QR Codes List */}
-                      {item.lotsWithIds && item.lotsWithIds.length > 0 && (
-                        <div>
-                          <h4 className="font-medium mb-3 flex items-center gap-2">
-                            <Package className="h-4 w-4" />
-                            Lots & QR Codes
-                          </h4>
-                          <div className="space-y-2">
-                            {item.lotsWithIds.map((lot, lotIndex) => (
-                              <div
-                                key={lotIndex}
-                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <span className="font-mono text-sm font-medium">
-                                    {lot.lotNumber}
-                                  </span>
-                                  <p className="text-xs text-muted-foreground">
-                                    Quantity: {lot.quantity} units
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {lot.lotId && (
-                                    <Badge variant="outline" className="text-xs">
-                                      Lot ID: {lot.lotId.substring(0, 8)}...
-                                    </Badge>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="default"
-                                    onClick={() => window.open(`/${lot.lotId}`, "_blank")}
-                                    className="flex items-center gap-2"
-                                  >
-                                    <Printer className="h-4 w-4" />
-                                    Print QR Code
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
-        </div>
-
-        <DialogFooter>
+          {/* Right: single Print‑QR button */}
           <Button
-            variant="outline"
-            onClick={() => setShowImportedPreview(false)}
-          >
-            Close
-          </Button>
-          <Button
-            onClick={() => {
-              // Batch-print all lots
-              importedItems.forEach(item => {
-                item.lotsWithIds?.forEach(lot => {
-                  setTimeout(() => {
-                    window.open(`/${lot.lotId}`, "_blank");
-                  }, 100);
-                });
-              });
-            }}
-            className="flex items-center gap-2"
+            size="sm"
+            variant="default"
+            className="flex items-center gap-1"
+            onClick={() => window.open(`/${lot.lotId}`, '_blank')}
           >
             <Printer className="h-4 w-4" />
-            Print All QR Codes
+            Print QR
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-};
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p className="text-sm text-muted-foreground">No lots found.</p>
+  )}
+</CardContent>
+
+            </Card>
+          ))}
+        </div>
+      </ScrollArea>
+
+      {/* Footer */}
+      <DialogFooter className="flex justify-end p-4">
+        <Button variant="outline" onClick={() => setShowImportedPreview(false)}>
+          Close
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+);
+
+
+
 
   // =============================================================================
   // MAIN RENDER
