@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/shadcn/components/sheet';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { SignInDialog } from '@/app/(pages)/SignInDialog';
-import QRScannerModal from '@/app/(pages)/home/QRScannerModal';
+import QRScannerModal from '@/app/(pages)/(components)/QRScannerModal';
 import { useRouter, usePathname } from 'next/navigation';
 import {
   Home,

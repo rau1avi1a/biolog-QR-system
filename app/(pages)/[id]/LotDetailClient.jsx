@@ -40,7 +40,7 @@ import {
   DollarSign,
   Clock
 } from 'lucide-react';
-import QRCodeGenerator from '@/app/(pages)/home/QRCodeGenerator';
+import QRCodeGenerator from '@/app/(pages)/(components)/QRCodeGenerator';
 import TxnTable from './components/TxnTable';
 // FIXED: Import the new API structure
 import { itemsApi, hasApiError, extractApiData, handleApiError } from './lib/api';
