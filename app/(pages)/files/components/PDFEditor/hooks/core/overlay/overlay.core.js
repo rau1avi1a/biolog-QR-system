@@ -5,7 +5,7 @@ import { useState, useRef, useCallback } from 'react';
 
 /**
  * FIXED Overlay Core Hook
- * Properly separates baked overlays (permanent) from session overlays (temporary)
+ * Properly clears session overlays after save to prevent double overlay display
  */
 export function useOverlay() {
   // === OVERLAY & HISTORY STATE ===
@@ -216,87 +216,112 @@ export function useOverlay() {
     return mergedOverlays;
   }, []);
 
-  // === GET ONLY NEW SESSION OVERLAYS (for efficient saves) ===
-  const getNewSessionOverlays = useCallback((doc) => {
-    console.log('📄 Building new session overlays for save...');
+const getNewSessionOverlays = useCallback((doc) => {
+  console.log('📄 Building new session overlays for save...');
+  
+  // Get existing baked overlays
+  let existingBakedOverlays = {};
+  if (doc.pageOverlays && typeof doc.pageOverlays === 'object') {
+    existingBakedOverlays = { ...doc.pageOverlays };
+  }
+  
+  // ✅ DEBUG: Log all overlay states
+  console.log('🔍 DEBUG - Overlay state analysis:', {
+    bakedOverlaysRef: Object.keys(bakedOverlaysRef.current),
+    sessionOverlaysRef: Object.keys(sessionOverlaysRef.current),
+    overlaysRef: Object.keys(overlaysRef.current),
+    existingBakedOverlays: Object.keys(existingBakedOverlays)
+  });
+  
+  // Get current session overlays
+  const currentSessionOverlays = Object.fromEntries(
+    Object.entries(sessionOverlaysRef.current).filter(([, png]) => png)
+  );
+  
+  console.log('🔍 Session overlays found:', {
+    sessionOverlaysCount: Object.keys(currentSessionOverlays).length,
+    sessionPages: Object.keys(currentSessionOverlays),
+    sessionOverlayLengths: Object.keys(currentSessionOverlays).map(page => ({
+      page,
+      length: currentSessionOverlays[page]?.length,
+      preview: currentSessionOverlays[page]?.substring(0, 50)
+    }))
+  });
+  
+  // Only send overlays that are NEW or DIFFERENT from baked ones
+  const newOverlaysToSave = {};
+  Object.entries(currentSessionOverlays).forEach(([pageNum, sessionOverlay]) => {
+    const bakedOverlay = existingBakedOverlays[pageNum];
     
-    // Get existing baked overlays
-    let existingBakedOverlays = {};
-    if (doc.pageOverlays && typeof doc.pageOverlays === 'object') {
-      existingBakedOverlays = { ...doc.pageOverlays };
+    // Only include if this overlay is different from what's already baked
+    if (!bakedOverlay || sessionOverlay !== bakedOverlay) {
+      newOverlaysToSave[pageNum] = sessionOverlay;
+      console.log(`📄 Page ${pageNum}: New overlay to save (different from baked)`);
+    } else {
+      console.log(`📄 Page ${pageNum}: Overlay unchanged from baked version, skipping`);
     }
-    
-    // Get current session overlays
-    const currentSessionOverlays = Object.fromEntries(
-      Object.entries(sessionOverlaysRef.current).filter(([, png]) => png)
-    );
-    
-    // ✅ CRITICAL: Only send overlays that are NEW or DIFFERENT from baked ones
-    const newOverlaysToSave = {};
-    Object.entries(currentSessionOverlays).forEach(([pageNum, sessionOverlay]) => {
-      const bakedOverlay = existingBakedOverlays[pageNum];
-      
-      // Only include if this overlay is different from what's already baked
-      if (!bakedOverlay || sessionOverlay !== bakedOverlay) {
-        newOverlaysToSave[pageNum] = sessionOverlay;
-        console.log(`📄 Page ${pageNum}: New overlay to save (different from baked)`);
-      } else {
-        console.log(`📄 Page ${pageNum}: Overlay unchanged from baked version, skipping`);
-      }
-    });
-    
-    console.log('🔧 New overlay save analysis:', {
-      existingBakedCount: Object.keys(existingBakedOverlays).length,
-      sessionOverlaysCount: Object.keys(currentSessionOverlays).length,
-      newOverlaysToSaveCount: Object.keys(newOverlaysToSave).length,
-      newPages: Object.keys(newOverlaysToSave)
-    });
+  });
+  
+  console.log('🔧 Final new overlay save analysis:', {
+    existingBakedCount: Object.keys(existingBakedOverlays).length,
+    sessionOverlaysCount: Object.keys(currentSessionOverlays).length,
+    newOverlaysToSaveCount: Object.keys(newOverlaysToSave).length,
+    newPages: Object.keys(newOverlaysToSave)
+  });
 
-    return newOverlaysToSave;
-  }, []);
+  return newOverlaysToSave;
+}, []);
 
   // === UPDATE BAKED OVERLAYS AFTER SAVE ===
-  const updateBakedOverlays = useCallback((newOverlays, currentPage = null) => {
-    console.log('✅ Updating baked overlays after save:', Object.keys(newOverlays));
+const updateBakedOverlays = useCallback((newOverlays, currentPage = null, action = 'save') => {
+  console.log('✅ Updating baked overlays after save:', {
+    pages: Object.keys(newOverlays),
+    action,
+    currentPage
+  });
+  
+  // Add newly saved overlays to baked overlays
+  Object.keys(newOverlays).forEach(pageNum => {
+    const pageNumber = parseInt(pageNum);
+    bakedOverlaysRef.current[pageNumber] = newOverlays[pageNumber];
     
-    // Add newly saved overlays to baked overlays
-    Object.keys(newOverlays).forEach(pageNum => {
-      const pageNumber = parseInt(pageNum);
-      bakedOverlaysRef.current[pageNumber] = newOverlays[pageNumber];
-      
-      // ✅ CRITICAL FIX: Reset history for pages that were just baked
-      // The baked overlay becomes the new "starting point" - no undo beyond this
-      historiesRef.current[pageNumber] = [newOverlays[pageNumber]];
-      
-      // ✅ CRITICAL FIX: Clear session overlay for this page since it's now baked
-      delete sessionOverlaysRef.current[pageNumber];
-      
-      // ✅ DISPLAY FIX: Update display overlay to show ONLY the baked version
-      overlaysRef.current[pageNumber] = newOverlays[pageNumber];
-      
-      console.log(`🔒 Page ${pageNumber}: Overlay baked, session cleared, display updated to baked version`);
-    });
+    // ✅ CRITICAL FIX: Reset history for pages that were just baked
+    historiesRef.current[pageNumber] = [newOverlays[pageNumber]];
     
-    console.log('✅ Overlay state after baking update:', {
-      bakedPages: Object.keys(bakedOverlaysRef.current),
-      sessionPages: Object.keys(sessionOverlaysRef.current)
-    });
+    // ✅ CRITICAL FIX: Clear session overlay for this page since it's now baked
+    delete sessionOverlaysRef.current[pageNumber];
     
-    // ✅ UPDATE UI STATE: If current page was baked, update the UI state
-    const currentPageStr = currentPage?.toString();
-    if (currentPageStr && newOverlays[currentPageStr]) {
-      const bakedOverlay = newOverlays[currentPageStr];
-      setOverlay(bakedOverlay);
-      setHistory([bakedOverlay]);
-      setHistIdx(0); // Point to the baked overlay (index 0 in the new single-item history)
-      
-      console.log(`🔒 Updated UI state for current page ${currentPage}: history reset to baked overlay, session cleared`);
+    // ✅ CRITICAL FIX: Clear display overlay completely - let PDF show the baked version
+    delete overlaysRef.current[pageNumber];
+    
+    console.log(`🔒 Page ${pageNumber}: Overlay baked, session cleared, display cleared`);
+  });
+  
+  // ✅ CRITICAL FIX: Clear UI state for current page to let PDF reload show baked overlay
+  // BUT ONLY if this is not a 'complete' action (completed files should preserve overlay display)
+  const currentPageStr = currentPage?.toString();
+  if (currentPageStr && newOverlays[currentPageStr] && action !== 'complete') {
+    console.log(`🧹 Clearing UI state for current page ${currentPage} - PDF reload will show baked overlay`);
+    
+    // Clear the UI state completely - the PDF will show the baked overlay
+    setOverlay(null);
+    setHistory([]);
+    setHistIdx(-1);
+  } else if (action === 'complete') {
+    console.log(`🔒 Complete action: Preserving overlay display state for completed file`);
+    
+    // For completed files, keep the overlay visible in the UI
+    const completedOverlay = newOverlays[currentPageStr];
+    if (completedOverlay) {
+      setOverlay(completedOverlay);
+      setHistory([completedOverlay]);
+      setHistIdx(0);
     }
-    
-    // ✅ CANVAS REFRESH: Force canvas to redraw with only the baked overlay
-    // This should remove any double-overlay visual artifacts
-    console.log('🎨 Requesting canvas refresh to display baked overlay only');
-  }, [setOverlay, setHistory, setHistIdx]);
+  }
+  
+  console.log('🎨 Session overlays cleared - PDF reload will show baked overlays');
+  
+}, [setOverlay, setHistory, setHistIdx]);
 
   // === UNDO HANDLING ===
   const handleUndoForPage = useCallback((pageNo) => {
@@ -409,11 +434,11 @@ export function useOverlay() {
     backupState,
     restoreState,
     initializeOverlaysFromDocument,
-    addSessionOverlay,                // ✅ CRITICAL: Export this function
+    addSessionOverlay,
     getMergedOverlays,
     getNewSessionOverlays,
     updateBakedOverlays,
-    handleUndoForPage,               // ✅ CRITICAL: Export this function
+    handleUndoForPage,
     clearOverlays,
     preserveStateForSave
   };

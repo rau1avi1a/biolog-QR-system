@@ -5,10 +5,10 @@ import { useState, useCallback } from 'react';
 import { filesApi } from '../../../../../lib/api';
 
 /**
- * Save Operations Core Hook - FIXED with proper overlay function parameters
+ * Save Operations Core Hook - FIXED to prevent canvas clearing race conditions
  */
 export function useSave(
-  doc, 
+  doc,
   pageNo, 
   canvasRef, 
   ctxRef, 
@@ -23,12 +23,12 @@ export function useSave(
   getMergedOverlays, 
   preserveStateForSave, 
   validateAndCleanBase64,
-  getNewSessionOverlays,    // ✅ NEW: Added parameter
-  updateBakedOverlays       // ✅ NEW: Added parameter
+  getNewSessionOverlays,
+  updateBakedOverlays
 ) {
   const [isSaving, setIsSaving] = useState(false);
 
-  // Object sanitization utility (extracted from your core.js)
+  // Object sanitization utility
   const sanitizeObject = useCallback((obj) => {
     if (obj === null || obj === undefined) return obj;
     if (typeof obj !== 'object') return obj;
@@ -51,34 +51,25 @@ export function useSave(
     return sanitized;
   }, []);
 
-  // Get canvas dimensions for overlay quality (extracted from your core.js)
+  // Get canvas dimensions for overlay quality
   const getCanvasDimensions = useCallback(() => {
     const canvas = canvasRef.current;
     const container = pageContainerRef.current;
     const containerRect = container?.getBoundingClientRect();
     
-    // Get actual PDF canvas dimensions for accurate overlay scaling
     const pdfCanvas = container?.querySelector('.react-pdf__Page__canvas');
     const pdfCanvasRect = pdfCanvas?.getBoundingClientRect();
     
     return canvas ? {
-      // Canvas actual dimensions
       width: canvas.width,
       height: canvas.height,
-      
-      // Display dimensions
       displayWidth: containerRect?.width || canvas.offsetWidth,
       displayHeight: containerRect?.height || canvas.offsetHeight,
-      
-      // PDF-specific dimensions for accurate overlay positioning
       pdfCanvasWidth: pdfCanvasRect?.width || canvas.width,
       pdfCanvasHeight: pdfCanvasRect?.height || canvas.height,
       pdfCanvasLeft: pdfCanvasRect ? pdfCanvasRect.left - containerRect.left : 0,
       pdfCanvasTop: pdfCanvasRect ? pdfCanvasRect.top - containerRect.top : 0,
-      
-      // Page information
       currentPage: pageNo,
-      
       containerRect: containerRect ? {
         width: containerRect.width,
         height: containerRect.height,
@@ -92,7 +83,7 @@ export function useSave(
     } : null;
   }, [pageNo, canvasRef, pageContainerRef]);
 
-  // Save current canvas state to memory (extracted from your core.js)
+  // Save current canvas state to memory
   const saveCurrentCanvasState = useCallback(() => {
     const canvas = canvasRef.current;
     if (canvas) {
@@ -115,15 +106,15 @@ export function useSave(
   }, [pageNo, canvasRef, overlaysRef, historiesRef, setHistory, setHistIdx, setOverlay]);
 
   // Create page-specific overlay data for API
-  const createPageOverlaysData = useCallback((mergedOverlays) => {
+  const createPageOverlaysData = useCallback((overlaysToSave) => {
     const pageOverlays = {};
-    Object.keys(mergedOverlays).forEach(pageNum => {
-      pageOverlays[`page_${pageNum}`] = mergedOverlays[pageNum];
+    Object.keys(overlaysToSave).forEach(pageNum => {
+      pageOverlays[`page_${pageNum}`] = overlaysToSave[pageNum];
     });
     return pageOverlays;
   }, []);
 
-  // Handle rejection action (extracted from your core.js)
+  // Handle rejection action
   const handleReject = useCallback(async (cleanConfirmationData) => {
     setIsSaving(true);
     try {
@@ -152,17 +143,12 @@ export function useSave(
   }, [doc, setCurrentDoc, refreshFiles]);
 
   // Handle original file save (create new batch)
-  const saveOriginalFile = useCallback(async (action, cleanConfirmationData, mergedOverlays, canvasDimensions) => {
+  const saveOriginalFile = useCallback(async (action, cleanConfirmationData, overlaysToSave, canvasDimensions) => {
     const editorData = {
-      // Legacy compatibility
-      overlayPng: mergedOverlays[1] || mergedOverlays[Object.keys(mergedOverlays)[0]],
-      
-      // Send merged overlays
-      pageOverlays: createPageOverlaysData(mergedOverlays),
-      annotations: mergedOverlays,  // Fallback format
-      
-      // Enhanced metadata
-      overlayPages: Object.keys(mergedOverlays).map(p => parseInt(p)).sort((a, b) => a - b),
+      overlayPng: overlaysToSave[1] || overlaysToSave[Object.keys(overlaysToSave)[0]],
+      pageOverlays: createPageOverlaysData(overlaysToSave),
+      annotations: overlaysToSave,
+      overlayPages: Object.keys(overlaysToSave).map(p => parseInt(p)).sort((a, b) => a - b),
       canvasDimensions: canvasDimensions
     };
 
@@ -191,10 +177,8 @@ export function useSave(
       throw new Error(result.error);
     }
     
-    // Handle successful save result
     if (setCurrentDoc && result.data) {
       const newBatchData = result.data;
-      
       let newPdfData = null;
       
       if (newBatchData.signedPdf?.data) {
@@ -234,17 +218,12 @@ export function useSave(
   }, [doc, pageNo, setCurrentDoc, createPageOverlaysData, preserveStateForSave, validateAndCleanBase64]);
 
   // Handle existing batch save
-  const saveExistingBatch = useCallback(async (action, cleanConfirmationData, mergedOverlays, canvasDimensions, backupState) => {
+  const saveExistingBatch = useCallback(async (action, cleanConfirmationData, overlaysToSave, canvasDimensions, backupState) => {
     const updateData = {
-      // Legacy compatibility  
-      overlayPng: mergedOverlays[1] || mergedOverlays[Object.keys(mergedOverlays)[0]],
-      
-      // Send merged overlays that include existing + new
-      pageOverlays: createPageOverlaysData(mergedOverlays),
-      annotations: mergedOverlays,
-      
-      // Enhanced metadata
-      overlayPages: Object.keys(mergedOverlays).map(p => parseInt(p)).sort((a, b) => a - b),
+      overlayPng: overlaysToSave[1] || overlaysToSave[Object.keys(overlaysToSave)[0]],
+      pageOverlays: createPageOverlaysData(overlaysToSave),
+      annotations: overlaysToSave,
+      overlayPages: Object.keys(overlaysToSave).map(p => parseInt(p)).sort((a, b) => a - b),
       canvasDimensions: canvasDimensions
     };
 
@@ -304,7 +283,7 @@ export function useSave(
     return result;
   }, [doc, pageNo, setCurrentDoc, createPageOverlaysData, preserveStateForSave]);
 
-  // MAIN SAVE FUNCTION - FIXED with proper overlay handling
+  // MAIN SAVE FUNCTION - FIXED to prevent canvas clearing race conditions
   const save = useCallback(async (action = 'save', confirmationData = null) => {
     console.log('🔧 CORE.SAVE CALLED:', { action, confirmationData, docFileName: doc?.fileName, currentPage: pageNo });
 
@@ -316,7 +295,6 @@ export function useSave(
     
     const cleanConfirmationData = confirmationData ? sanitizeObject(confirmationData) : null;
     
-    // Handle rejection separately
     if (action === 'reject') {
       return await handleReject(cleanConfirmationData);
     }
@@ -324,81 +302,30 @@ export function useSave(
     // Save current page overlay to memory BEFORE building overlay data
     saveCurrentCanvasState();
 
-    // ✅ CRITICAL FIX: Use the new session-aware overlay merging
     console.log('📄 Building overlay data with proper baked/session separation...');
     
-    // Debug current overlay state before merging
-    console.log('🔍 Pre-merge overlay state:', {
-      overlaysRefPages: Object.keys(overlaysRef.current),
-      overlaysRefContent: Object.keys(overlaysRef.current).map(page => ({
-        page,
-        hasOverlay: !!overlaysRef.current[page],
-        overlayLength: overlaysRef.current[page]?.length
-      }))
-    });
-    
-    let mergedOverlays;
-    if (getMergedOverlays && typeof getMergedOverlays === 'function') {
-      mergedOverlays = getMergedOverlays(doc);
-      console.log('🔍 getMergedOverlays result:', {
-        pages: Object.keys(mergedOverlays),
-        count: Object.keys(mergedOverlays).length,
-        pageDetails: Object.keys(mergedOverlays).map(page => ({
-          page,
-          hasOverlay: !!mergedOverlays[page],
-          overlayLength: mergedOverlays[page]?.length,
-          startsWithData: mergedOverlays[page]?.startsWith('data:')
-        }))
+    let overlaysToSave;
+    if (getNewSessionOverlays && typeof getNewSessionOverlays === 'function') {
+      overlaysToSave = getNewSessionOverlays(doc);
+      console.log('🔍 getNewSessionOverlays result:', {
+        pages: Object.keys(overlaysToSave),
+        count: Object.keys(overlaysToSave).length
       });
+      
+      if (Object.keys(overlaysToSave).length === 0) {
+        console.log('🔄 getNewSessionOverlays returned empty, trying getMergedOverlays...');
+        overlaysToSave = getMergedOverlays(doc);
+      }
     } else {
-      // Fallback to old method
-      console.warn('⚠️ getMergedOverlays not available, using fallback');
-      mergedOverlays = Object.fromEntries(
-        Object.entries(overlaysRef.current).filter(([, png]) => png)
-      );
-      console.log('🔍 Fallback merged overlays:', Object.keys(mergedOverlays));
+      console.warn('⚠️ getNewSessionOverlays not available, falling back to getMergedOverlays');
+      overlaysToSave = getMergedOverlays(doc);
     }
     
-    // Additional validation
-    if (Object.keys(mergedOverlays).length === 0) {
-      console.warn('⚠️ WARNING: No overlays to save! This might be why saves appear to fail.');
-      console.log('🔍 Debug info:', {
-        hasCurrentPageOverlay: !!overlaysRef.current[pageNo],
-        currentPageOverlay: overlaysRef.current[pageNo]?.substring(0, 50) + '...',
-        allOverlayPages: Object.keys(overlaysRef.current)
-      });
+    if (Object.keys(overlaysToSave).length === 0) {
+      console.warn('⚠️ WARNING: No overlays to save!');
     }
     
     const canvasDimensions = getCanvasDimensions();
-
-    console.log('📤 Final overlay data for API (DETAILED DEBUG):', {
-      pageOverlaysCount: Object.keys(createPageOverlaysData(mergedOverlays)).length,
-      mergedOverlaysCount: Object.keys(mergedOverlays).length,
-      overlayPages: Object.keys(mergedOverlays).map(p => parseInt(p)).sort((a, b) => a - b),
-      
-      // ✅ DETAILED DEBUG: Show actual overlay data being sent
-      pageOverlaysData: Object.keys(createPageOverlaysData(mergedOverlays)).map(key => ({
-        key,
-        hasData: !!createPageOverlaysData(mergedOverlays)[key],
-        dataLength: createPageOverlaysData(mergedOverlays)[key]?.length,
-        startsWithData: createPageOverlaysData(mergedOverlays)[key]?.startsWith('data:'),
-        preview: createPageOverlaysData(mergedOverlays)[key]?.substring(0, 100)
-      })),
-      
-      mergedOverlaysData: Object.keys(mergedOverlays).map(page => ({
-        page,
-        hasData: !!mergedOverlays[page],
-        dataLength: mergedOverlays[page]?.length,
-        startsWithData: mergedOverlays[page]?.startsWith('data:'),
-        preview: mergedOverlays[page]?.substring(0, 100)
-      })),
-      
-      canvasDimensions: canvasDimensions ? {
-        canvasSize: `${canvasDimensions.width}x${canvasDimensions.height}`,
-        pdfCanvasSize: `${canvasDimensions.pdfCanvasWidth}x${canvasDimensions.pdfCanvasHeight}`,
-        currentPage: canvasDimensions.currentPage
-      } : 'no canvas dims'
-    });
 
     setIsSaving(true);
     
@@ -407,40 +334,41 @@ export function useSave(
       let result;
       
       if (isOriginal) {
-        result = await saveOriginalFile(action, cleanConfirmationData, mergedOverlays, canvasDimensions);
+        result = await saveOriginalFile(action, cleanConfirmationData, overlaysToSave, canvasDimensions);
       } else {
-        const backupState = () => {}; // This should be passed in from overlay hook if needed
-        result = await saveExistingBatch(action, cleanConfirmationData, mergedOverlays, canvasDimensions, backupState);
+        const backupState = () => {};
+        result = await saveExistingBatch(action, cleanConfirmationData, overlaysToSave, canvasDimensions, backupState);
       }
-      
-      // ✅ CRITICAL FIX: Update baked overlays after successful save
+
+      // ✅ CRITICAL FIX: Update baked overlays ONLY if save was successful
       if (result && !result.error) {
         console.log('✅ Save successful - updating baked overlay state');
         
-        // The overlays that were just saved are now "baked" into the PDF
         if (updateBakedOverlays && typeof updateBakedOverlays === 'function') {
-          updateBakedOverlays(mergedOverlays, pageNo); // ✅ Pass current page number
-          
-          // ✅ CANVAS REFRESH: Force canvas to redraw to remove double-overlay artifacts
-          setTimeout(() => {
-            const canvas = canvasRef.current;
-            if (canvas) {
-              console.log('🎨 Forcing canvas refresh after save to display only baked overlay');
-              // Clear and redraw canvas with the baked overlay only
-              const ctx = canvas.getContext('2d');
-              const devicePixelRatio = window.devicePixelRatio || 1;
-              ctx.clearRect(0, 0, canvas.width / devicePixelRatio, canvas.height / devicePixelRatio);
-              
-              // The canvas should now redraw with only the baked overlay from the PDF
-            }
-          }, 100);
-          
+          // ✅ CRITICAL FIX: Pass the action to updateBakedOverlays
+          updateBakedOverlays(overlaysToSave, pageNo, action);
         } else {
-          console.warn('⚠️ updateBakedOverlays not available, overlay state may be inconsistent');
+          console.warn('⚠️ updateBakedOverlays not available');
+        }
+
+        // ✅ CRITICAL FIX: Clear canvas immediately after save to prevent double overlay
+        // BUT ONLY if this is not a 'complete' action
+        if (action !== 'complete') {
+          console.log('🎨 Clearing canvas immediately after save - overlay is now baked into PDF');
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            const devicePixelRatio = window.devicePixelRatio || 1;
+            
+            // Clear the canvas completely
+            ctx.clearRect(0, 0, canvas.width / devicePixelRatio, canvas.height / devicePixelRatio);
+            console.log('🧹 Canvas cleared - PDF reload will show only baked overlay');
+          }
+        } else {
+          console.log('🔒 Complete action: Preserving canvas state for completed file');
         }
       }
       
-      console.log('✅ Save completed - staying on page', pageNo, 'with overlays preserved');
       return result;
       
     } catch (err) {
@@ -453,12 +381,13 @@ export function useSave(
   }, [
     doc, 
     pageNo, 
+    canvasRef, 
     sanitizeObject, 
     handleReject, 
     saveCurrentCanvasState, 
-    getMergedOverlays,        // ✅ Now properly included
-    getNewSessionOverlays,    // ✅ Now properly included  
-    updateBakedOverlays,      // ✅ Now properly included
+    getMergedOverlays,
+    getNewSessionOverlays,
+    updateBakedOverlays,
     getCanvasDimensions, 
     createPageOverlaysData, 
     saveOriginalFile, 
@@ -467,14 +396,9 @@ export function useSave(
   ]);
 
   return {
-    // === STATE ===
     isSaving,
     setIsSaving,
-
-    // === MAIN FUNCTION ===
     save,
-
-    // === UTILITY FUNCTIONS ===
     sanitizeObject,
     getCanvasDimensions,
     saveCurrentCanvasState,

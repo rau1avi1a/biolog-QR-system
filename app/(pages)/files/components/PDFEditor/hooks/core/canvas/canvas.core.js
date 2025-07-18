@@ -244,17 +244,16 @@ export function useCanvas(
       // ✅ QUALITY FIX: Use maximum quality for the snapshot
       const snap = canvas.toDataURL('image/png', 1.0); // Maximum quality
       
-      // ✅ CRITICAL FIX: Add to session overlays (new drawings)
-      console.log('📸 Saving canvas snapshot for page', pageNo);
-      
-      if (addSessionOverlay && typeof addSessionOverlay === 'function') {
-        console.log('✅ Using addSessionOverlay to track new drawing');
-        addSessionOverlay(pageNo, snap);
-      } else {
-        console.warn('⚠️ addSessionOverlay not available, using fallback method');
-        // Fallback to old method
-        overlaysRef.current[pageNo] = snap;
-      }
+console.log('📸 Saving canvas snapshot for page', pageNo);
+
+if (addSessionOverlay && typeof addSessionOverlay === 'function') {
+  console.log('✅ Using addSessionOverlay to track new drawing');
+  addSessionOverlay(pageNo, snap);
+} else {
+  console.warn('⚠️ addSessionOverlay not available, using fallback method');
+  // Fallback to old method
+  overlaysRef.current[pageNo] = snap;
+}
       
       // Also ensure the display overlay is updated
       overlaysRef.current[pageNo] = snap;
