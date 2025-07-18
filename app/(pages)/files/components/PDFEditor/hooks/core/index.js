@@ -89,25 +89,26 @@ export function useMain(props) {
   }, [pageNavCore.pageNo, currentPageNo]);
 
   // 9. Save operations (depends on multiple hooks) - now with proper overlay integration
-  const saveCore = useSave(
-    doc,
-    currentPageNo,
-    canvasCore.canvasRef,
-    canvasCore.ctxRef,
-    canvasCore.pageContainerRef,
-    overlayCore.overlaysRef,
-    overlayCore.historiesRef,
-    overlayCore.setHistory,
-    overlayCore.setHistIdx,
-    overlayCore.setOverlay,
-    refreshFiles,
-    setCurrentDoc,
-    overlayCore.getMergedOverlays,
-    overlayCore.preserveStateForSave,
-    pdfCore.validateAndCleanBase64,
-    overlayCore.getNewSessionOverlays,
-    overlayCore.updateBakedOverlays
-  );
+// 9. Save operations (depends on multiple hooks) - now with proper overlay integration
+const saveCore = useSave(
+  doc,
+  currentPageNo,                     // ✅ CORRECT: pageNo should be here
+  canvasCore.canvasRef,
+  canvasCore.ctxRef,
+  canvasCore.pageContainerRef,
+  overlayCore.overlaysRef,
+  overlayCore.historiesRef,
+  overlayCore.setHistory,
+  overlayCore.setHistIdx,
+  overlayCore.setOverlay,
+  refreshFiles,
+  setCurrentDoc,
+  overlayCore.getMergedOverlays,
+  overlayCore.preserveStateForSave,
+  pdfCore.validateAndCleanBase64,
+  overlayCore.getNewSessionOverlays,
+  overlayCore.updateBakedOverlays
+);
 
   // === COMPUTED PROPERTIES ===
   const isOriginal = useMemo(() => !doc?.isBatch, [doc?.isBatch]);

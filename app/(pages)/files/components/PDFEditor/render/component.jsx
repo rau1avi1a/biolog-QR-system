@@ -1,7 +1,7 @@
 // app/files/components/PDFEditor/render/component.jsx
 'use client';
 
-import React from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { ui } from '@/components/ui';
@@ -13,6 +13,55 @@ if (typeof window !== 'undefined') {
   const { pdfjs } = await import('react-pdf');
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 }
+
+/* Zoom Controls Component */
+const ZoomControls = ({ zoom, onZoomChange, onResetZoom, disabled = false }) => {
+  const canZoomIn = zoom < 3.0;
+  const canZoomOut = zoom > 0.5;
+
+  return (
+    <div className="flex items-center gap-1 bg-white/90 backdrop-blur-sm border rounded-lg px-2 py-1">
+      <ui.Button
+        size="icon"
+        variant="ghost"
+        className="h-6 w-6"
+        onClick={() => onZoomChange(Math.max(0.5, zoom - 0.25))}
+        disabled={!canZoomOut || disabled}
+        title="Zoom out"
+      >
+        <ui.icons.ZoomOut size={14} />
+      </ui.Button>
+      
+      <span className="text-xs font-mono w-12 text-center">
+        {Math.round(zoom * 100)}%
+      </span>
+      
+      <ui.Button
+        size="icon"
+        variant="ghost"
+        className="h-6 w-6"
+        onClick={() => onZoomChange(Math.min(3.0, zoom + 0.25))}
+        disabled={!canZoomIn || disabled}
+        title="Zoom in"
+      >
+        <ui.icons.ZoomIn size={14} />
+      </ui.Button>
+      
+      <div className="w-px h-4 bg-gray-300 mx-1" />
+      
+      <ui.Button
+        size="icon"
+        variant="ghost"
+        className="h-6 w-6"
+        onClick={onResetZoom}
+        disabled={zoom === 1.0 || disabled}
+        title="Reset zoom (100%)"
+      >
+        <ui.icons.RotateCcw size={14} />
+      </ui.Button>
+    </div>
+  );
+};
 
 /* Tiny icon button component */
 const Tool = ({ icon, label, onClick, disabled, className, style }) => {
@@ -202,7 +251,207 @@ const WorkflowIndicators = ({ indicators }) => {
   );
 };
 
-/* Save Confirmation Dialog Component - Updated for rejected files */
+/* Enhanced Canvas Component with Proper Transform Origin Handling */
+const DrawingCanvas = ({ 
+  canvasRef, 
+  core, 
+  zoom, 
+  isDrawing, 
+  containerRef 
+}) => {
+  const [touchState, setTouchState] = useState({
+    drawing: false,
+    touchId: null,
+    lastPos: null
+  });
+
+  // Fixed coordinate calculation that accounts for transform origin
+  const getProperPos = useCallback((e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+
+    const p = e.touches?.[0] || e;
+    
+    // Get the PDF container (this is what's being scaled)
+    const container = containerRef.current;
+    
+    if (container) {
+      // The container is scaled with transform-origin: 'top center'
+      // We need to account for this in our coordinate calculation
+      
+      const containerRect = container.getBoundingClientRect();
+      
+      // Get the original (unscaled) container dimensions
+      // We can calculate this by dividing the current rect by zoom
+      const originalWidth = containerRect.width / zoom;
+      const originalHeight = containerRect.height / zoom;
+      
+      // Calculate where the container would be positioned if not scaled
+      // With transform-origin 'top center', the container grows outward from the top center
+      const scaleDiff = zoom - 1;
+      const widthIncrease = originalWidth * scaleDiff;
+      const leftOffset = widthIncrease / 2; // Half the width increase goes to each side
+      
+      // Calculate the original (unscaled) position
+      const originalLeft = containerRect.left + leftOffset;
+      const originalTop = containerRect.top; // Top doesn't change with 'top center' origin
+      
+      // Get position relative to the original container position
+      const containerX = p.clientX - originalLeft;
+      const containerY = p.clientY - originalTop;
+      
+      // Since we're now working with the original container dimensions,
+      // we don't need to divide by zoom
+      const x = containerX;
+      const y = containerY;
+      
+      console.log('🎯 Transform-origin aware positioning:', {
+        zoom,
+        pagePointer: { x: p.clientX, y: p.clientY },
+        containerRect: { 
+          left: containerRect.left, 
+          top: containerRect.top, 
+          width: containerRect.width, 
+          height: containerRect.height 
+        },
+        calculated: {
+          originalWidth,
+          originalHeight,
+          leftOffset,
+          originalLeft,
+          originalTop
+        },
+        containerRelative: { x: containerX, y: containerY },
+        finalCoords: { x, y }
+      });
+      
+      return { x, y };
+    } else {
+      // Fallback: try direct canvas calculation
+      const rect = canvas.getBoundingClientRect();
+      const canvasX = p.clientX - rect.left;
+      const canvasY = p.clientY - rect.top;
+      
+      // Simple division by zoom
+      const x = canvasX / zoom;
+      const y = canvasY / zoom;
+      
+      console.log('🎯 Fallback canvas positioning:', {
+        zoom,
+        pagePointer: { x: p.clientX, y: p.clientY },
+        canvasRect: rect,
+        canvasRelative: { x: canvasX, y: canvasY },
+        finalCoords: { x, y }
+      });
+      
+      return { x, y };
+    }
+  }, [zoom, containerRef]);
+
+  // Override core's getPos function during drawing operations
+  const withProperPos = useCallback((coreFunction) => {
+    return (e) => {
+      // Store the original getPos
+      const originalGetPos = core.getPos;
+      
+      // Temporarily replace with our proper positioning
+      core.getPos = getProperPos;
+      
+      try {
+        // Call the core function
+        const result = coreFunction(e);
+        return result;
+      } finally {
+        // Always restore the original getPos
+        core.getPos = originalGetPos;
+      }
+    };
+  }, [core, getProperPos]);
+
+  const handlePointerDown = useCallback((e) => {
+    if (!isDrawing || !core.canDraw()) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (e.pointerType === 'touch') {
+      setTouchState({
+        drawing: true,
+        touchId: e.pointerId,
+        lastPos: { x: e.clientX, y: e.clientY }
+      });
+    }
+    
+    const properPointerDown = withProperPos(core.pointerDown);
+    properPointerDown(e);
+  }, [isDrawing, core, withProperPos]);
+
+  const handlePointerMove = useCallback((e) => {
+    if (!isDrawing || !core.canDraw()) return;
+    
+    if (e.pointerType === 'touch' && e.pointerId !== touchState.touchId) {
+      return;
+    }
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const properPointerMove = withProperPos(core.pointerMove);
+    properPointerMove(e);
+    
+    if (e.pointerType === 'touch') {
+      setTouchState(prev => ({
+        ...prev,
+        lastPos: { x: e.clientX, y: e.clientY }
+      }));
+    }
+  }, [isDrawing, core, touchState.touchId, withProperPos]);
+
+  const handlePointerUp = useCallback((e) => {
+    if (e.pointerType === 'touch' && e.pointerId === touchState.touchId) {
+      setTouchState({
+        drawing: false,
+        touchId: null,
+        lastPos: null
+      });
+    }
+    
+    const properPointerUp = withProperPos(core.pointerUp);
+    properPointerUp(e);
+  }, [core, touchState.touchId, withProperPos]);
+
+  const handlePointerCancel = useCallback((e) => {
+    if (e.pointerType === 'touch' && e.pointerId === touchState.touchId) {
+      setTouchState({
+        drawing: false,
+        touchId: null,
+        lastPos: null
+      });
+    }
+    
+    const properPointerCancel = withProperPos(core.pointerCancel);
+    properPointerCancel(e);
+  }, [core, touchState.touchId, withProperPos]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={`absolute inset-0 ${
+        isDrawing && core.canDraw() ? 'cursor-crosshair' : 'pointer-events-none'
+      }`}
+      style={{ 
+        touchAction: isDrawing && core.canDraw() ? 'none' : 'auto'
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+    />
+  );
+};
+
+/* Save Confirmation Dialog Component - Updated for rejected files (PRESERVED FROM ORIGINAL) */
 const SaveConfirmationDialog = ({ 
   open, 
   onClose, 
@@ -806,10 +1055,67 @@ const SaveConfirmationDialog = ({
   );
 };
 
-/* Main PDFEditor Component */
+/* Main PDFEditor Component with Enhanced Zoom and Fixed Toolbar */
 export default function PDFEditor(props) {
   const core = useCoreMain(props);
   const state = useStateMain(core, props);
+  
+  // Zoom state
+  const [zoom, setZoom] = useState(1.0);
+  const [isDrawing, setIsDrawing] = useState(core.isDraw);
+  const viewerRef = useRef(null);
+  const contentRef = useRef(null);
+
+  // Sync drawing state
+  useEffect(() => {
+    setIsDrawing(core.isDraw);
+  }, [core.isDraw]);
+
+  // Handle zoom changes
+  const handleZoomChange = useCallback((newZoom) => {
+    setZoom(Math.max(0.5, Math.min(3.0, newZoom)));
+  }, []);
+
+  const handleResetZoom = useCallback(() => {
+    setZoom(1.0);
+    // Reset scroll position
+    if (viewerRef.current) {
+      viewerRef.current.scrollTo(0, 0);
+    }
+  }, []);
+
+  // Handle drawing toggle with haptic feedback
+  const handleToggleDrawing = useCallback(() => {
+    if (!core.canDraw()) return;
+    
+    // Haptic feedback for supported devices
+    if (navigator.vibrate) {
+      navigator.vibrate(50);
+    }
+    
+    const newDrawingState = !isDrawing;
+    setIsDrawing(newDrawingState);
+    core.setIsDraw(newDrawingState);
+  }, [core, isDrawing]);
+
+  // Prevent pinch-to-zoom on the entire page when drawing
+  useEffect(() => {
+    const preventZoom = (e) => {
+      if (isDrawing && e.touches && e.touches.length > 1) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('touchmove', preventZoom, { passive: false });
+    document.addEventListener('gesturestart', preventZoom, { passive: false });
+    document.addEventListener('gesturechange', preventZoom, { passive: false });
+
+    return () => {
+      document.removeEventListener('touchmove', preventZoom);
+      document.removeEventListener('gesturestart', preventZoom);
+      document.removeEventListener('gesturechange', preventZoom);
+    };
+  }, [isDrawing]);
 
   const componentKey = useMemo(() => {
     const baseId = props.doc?.originalFileId || props.doc?.fileId || props.doc?._id;
@@ -841,148 +1147,191 @@ export default function PDFEditor(props) {
 
   return (
     <div key={componentKey} className="flex flex-col h-full">
-      {/* Enhanced Header */}
-      <div className={safeState.headerConfig.className || 'border-b bg-white/95 backdrop-blur-sm flex items-center justify-between px-2 sm:px-4 py-2'}>
-        <div className="flex items-center gap-1 sm:gap-3 min-w-0 flex-1">
-          {/* Menu Button */}
-          {safeState.headerConfig.showMenu && (
-            <ui.Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={props.onToggleDrawer} 
-              title="Menu" 
-              className="shrink-0 toolbar-button"
-            >
-              <ui.icons.Menu size={18} />
-            </ui.Button>
-          )}
-
-          {/* File Info & Navigation */}
-          <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
-            {/* File Name */}
-            {safeState.headerConfig.showFileName && (
-              <span className="font-semibold text-xs sm:text-sm truncate max-w-[20vw] sm:max-w-[30vw] hidden xl:block">
-                {safeState.headerConfig.fileName}
-              </span>
+      {/* Enhanced Fixed Header with Zoom Controls */}
+      <div className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-sm border-b shadow-sm">
+        <div className="flex items-center justify-between px-2 sm:px-4 py-2">
+          {/* Left Section */}
+          <div className="flex items-center gap-1 sm:gap-3 min-w-0 flex-1">
+            {/* Menu Button */}
+            {safeState.headerConfig.showMenu && (
+              <ui.Button 
+                size="icon" 
+                variant="ghost" 
+                onClick={props.onToggleDrawer} 
+                title="Menu" 
+                className="shrink-0 toolbar-button"
+              >
+                <ui.icons.Menu size={18} />
+              </ui.Button>
             )}
 
-            {/* Page Navigation */}
-            <PageNavigation 
-              config={safeState.pageNavConfig} 
-              onNavigate={safeState.handlePageNavigation} 
-            />
+            {/* File Info & Navigation */}
+            <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
+              {/* File Name */}
+              {safeState.headerConfig.showFileName && (
+                <span className="font-semibold text-xs sm:text-sm truncate max-w-[20vw] sm:max-w-[30vw] hidden xl:block">
+                  {safeState.headerConfig.fileName}
+                </span>
+              )}
 
-            {/* Status Badge */}
-            <ui.Badge 
-              variant="outline" 
-              className={safeState.statusBadgeProps.className}
-            >
-              {safeState.statusBadgeProps.text}
-            </ui.Badge>
-
-            {/* Workflow Indicators */}
-            <WorkflowIndicators indicators={safeState.workflowIndicators} />
-          </div>
-        </div>
-
-        {/* Toolbar & Actions */}
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {/* Tools */}
-          <div className="flex items-center gap-1">
-            {/* Settings */}
-            {safeState.toolbarConfig.showSettings && (
-              <Tool 
-                icon="Settings" 
-                label="File properties" 
-                onClick={safeState.handleOpenProperties} 
+              {/* Page Navigation */}
+              <PageNavigation 
+                config={safeState.pageNavConfig} 
+                onNavigate={safeState.handlePageNavigation} 
               />
-            )}
 
-            {/* Drawing Toggle */}
-            {safeState.toolbarConfig.showDrawingToggle ? (
-              <Tool 
-                icon="Pencil" 
-                label={core.isDraw ? 'Draw off' : 'Draw on'}
-                onClick={safeState.handleToggleDrawing}
-                style={core.isDraw ? { color: 'var(--primary)' } : {}} 
-              />
-            ) : (
-              <Tool 
-                icon="Lock" 
-                label="Drawing disabled for this file type/status"
-                disabled={true}
-                className="opacity-50" 
-              />
-            )}
+              {/* Status Badge */}
+              <ui.Badge 
+                variant="outline" 
+                className={safeState.statusBadgeProps.className}
+              >
+                {safeState.statusBadgeProps.text}
+              </ui.Badge>
 
-            {/* Undo */}
-            <Tool 
-              icon="Undo" 
-              label="Undo" 
-              onClick={core.undo}
-              disabled={!safeState.toolbarConfig.undoEnabled}
-              className={!safeState.toolbarConfig.undoEnabled ? 'opacity-50' : ''} 
-            />
-
-            {/* Print - Only show on desktop, not mobile/tablet */}
-            {!safeState.compact && (typeof window === 'undefined' || window.innerWidth >= 1024) && (
-              <Tool icon="Printer" label="Print" onClick={core.print} />
-            )}
-          </div>
-
-          {/* Dynamic Action Buttons */}
-          <MobileActions 
-            config={safeState.mobileActionsConfig}
-            handleSave={safeState.handleSave}
-            core={core}
-            saveAction={safeState.saveAction}
-          />
-
-          {/* Work Order Creation Loading Indicator */}
-          {core.isCreatingWorkOrder && (
-            <div className="flex items-center gap-1 text-xs text-blue-600">
-              <ui.icons.Clock size={12} className="animate-spin" />
-              <span className="hidden sm:inline">Creating WO...</span>
+              {/* Workflow Indicators */}
+              <WorkflowIndicators indicators={safeState.workflowIndicators} />
             </div>
-          )}
-        </div>
-      </div>
+          </div>
 
-      {/* PDF Viewer */}
-      <div className={safeState.viewerConfig.className || 'flex-1 overflow-auto bg-gray-100 flex justify-center'}>
-        <div ref={core.pageContainerRef} className="relative bg-white shadow my-4">
-          <Document
-            file={core.blobUri}
-            onLoadSuccess={({ numPages }) => core.setPages(numPages)}
-            loading={<div className="p-10 text-center">Loading PDF…</div>}
-            error={<div className="p-10 text-center text-red-500">Error loading PDF</div>}
-          >
-            <Page
-              pageNumber={core.pageNo}
-              renderAnnotationLayer={false}
-              renderTextLayer={false}
-              onRenderSuccess={core.initCanvas}
-              loading={<div className="p-10 text-center">Rendering…</div>}
+          {/* Right Section - Tools & Actions */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {/* Zoom Controls */}
+            <ZoomControls
+              zoom={zoom}
+              onZoomChange={handleZoomChange}
+              onResetZoom={handleResetZoom}
+              disabled={!core.blobUri}
             />
-          </Document>
 
-          {/* Drawing Canvas */}
-          <canvas
-            ref={core.canvasRef}
-            className={`absolute inset-0 ${
-              core.isDraw && core.canDraw() ? 'cursor-crosshair' : 'pointer-events-none'
-            }`}
-            style={{ 
-              touchAction: core.isDraw && core.canDraw() ? 'none' : 'auto'
-            }}
-            onPointerDown={core.pointerDown}
-            onPointerMove={core.pointerMove}
-            onPointerUp={core.pointerUp}
-            onPointerLeave={core.pointerUp}
-            onPointerCancel={core.pointerCancel}
-          />
+            {/* Tools */}
+            <div className="flex items-center gap-1">
+              {/* Settings */}
+              {safeState.toolbarConfig.showSettings && (
+                <Tool 
+                  icon="Settings" 
+                  label="File properties" 
+                  onClick={safeState.handleOpenProperties} 
+                />
+              )}
+
+              {/* Drawing Toggle */}
+              {safeState.toolbarConfig.showDrawingToggle ? (
+                <Tool 
+                  icon="Pencil" 
+                  label={isDrawing ? 'Draw off' : 'Draw on'}
+                  onClick={handleToggleDrawing}
+                  style={isDrawing ? { color: 'var(--primary)' } : {}} 
+                />
+              ) : (
+                <Tool 
+                  icon="Lock" 
+                  label="Drawing disabled for this file type/status"
+                  disabled={true}
+                  className="opacity-50" 
+                />
+              )}
+
+              {/* Undo */}
+              <Tool 
+                icon="Undo" 
+                label="Undo" 
+                onClick={core.undo}
+                disabled={!safeState.toolbarConfig.undoEnabled}
+                className={!safeState.toolbarConfig.undoEnabled ? 'opacity-50' : ''} 
+              />
+
+              {/* Print - Only show on desktop, not mobile/tablet */}
+              {!safeState.compact && (typeof window === 'undefined' || window.innerWidth >= 1024) && (
+                <Tool icon="Printer" label="Print" onClick={core.print} />
+              )}
+            </div>
+
+            {/* Dynamic Action Buttons */}
+            <MobileActions 
+              config={safeState.mobileActionsConfig}
+              handleSave={safeState.handleSave}
+              core={core}
+              saveAction={safeState.saveAction}
+            />
+
+            {/* Work Order Creation Loading Indicator */}
+            {core.isCreatingWorkOrder && (
+              <div className="flex items-center gap-1 text-xs text-blue-600">
+                <ui.icons.Clock size={12} className="animate-spin" />
+                <span className="hidden sm:inline">Creating WO...</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* PDF Viewer with Toolbar Offset and Zoom */}
+      <div 
+        ref={viewerRef}
+        className="flex-1 overflow-auto bg-gray-100"
+        style={{ 
+          paddingTop: '60px', // Offset for fixed toolbar
+          scrollBehavior: 'smooth'
+        }}
+      >
+        <div className="flex justify-center p-4">
+          <div 
+            ref={contentRef}
+            className="relative bg-white shadow-lg rounded-lg overflow-hidden"
+            style={{
+              transform: `scale(${zoom})`,
+              transformOrigin: 'top center',
+              transition: 'transform 0.2s ease-out'
+            }}
+          >
+            {/* PDF Container */}
+            <div ref={core.pageContainerRef} className="relative">
+              <Document
+                file={core.blobUri}
+                onLoadSuccess={({ numPages }) => core.setPages(numPages)}
+                loading={<div className="p-10 text-center">Loading PDF…</div>}
+                error={<div className="p-10 text-center text-red-500">Error loading PDF</div>}
+              >
+                <Page
+                  pageNumber={core.pageNo}
+                  renderAnnotationLayer={false}
+                  renderTextLayer={false}
+                  onRenderSuccess={core.initCanvas}
+                  loading={<div className="p-10 text-center">Rendering…</div>}
+                />
+              </Document>
+
+              {/* Enhanced Drawing Canvas */}
+              <DrawingCanvas
+                canvasRef={core.canvasRef}
+                core={core}
+                zoom={zoom}
+                isDrawing={isDrawing}
+                containerRef={contentRef}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Drawing Mode Indicator */}
+      {isDrawing && core.canDraw() && (
+        <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40">
+          <div className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm flex items-center gap-2 shadow-lg">
+            <ui.icons.Pen size={14} />
+            Drawing Mode - Tap to draw
+          </div>
+        </div>
+      )}
+
+      {/* Zoom Level Indicator */}
+      {zoom !== 1.0 && (
+        <div className="fixed bottom-4 right-4 z-40">
+          <div className="bg-black/70 text-white px-2 py-1 rounded text-xs">
+            {Math.round(zoom * 100)}%
+          </div>
+        </div>
+      )}
 
       {/* Save Confirmation Dialog */}
       <SaveConfirmationDialog
