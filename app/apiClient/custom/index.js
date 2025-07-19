@@ -7,6 +7,30 @@ export function customOperations(apiManager, handleApiCall) {
           apiManager.client(resource).custom(action, data, method)
         )
       },
+
+// === OAUTH2 NETSUITE OPERATIONS ===
+async netsuiteOAuth2Login() {
+  // Redirect to OAuth2 login
+  window.location.href = '/api/netsuite?action=oauth2-login';
+  return { data: { redirected: true }, error: null };
+},
+
+async netsuiteOAuth2Status() {
+  try {
+    const response = await fetch('/api/netsuite?action=oauth2-status');
+    if (!response.ok) throw new Error('Failed to get OAuth2 status');
+    const result = await response.json();
+    return { data: result.data, error: result.error };
+  } catch (error) {
+    return { data: null, error: error.message };
+  }
+},
+
+async netsuiteOAuth2Disconnect() {
+  return handleApiCall('custom', 'netsuite-oauth2-disconnect', {}, () =>
+    apiManager.client('netsuite').custom('oauth2-disconnect', {}, 'POST')
+  );
+},
   
       // === UPLOAD OPERATIONS ===
       async uploadFile(file, folderId = null, onProgress = null) {
