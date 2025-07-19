@@ -32,7 +32,31 @@ function normalizeResponse(response) {
 async function handleApiCall(operation, resource, params, apiCall) {
   try {
     if (isDev) console.log(`🔍 ${operation} ${resource}`, params)
-    const response   = await apiCall()
+    const response = await apiCall()
+    
+    // ✅ FIX: Enhanced authentication handling for OAuth2
+    if (response && response.authRequired && response.needsOAuth2) {
+      console.log('🔐 API response indicates authentication required, redirecting to OAuth2 login...');
+      
+      // Store the current URL to redirect back after auth
+      const currentUrl = window.location.pathname + window.location.search;
+      sessionStorage.setItem('postAuthRedirect', currentUrl);
+      
+      // ✅ FIX: Add small delay to ensure storage is saved
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Redirect to OAuth2 login
+      window.location.href = response.redirectUrl || '/api/netsuite?action=oauth2-login';
+      
+      // Return a specific error so components know what happened
+      return { 
+        data: null, 
+        error: 'Redirecting to NetSuite authentication...',
+        redirecting: true,
+        authRequired: true
+      };
+    }
+    
     const normalized = normalizeResponse(response)
     if (isDev) {
       normalized.error
@@ -42,6 +66,58 @@ async function handleApiCall(operation, resource, params, apiCall) {
     return normalized
   } catch (error) {
     if (isDev) console.log(`💥 ${operation} ${resource} exception:`, error.message)
+    
+    // ✅ FIX: Enhanced error handling for fetch responses
+    if (error instanceof Response) {
+      try {
+        const errorData = await error.json();
+        if (error.status === 401 && errorData.authRequired && errorData.needsOAuth2) {
+          console.log('🔐 401 response with authRequired flag detected');
+          
+          const currentUrl = window.location.pathname + window.location.search;
+          sessionStorage.setItem('postAuthRedirect', currentUrl);
+          
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          window.location.href = errorData.redirectUrl || '/api/netsuite?action=oauth2-login';
+          
+          return { 
+            data: null, 
+            error: 'Redirecting to NetSuite authentication...',
+            redirecting: true,
+            authRequired: true
+          };
+        }
+      } catch (parseError) {
+        console.log('Could not parse error response:', parseError);
+      }
+    }
+    
+    // ✅ FIX: Check if the error is a fetch error with 401 status
+    if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      // This might be a network error, handle normally
+      return { data: null, error: error.message || 'Network error' }
+    }
+    
+    // ✅ FIX: Handle errors that contain auth flags directly
+    if (error.authRequired && error.needsOAuth2) {
+      console.log('🔐 Error contains authRequired flag, redirecting to OAuth2 login...');
+      
+      const currentUrl = window.location.pathname + window.location.search;
+      sessionStorage.setItem('postAuthRedirect', currentUrl);
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      window.location.href = error.redirectUrl || '/api/netsuite?action=oauth2-login';
+      
+      return { 
+        data: null, 
+        error: 'Redirecting to NetSuite authentication...',
+        redirecting: true,
+        authRequired: true
+      };
+    }
+    
     return { data: null, error: error.message || 'Network error' }
   }
 }

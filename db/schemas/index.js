@@ -29,27 +29,74 @@ const softDeleteFields = {
 // =============================================================================
 // USER SCHEMA
 // =============================================================================
+
 const userSchema = new Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, default: "operator" },
   
-  // NetSuite credentials (encoded)
+  // Updated NetSuite credentials for OAuth2
   netsuiteCredentials: {
+    // OAuth2 fields
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    tokenExpiry: { type: Date },
+    scope: { type: String },
+    lastTokenRefresh: { type: Date },
+    
+    // Keep these for backward compatibility during migration
     accountId: { type: String },
     consumerKey: { type: String },
     consumerSecret: { type: String },
     tokenId: { type: String },
     tokenSecret: { type: String },
-    isConfigured: { type: Boolean, default: false }
+    
+    // Configuration flags
+    isConfigured: { type: Boolean, default: false },
+    authType: { type: String, enum: ['oauth1', 'oauth2'], default: 'oauth2' }
   },
   
   ...auditFields
 }, { 
   timestamps: true,
-  strict: false // Allow services to add fields
+  strict: false
 });
+
+// Updated user methods for OAuth2
+userSchema.methods.setNetSuiteOAuth2Credentials = function (oauth2Data) {
+  this.netsuiteCredentials = {
+    accessToken: oauth2Data.accessToken,
+    refreshToken: oauth2Data.refreshToken,
+    tokenExpiry: oauth2Data.tokenExpiry,
+    scope: oauth2Data.scope,
+    lastTokenRefresh: new Date(),
+    isConfigured: true,
+    authType: 'oauth2'
+  };
+};
+
+userSchema.methods.hasNetSuiteAccess = function () {
+  return this.netsuiteCredentials?.isConfigured && 
+         this.netsuiteCredentials?.accessToken;
+};
+
+userSchema.methods.isNetSuiteTokenExpired = function () {
+  if (!this.netsuiteCredentials?.tokenExpiry) return true;
+  
+  const now = new Date();
+  const expiry = new Date(this.netsuiteCredentials.tokenExpiry);
+  const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+  
+  return expiry <= fiveMinutesFromNow;
+};
+
+userSchema.methods.clearNetSuiteCredentials = function () {
+  this.netsuiteCredentials = {
+    isConfigured: false,
+    authType: 'oauth2'
+  };
+};
 
 // =============================================================================
 // ITEM SCHEMA (Base for Chemical, Solution, Product)
